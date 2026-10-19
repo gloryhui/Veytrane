@@ -9,7 +9,8 @@ use std::time::Duration;
 
 use clap::Parser;
 
-use p2p_file::cli::{Cli, Command, DirectOpts};
+use p2p_file::admin;
+use p2p_file::cli::{AdminOpts, Cli, Command, DirectOpts};
 use p2p_file::discovery::signal::{SignalServerConfig, run_signal_server_on_with};
 use p2p_file::discovery::{LanDiscovery, parse_announcement};
 use p2p_file::error::{Error, Result};
@@ -90,17 +91,18 @@ async fn run(cli: Cli) -> Result<()> {
             recv_dir,
             re_punch_after,
             config,
+            admin,
         } => {
-            cmd_serve(
-                &key_file,
+            let args = ServeArgs {
                 direct,
+                admin,
                 allow,
                 forward,
                 recv_dir,
                 re_punch_after,
                 config,
-            )
-            .await
+            };
+            cmd_serve(&key_file, args).await
         }
         Command::Tunnel {
             direct,
@@ -108,7 +110,11 @@ async fn run(cli: Cli) -> Result<()> {
             listen,
             to,
         } => cmd_tunnel(&key_file, direct, peer, listen, to).await,
-        Command::Forward { direct, config } => cmd_forward(&key_file, direct, config).await,
+        Command::Forward {
+            direct,
+            config,
+            admin,
+        } => cmd_forward(&key_file, direct, admin, config).await,
         Command::Rules {
             file,
             service,
@@ -453,19 +459,37 @@ async fn cmd_signal_server(
     }
 }
 
-async fn cmd_serve(
-    key_file: &Option<PathBuf>,
+struct ServeArgs {
     direct: DirectOpts,
+    admin: AdminOpts,
     allow: Vec<p2p_file::identity::NodeId>,
     forward: Vec<SocketAddr>,
     recv_dir: Option<PathBuf>,
     re_punch_after: u64,
-    config_path: Option<PathBuf>,
-) -> Result<()> {
+    config: Option<PathBuf>,
+}
+
+async fn cmd_serve(key_file: &Option<PathBuf>, args: ServeArgs) -> Result<()> {
+    let ServeArgs {
+        direct,
+        admin,
+        allow,
+        forward,
+        recv_dir,
+        re_punch_after,
+        config: config_path,
+    } = args;
     let identity = load_identity(key_file)?;
     println!("本机节点 ID: {}", identity.node_id());
     println!("（把这个 ID 告诉对方，对方用 --peer 指定）");
 
+    if admin.admin_listen.is_some() && config_path.is_none() {
+        return Err(Error::Discovery(
+            "服务端 Web 管理需要 --config 持久化文件".into(),
+        ));
+    }
+
+    let mut loaded_service = None;
     let (policy, config_peer) = if let Some(path) = &config_path {
         let config = ServiceConfig::load(path)?;
         let peer = config.single_peer()?;
@@ -478,7 +502,9 @@ async fn cmd_serve(
                 entry.name
             );
         }
-        (Some(Arc::new(ServePolicy::new(&config)?)), Some(peer))
+        let policy = Arc::new(ServePolicy::new(&config)?);
+        loaded_service = Some(Arc::new(tokio::sync::RwLock::new(config)));
+        (Some(policy), Some(peer))
     } else {
         (None, None)
     };
@@ -535,8 +561,32 @@ async fn cmd_serve(
         ..ServeConfig::new()
     };
 
+    let _admin = if let Some(listen) = admin.admin_listen {
+        let path = config_path.as_ref().expect("admin requires a config path");
+        let service = loaded_service
+            .clone()
+            .expect("admin requires a loaded service config");
+        let policy = policy
+            .as_ref()
+            .expect("admin requires a live service policy")
+            .clone();
+        let token_path = admin
+            .admin_token_file
+            .clone()
+            .unwrap_or_else(|| admin::default_token_path(path));
+        let token = admin::load_or_create_token(&token_path)?;
+        let state = admin::AdminState::service(policy, service, peer, path.clone(), token);
+        let handle = admin::spawn(listen, state).await?;
+        println!("Web 管理页: http://{}/", handle.addr);
+        println!("管理 token 文件: {}", token_path.display());
+        Some(handle)
+    } else {
+        None
+    };
+
     if let (Some(path), Some(policy)) = (config_path, policy) {
-        spawn_service_policy_reload(path, policy, peer);
+        let config_state = loaded_service.expect("config path implies a loaded service config");
+        spawn_service_policy_reload(path, policy, peer, config_state);
     }
 
     tokio::select! {
@@ -553,6 +603,7 @@ fn spawn_service_policy_reload(
     path: PathBuf,
     policy: Arc<ServePolicy>,
     serving_peer: p2p_file::identity::NodeId,
+    config_state: Arc<tokio::sync::RwLock<ServiceConfig>>,
 ) {
     tokio::spawn(async move {
         let Ok(mut hangup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
@@ -570,6 +621,7 @@ fn spawn_service_policy_reload(
                     if peers.is_empty() || (peers.len() == 1 && peers[0] == serving_peer) {
                         match policy.replace(&config) {
                             Ok(()) => {
+                                *config_state.write().await = config;
                                 tracing::info!(path = %path.display(), "服务授权配置已热加载")
                             }
                             Err(error) => tracing::warn!(
@@ -598,6 +650,7 @@ fn spawn_service_policy_reload(
     _path: PathBuf,
     _policy: Arc<ServePolicy>,
     _serving_peer: p2p_file::identity::NodeId,
+    _config_state: Arc<tokio::sync::RwLock<ServiceConfig>>,
 ) {
     tracing::warn!("当前平台不支持 SIGHUP，服务配置只在启动时加载");
 }
@@ -634,6 +687,7 @@ async fn cmd_tunnel(
 async fn cmd_forward(
     key_file: &Option<PathBuf>,
     direct: DirectOpts,
+    admin: AdminOpts,
     config_path: PathBuf,
 ) -> Result<()> {
     let identity = load_identity(key_file)?;
@@ -649,8 +703,11 @@ async fn cmd_forward(
 
     let endpoints = link.endpoints();
     let session = Arc::new(SharedSession::new(Arc::new(link), identity.clone()));
-    let mut supervisor = RuleSupervisor::start(session, &config.enabled_rules()).await?;
-    for (id, address) in supervisor.listeners() {
+    let supervisor = Arc::new(tokio::sync::Mutex::new(
+        RuleSupervisor::start(session, &config.enabled_rules()).await?,
+    ));
+    let client_config = Arc::new(tokio::sync::RwLock::new(config));
+    for (id, address) in supervisor.lock().await.listeners() {
         println!("规则 {id} 监听 {address}");
     }
     println!();
@@ -659,6 +716,27 @@ async fn cmd_forward(
         config_path.display()
     );
 
+    let _admin = if let Some(listen) = admin.admin_listen {
+        let token_path = admin
+            .admin_token_file
+            .clone()
+            .unwrap_or_else(|| admin::default_token_path(&config_path));
+        let token = admin::load_or_create_token(&token_path)?;
+        let state = admin::AdminState::client(
+            supervisor.clone(),
+            client_config.clone(),
+            peer,
+            config_path.clone(),
+            token,
+        );
+        let handle = admin::spawn(listen, state).await?;
+        println!("Web 管理页: http://{}/", handle.addr);
+        println!("管理 token 文件: {}", token_path.display());
+        Some(handle)
+    } else {
+        None
+    };
+
     let (reload_tx, mut reload_rx) = tokio::sync::mpsc::channel(1);
     spawn_sighup_reload(reload_tx);
 
@@ -666,7 +744,7 @@ async fn cmd_forward(
         tokio::select! {
             _ = shutdown_signal() => {
                 println!("\n收到退出信号，正在关闭所有转发规则……");
-                supervisor.shutdown().await;
+                supervisor.lock().await.shutdown().await;
                 close_endpoints(&endpoints).await;
                 return Ok(());
             }
@@ -675,14 +753,15 @@ async fn cmd_forward(
                     Ok(new_config) => {
                         let peers = new_config.peers();
                         if peers.is_empty() || (peers.len() == 1 && peers[0] == peer) {
-                            let errors = supervisor.apply(&new_config.enabled_rules()).await;
+                            let errors = supervisor.lock().await.apply(&new_config.enabled_rules()).await;
                             for error in &errors {
                                 eprintln!("配置热加载：{error}");
                             }
                             if errors.is_empty() {
+                                *client_config.write().await = new_config;
                                 tracing::info!(path = %config_path.display(), "客户端规则已热加载");
                             }
-                            for (id, address) in supervisor.listeners() {
+                            for (id, address) in supervisor.lock().await.listeners() {
                                 println!("规则 {id} 监听 {address}");
                             }
                         } else {
