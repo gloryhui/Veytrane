@@ -231,6 +231,10 @@ pub enum Command {
         /// 空闲多少秒后重新打洞（NAT 映射会过期，重新打一次更保险）
         #[arg(long, value_name = "SECS", default_value_t = 60)]
         re_punch_after: u64,
+
+        /// 持久化服务策略（节点授权与目标白名单）；支持 SIGHUP 热加载
+        #[arg(long, value_name = "FILE", conflicts_with_all = ["allow", "forward"])]
+        config: Option<PathBuf>,
     },
 
     /// 本机开一个监听端口，转发到对端的某个服务
@@ -251,6 +255,33 @@ pub enum Command {
         /// 要连对端的哪个服务（必须在对方的 --forward 白名单里）
         #[arg(long, value_name = "ADDR")]
         to: SocketAddr,
+    },
+
+    /// 常驻客户端：按配置运行多条本地转发，共享同一对端的认证会话
+    ///
+    /// 规则文件可被 SIGHUP 热加载；新增/修改规则不需要重启进程。
+    Forward {
+        #[command(flatten)]
+        direct: DirectOpts,
+
+        /// 本机转发规则文件（JSON）
+        #[arg(long, value_name = "FILE")]
+        config: PathBuf,
+    },
+
+    /// 校验并打印持久化转发配置，不会启动网络
+    Rules {
+        /// 规则文件（JSON）
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// 按服务端授权配置解析
+        #[arg(long, conflicts_with = "client")]
+        service: bool,
+
+        /// 按客户端转发规则解析
+        #[arg(long)]
+        client: bool,
     },
 
     /// 把文件直接推到对端（走直连）
@@ -674,8 +705,10 @@ mod tests {
                 forward,
                 recv_dir,
                 re_punch_after,
+                config,
             } => {
                 assert_eq!(re_punch_after, 60);
+                assert_eq!(config, None);
                 assert_eq!(direct.signal, "1.2.3.4:7000");
                 assert_eq!(direct.port, 9100);
                 assert_eq!(allow.len(), 1);
@@ -717,6 +750,78 @@ mod tests {
                 assert_eq!(listen, "127.0.0.1:2222".parse().unwrap());
                 assert_eq!(to, "127.0.0.1:22".parse().unwrap());
                 assert_eq!(direct.advertise, vec!["203.0.113.9:4000".parse().unwrap()]);
+            }
+            other => panic!("解析结果不对: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 解析_forward_子命令() {
+        let cli = Cli::parse_from([
+            "p2p_file",
+            "forward",
+            "--signal",
+            "1.2.3.4:7000",
+            "--config",
+            "/etc/p2p_file/client.json",
+        ]);
+        match cli.command {
+            Command::Forward { direct, config } => {
+                assert_eq!(direct.signal, "1.2.3.4:7000");
+                assert_eq!(config, PathBuf::from("/etc/p2p_file/client.json"));
+            }
+            other => panic!("解析结果不对: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn serve_config_conflicts_with_legacy_allow_and_forward() {
+        let peer = "00112233445566778899aabbccddeeff";
+        assert!(
+            Cli::try_parse_from([
+                "p2p_file",
+                "serve",
+                "--signal",
+                "1.2.3.4:7000",
+                "--allow",
+                peer,
+                "--config",
+                "/etc/p2p_file/service.json",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "p2p_file",
+                "serve",
+                "--signal",
+                "1.2.3.4:7000",
+                "--forward",
+                "127.0.0.1:22",
+                "--config",
+                "/etc/p2p_file/service.json",
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn 解析_rules_子命令() {
+        let cli = Cli::parse_from([
+            "p2p_file",
+            "rules",
+            "--service",
+            "/etc/p2p_file/service.json",
+        ]);
+        match cli.command {
+            Command::Rules {
+                file,
+                service,
+                client,
+            } => {
+                assert_eq!(file, PathBuf::from("/etc/p2p_file/service.json"));
+                assert!(service);
+                assert!(!client);
             }
             other => panic!("解析结果不对: {other:?}"),
         }

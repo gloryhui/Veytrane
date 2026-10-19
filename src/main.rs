@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
@@ -18,6 +19,8 @@ use p2p_file::net::{DirectConfig, establish};
 use p2p_file::speedtest::{SpeedTestDirection, SpeedTestReport, SpeedTestStats, run_speedtest};
 use p2p_file::transfer::{receive_file, send_file};
 use p2p_file::transport::quic::{client_endpoint, connect, server_endpoint};
+use p2p_file::tunnel::rules::{ClientConfig, ServePolicy, ServiceConfig};
+use p2p_file::tunnel::supervisor::{RuleSupervisor, SharedSession};
 use p2p_file::tunnel::{ServeConfig, forward_tunnel, push_file, serve_loop};
 
 fn main() -> ExitCode {
@@ -86,13 +89,31 @@ async fn run(cli: Cli) -> Result<()> {
             forward,
             recv_dir,
             re_punch_after,
-        } => cmd_serve(&key_file, direct, allow, forward, recv_dir, re_punch_after).await,
+            config,
+        } => {
+            cmd_serve(
+                &key_file,
+                direct,
+                allow,
+                forward,
+                recv_dir,
+                re_punch_after,
+                config,
+            )
+            .await
+        }
         Command::Tunnel {
             direct,
             peer,
             listen,
             to,
         } => cmd_tunnel(&key_file, direct, peer, listen, to).await,
+        Command::Forward { direct, config } => cmd_forward(&key_file, direct, config).await,
+        Command::Rules {
+            file,
+            service,
+            client,
+        } => cmd_rules(file, service, client),
         Command::Push {
             direct,
             peer,
@@ -439,22 +460,52 @@ async fn cmd_serve(
     forward: Vec<SocketAddr>,
     recv_dir: Option<PathBuf>,
     re_punch_after: u64,
+    config_path: Option<PathBuf>,
 ) -> Result<()> {
     let identity = load_identity(key_file)?;
     println!("本机节点 ID: {}", identity.node_id());
     println!("（把这个 ID 告诉对方，对方用 --peer 指定）");
 
+    let (policy, config_peer) = if let Some(path) = &config_path {
+        let config = ServiceConfig::load(path)?;
+        let peer = config.single_peer()?;
+        println!("已加载服务配置 {}", path.display());
+        for entry in config.forward_targets.iter().filter(|entry| entry.enabled) {
+            println!(
+                "允许 {} 访问 {}（{}）",
+                entry.allowed_peers.join(","),
+                entry.target,
+                entry.name
+            );
+        }
+        (Some(Arc::new(ServePolicy::new(&config)?)), Some(peer))
+    } else {
+        (None, None)
+    };
+
+    if policy.is_some() && (!allow.is_empty() || !forward.is_empty()) {
+        return Err(Error::Discovery(
+            "--config 已包含授权与目标白名单，不能再同时使用 --allow/--forward".into(),
+        ));
+    }
+
     // 打洞必须知道「往哪打」，所以 serve 需要恰好一个对端节点。
-    let peer = match allow.as_slice() {
-        [peer] => *peer,
-        [] => {
+    let peer = match (allow.as_slice(), config_peer) {
+        ([peer], None) => *peer,
+        ([], Some(peer)) => peer,
+        ([], None) => {
             return Err(Error::Discovery(
-                "serve 必须用 --allow 指定对端节点 ID：不知道对方是谁就没法打洞".into(),
+                "serve 必须用 --allow 或 --config 指定对端节点 ID：不知道对方是谁就没法打洞".into(),
             ));
         }
-        _ => {
+        ([_], Some(_)) => {
             return Err(Error::Discovery(
-                "serve 目前只支持一个 --allow 对端：打洞是点对点的，多个对端请各开一个进程".into(),
+                "--allow 与 --config 只能选一种授权来源".into(),
+            ));
+        }
+        (_, _) => {
+            return Err(Error::Discovery(
+                "serve 目前只支持一个对端：打洞是点对点的，多个对端请各开一个进程".into(),
             ));
         }
     };
@@ -463,22 +514,30 @@ async fn cmd_serve(
     let mut config = direct_config(&direct, peer);
     config.signal_timeout = Duration::ZERO; // 0 = 一直等，不超时
 
-    if forward.is_empty() && recv_dir.is_none() {
-        println!("提示：没有 --forward 也没有 --recv-dir，对端连上来也没事可做。");
+    if forward.is_empty() && recv_dir.is_none() && policy.is_none() {
+        println!("提示：没有 --forward、--config 也没有 --recv-dir，对端连上来也没事可做。");
     }
     for target in &forward {
         println!("允许转发到 {target}");
     }
     println!();
     println!("常驻等待中。对端上线后会自动打洞并开始服务。");
+    if let Some(path) = &config_path {
+        println!("修改 {} 后发送 SIGHUP 可热加载授权与目标。", path.display());
+    }
 
     let serve_config = ServeConfig {
         allowed_peers: allow,
         forwards: forward,
         recv_dir,
         re_punch_after: Duration::from_secs(re_punch_after),
+        policy: policy.clone(),
         ..ServeConfig::new()
     };
+
+    if let (Some(path), Some(policy)) = (config_path, policy) {
+        spawn_service_policy_reload(path, policy, peer);
+    }
 
     tokio::select! {
         result = serve_loop(identity, config, serve_config) => result,
@@ -487,6 +546,60 @@ async fn cmd_serve(
             Ok(())
         }
     }
+}
+
+#[cfg(unix)]
+fn spawn_service_policy_reload(
+    path: PathBuf,
+    policy: Arc<ServePolicy>,
+    serving_peer: p2p_file::identity::NodeId,
+) {
+    tokio::spawn(async move {
+        let Ok(mut hangup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
+        else {
+            tracing::warn!("无法注册 SIGHUP，配置热加载不可用");
+            return;
+        };
+        while hangup.recv().await.is_some() {
+            match ServiceConfig::load(&path) {
+                Ok(config) => {
+                    let peers = config.peers();
+                    // The punching loop is bound to one peer. Changing that peer
+                    // requires a restart; target-only updates and full revocation
+                    // are safe to apply live.
+                    if peers.is_empty() || (peers.len() == 1 && peers[0] == serving_peer) {
+                        match policy.replace(&config) {
+                            Ok(()) => {
+                                tracing::info!(path = %path.display(), "服务授权配置已热加载")
+                            }
+                            Err(error) => tracing::warn!(
+                                path = %path.display(),
+                                %error,
+                                "服务配置无效，保留原策略"
+                            ),
+                        }
+                    } else {
+                        tracing::warn!(
+                            path = %path.display(),
+                            "服务配置的对端发生变化，当前进程仍服务原对端；请重启 serve"
+                        );
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(path = %path.display(), %error, "服务配置加载失败，保留原策略")
+                }
+            }
+        }
+    });
+}
+
+#[cfg(not(unix))]
+fn spawn_service_policy_reload(
+    _path: PathBuf,
+    _policy: Arc<ServePolicy>,
+    _serving_peer: p2p_file::identity::NodeId,
+) {
+    tracing::warn!("当前平台不支持 SIGHUP，服务配置只在启动时加载");
 }
 
 async fn cmd_tunnel(
@@ -516,6 +629,92 @@ async fn cmd_tunnel(
             Ok(())
         }
     }
+}
+
+async fn cmd_forward(
+    key_file: &Option<PathBuf>,
+    direct: DirectOpts,
+    config_path: PathBuf,
+) -> Result<()> {
+    let identity = load_identity(key_file)?;
+    let config = ClientConfig::load(&config_path)?;
+    let peer = config.single_peer()?;
+    println!("本机节点 ID: {}", identity.node_id());
+    println!("共享对端:   {} ({})", peer.short(), peer);
+    println!("规则文件:   {}", config_path.display());
+
+    let direct = direct_config(&direct, peer);
+    let link = establish(&identity, &direct).await?;
+    println!("直连候选已准备：{}", link.describe());
+
+    let endpoints = link.endpoints();
+    let session = Arc::new(SharedSession::new(Arc::new(link), identity.clone()));
+    let mut supervisor = RuleSupervisor::start(session, &config.enabled_rules()).await?;
+    for (id, address) in supervisor.listeners() {
+        println!("规则 {id} 监听 {address}");
+    }
+    println!();
+    println!(
+        "常驻运行中；修改 {} 后发送 SIGHUP 可增删/修改规则。",
+        config_path.display()
+    );
+
+    let (reload_tx, mut reload_rx) = tokio::sync::mpsc::channel(1);
+    spawn_sighup_reload(reload_tx);
+
+    loop {
+        tokio::select! {
+            _ = shutdown_signal() => {
+                println!("\n收到退出信号，正在关闭所有转发规则……");
+                supervisor.shutdown().await;
+                close_endpoints(&endpoints).await;
+                return Ok(());
+            }
+            Some(()) = reload_rx.recv() => {
+                match ClientConfig::load(&config_path) {
+                    Ok(new_config) => {
+                        let peers = new_config.peers();
+                        if peers.is_empty() || (peers.len() == 1 && peers[0] == peer) {
+                            let errors = supervisor.apply(&new_config.enabled_rules()).await;
+                            for error in &errors {
+                                eprintln!("配置热加载：{error}");
+                            }
+                            if errors.is_empty() {
+                                tracing::info!(path = %config_path.display(), "客户端规则已热加载");
+                            }
+                            for (id, address) in supervisor.listeners() {
+                                println!("规则 {id} 监听 {address}");
+                            }
+                        } else {
+                            eprintln!("拒绝热加载：规则对端与当前共享会话不一致");
+                        }
+                    }
+                    Err(error) => eprintln!("配置加载失败，保留原规则：{error}"),
+                }
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+fn spawn_sighup_reload(sender: tokio::sync::mpsc::Sender<()>) {
+    tokio::spawn(async move {
+        let Ok(mut hangup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
+        else {
+            tracing::warn!("无法注册 SIGHUP，客户端规则热加载不可用");
+            return;
+        };
+        while hangup.recv().await.is_some() {
+            if sender.send(()).await.is_err() {
+                return;
+            }
+        }
+    });
+}
+
+#[cfg(not(unix))]
+fn spawn_sighup_reload(_sender: tokio::sync::mpsc::Sender<()>) {
+    tracing::warn!("当前平台不支持 SIGHUP，客户端规则只在启动时加载");
 }
 
 async fn cmd_push(
@@ -550,6 +749,54 @@ async fn cmd_push(
             Ok(())
         }
     }
+}
+
+fn cmd_rules(file: PathBuf, service: bool, client: bool) -> Result<()> {
+    let text = std::fs::read_to_string(&file)?;
+    let service_mode = service || (!client && text.contains("\"forward_targets\""));
+    if service_mode {
+        let config = ServiceConfig::load(&file)?;
+        println!("服务配置 {}（version {}）", file.display(), config.version);
+        let peers = config.peers();
+        println!("授权对端（{}）:", peers.len());
+        for peer in &peers {
+            println!("  {} ({})", peer, peer.short());
+        }
+        for entry in &config.forward_targets {
+            println!(
+                "  [{}] {}：{} -> {}，授权 {} 个节点",
+                if entry.enabled { "启用" } else { "停用" },
+                entry.id,
+                entry.name,
+                entry.target,
+                entry.allowed_peers.len()
+            );
+        }
+        if let Err(error) = config.single_peer() {
+            println!("注意：{error}");
+        }
+        return Ok(());
+    }
+
+    let config = ClientConfig::load(&file)?;
+    let peer = config.single_peer()?;
+    println!(
+        "客户端配置 {}（version {}）",
+        file.display(),
+        config.version
+    );
+    println!("共享对端: {} ({})", peer, peer.short());
+    for rule in &config.rules {
+        println!(
+            "  [{}] {}：{} -> {}，对端 {}",
+            if rule.enabled { "启用" } else { "停用" },
+            rule.id,
+            rule.listen,
+            rule.target,
+            rule.peer_node_id
+        );
+    }
+    Ok(())
 }
 
 async fn cmd_speedtest(

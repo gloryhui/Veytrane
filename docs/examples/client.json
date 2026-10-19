@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "sub2api",
+      "name": "Sub2API",
+      "peer_node_id": "00112233445566778899aabbccddeeff",
+      "listen": "127.0.0.1:8080",
+      "target": "127.0.0.1:8080",
+      "enabled": true,
+      "auto_start": true
+    },
+    {
+      "id": "nas-ssh",
+      "name": "NAS SSH",
+      "peer_node_id": "00112233445566778899aabbccddeeff",
+      "listen": "127.0.0.1:2222",
+      "target": "192.168.1.20:22",
+      "enabled": true,
+      "auto_start": true
+    }
+  ]
+}

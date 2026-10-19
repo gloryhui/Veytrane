@@ -222,6 +222,23 @@ $BIN speedtest \
 - `speedtest` 慢、`push` 慢：优先检查 QUIC、UDP、RTT、丢包、流控或 ISP。
 - `speedtest` 快、`push` 快：当前链路和文件路径都正常。
 
+## 动态转发规则（CLI）
+
+需要长期访问多个目标时，不必把 `--forward` / `--listen` 写死在启动参数里：
+
+```bash
+# Ubuntu 常驻服务：授权与目标白名单放在 JSON 里
+$BIN serve --signal 203.0.113.7:7000 --config /etc/p2p_file/service.json
+
+# macOS/Linux 客户端：一个进程、多条本机转发、共享同一认证会话
+$BIN forward --signal 203.0.113.7:7000 --config ~/.config/p2p_file/client.json
+```
+
+修改配置后发送 `SIGHUP` 即热加载；非法配置或端口占用会保留原规则并报告错误。
+不启动网络可用 `$BIN rules <FILE>` 校验并查看规则。格式、撤销语义、重连修复和
+验收边界见 [CLI 动态 TCP 转发与共享会话](docs/CLI_DYNAMIC_TUNNEL.md)，
+示例见 [service.json](docs/examples/service.json) 与 [client.json](docs/examples/client.json)。
+
 ## 部署为 systemd 服务
 
 两个服务都用**用户级 unit**，这样路径里不用写死用户名。
