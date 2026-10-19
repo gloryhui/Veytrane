@@ -267,7 +267,12 @@ fn validate_service_peer(
         return Err(ApiError::bad_request(error.to_string()));
     }
     let peers = config.peers();
-    if !peers.is_empty() && (peers.len() != 1 || peers[0] != state.inner.peer) {
+    if peers.is_empty() {
+        return Err(ApiError::bad_request(
+            "Web 保存至少保留一个启用的目标，否则重启 serve 时无法确定对端",
+        ));
+    }
+    if peers.len() != 1 || peers[0] != state.inner.peer {
         return Err(ApiError::bad_request(
             "serve 当前只服务一个对端；不能通过 Web 切换对端，请重启进程",
         ));
@@ -283,7 +288,12 @@ fn validate_client_peer(
         return Err(ApiError::bad_request(error.to_string()));
     }
     let peers = config.peers();
-    if !peers.is_empty() && (peers.len() != 1 || peers[0] != state.inner.peer) {
+    if peers.is_empty() {
+        return Err(ApiError::bad_request(
+            "Web 保存至少保留一条启用的转发规则，否则重启 forward 时无法确定对端",
+        ));
+    }
+    if peers.len() != 1 || peers[0] != state.inner.peer {
         return Err(ApiError::bad_request(
             "所有启用规则必须共享当前对端；切换对端需要重启 forward",
         ));
@@ -746,6 +756,29 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert!(policy.target_allowed(peer, "127.0.0.1:8080".parse().unwrap()));
         assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[tokio::test]
+    async fn empty_web_config_is_rejected_to_keep_restart_viable() {
+        let (state, policy, path, peer) = service_fixture("127.0.0.1:8080");
+        let token = "test-token-0123456789abcdef0123456789abcdef";
+        let empty = ServiceConfig {
+            version: RULES_SCHEMA_VERSION,
+            forward_targets: vec![],
+        };
+        let body = serde_json::to_vec(&empty).unwrap();
+        let request = Request::builder()
+            .method("PUT")
+            .uri("/api/v1/config")
+            .header(header::HOST, "127.0.0.1:7788")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        let response = router(state).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(policy.target_allowed(peer, "127.0.0.1:8080".parse().unwrap()));
+        assert!(ServiceConfig::load(&path).is_ok());
     }
 
     #[tokio::test]
