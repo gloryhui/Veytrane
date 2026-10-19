@@ -118,31 +118,7 @@ pub struct SettingsDraft {
     pub trusted_devices: Vec<super::trusted_devices::TrustedDevice>,
 }
 
-/// A local TCP service that authenticated peers may reach through this device.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct AllowedForwardTarget {
-    /// Empty grants no access (including migrated schema v2 entries).
-    #[serde(default)]
-    pub allowed_peers: Vec<String>,
-    pub id: String,
-    pub name: String,
-    pub target: std::net::SocketAddr,
-    pub enabled: bool,
-}
-
-/// A local TCP listener bound to one specific authenticated peer.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct TunnelRule {
-    pub id: String,
-    pub name: String,
-    pub peer_node_id: String,
-    pub listen: std::net::SocketAddr,
-    pub target: std::net::SocketAddr,
-    pub enabled: bool,
-    pub auto_start: bool,
-}
+pub use crate::tunnel::rules::{AllowedForwardTarget, TunnelRule};
 
 impl AllowedForwardTarget {
     pub fn new(

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "forward_targets": [
+    {
+      "id": "sub2api",
+      "name": "Sub2API",
+      "target": "127.0.0.1:8080",
+      "enabled": true,
+      "allowed_peers": ["00112233445566778899aabbccddeeff"]
+    },
+    {
+      "id": "nas-ssh",
+      "name": "NAS SSH",
+      "target": "192.168.1.20:22",
+      "enabled": false,
+      "allowed_peers": ["00112233445566778899aabbccddeeff"]
+    }
+  ]
+}

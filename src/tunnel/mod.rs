@@ -37,7 +37,9 @@ use tracing::{debug, info, warn};
 
 use crate::error::{Error, Result};
 use crate::identity::{Identity, NodeId};
-use crate::net::{DirectConfig, DirectLink, establish};
+use crate::net::{DirectConfig, DirectLink, establish, spawn_punch_probes};
+pub mod rules;
+pub mod supervisor;
 use crate::protocol::frame::{read_frame, write_frame};
 use crate::protocol::message::ControlMessage;
 use crate::speedtest::serve_speedtest;
@@ -84,6 +86,9 @@ pub struct ServeConfig {
     pub max_file_receives: usize,
     /// 认证连接在没有任何业务流时允许保持多久。
     pub connection_idle_timeout: Duration,
+    /// Optional live policy loaded from a service config file. `SIGHUP` swaps the
+    /// validated snapshot without restarting the process.
+    pub policy: Option<Arc<rules::ServePolicy>>,
 }
 
 impl ServeConfig {
@@ -97,17 +102,51 @@ impl ServeConfig {
             max_business_streams: DEFAULT_MAX_BUSINESS_STREAMS,
             max_file_receives: DEFAULT_MAX_FILE_RECEIVES,
             connection_idle_timeout: TRANSFER_IDLE_TIMEOUT,
+            policy: None,
         }
     }
 
     /// 这个节点允许连进来吗。
     pub fn peer_allowed(&self, peer: NodeId) -> bool {
-        self.allowed_peers.is_empty() || self.allowed_peers.contains(&peer)
+        if !self.allowed_peers.is_empty() {
+            return self.allowed_peers.contains(&peer);
+        }
+        match &self.policy {
+            Some(policy) => policy.peer_allowed(peer),
+            None => true,
+        }
     }
 
-    /// 这个目标允许转发吗。
-    pub fn target_allowed(&self, target: SocketAddr) -> bool {
+    /// 这个目标允许该对端转发吗。
+    pub fn target_allowed(&self, peer: NodeId, target: SocketAddr) -> bool {
         self.forwards.contains(&target)
+            || self
+                .policy
+                .as_ref()
+                .is_some_and(|policy| policy.target_allowed(peer, target))
+    }
+
+    /// Targets currently authorized for a peer, for diagnostics only.
+    pub fn targets_for(&self, peer: NodeId) -> Vec<SocketAddr> {
+        let mut targets = self.forwards.clone();
+        if let Some(policy) = &self.policy {
+            for target in policy.targets_for(peer) {
+                if !targets.contains(&target) {
+                    targets.push(target);
+                }
+            }
+        }
+        targets
+    }
+
+    /// Whether any static or live peer authorization exists.
+    pub fn has_peer_authorization(&self) -> bool {
+        !self.allowed_peers.is_empty() || self.policy.is_some()
+    }
+
+    /// Whether any static or live target authorization exists.
+    pub fn has_target_authorization(&self) -> bool {
+        !self.forwards.is_empty() || self.policy.is_some()
     }
 }
 
@@ -126,10 +165,10 @@ pub async fn serve_loop(
     direct: DirectConfig,
     config: ServeConfig,
 ) -> Result<()> {
-    if config.allowed_peers.is_empty() {
-        warn!("没有指定允许的节点（--allow），任何知道信令服务器的人都能连进来");
+    if !config.has_peer_authorization() {
+        warn!("没有指定允许的节点（--allow 或 --config），任何知道信令服务器的人都能连进来");
     }
-    if config.forwards.is_empty() && config.recv_dir.is_none() {
+    if !config.has_target_authorization() && config.recv_dir.is_none() {
         warn!("既没有配置转发目标，也没有配置接收目录，对端连上来也没事可做");
     }
 
@@ -261,36 +300,27 @@ pub async fn serve_session(
     loop {
         let incoming = tokio::select! {
             incoming = incoming_rx.recv(), if !network.paths.is_empty() => incoming,
-            message = signal.next_event(), if network.relay.is_some() => {
+            message = signal.next_event() => {
                 match message {
                     Ok(crate::discovery::signal::SignalMessage::PeerCandidates {node_id, candidates, token}) => {
-                        offers.retain(|_, offer| !offer.abort.is_finished() || offer.direct.as_ref().is_some_and(|c| c.close_reason().is_none()));
-                        if offers.contains_key(token.as_bytes()) || offers.len() >= DEFAULT_MAX_PENDING_HANDSHAKES { continue; }
-                        let reachable = network.reachable_candidates(&candidates);
-                        if offers.values().any(|offer| offer.peer == node_id && offer.candidates == reachable) { continue; }
-                        let relay = network.relay.as_ref().unwrap();
-                        let Some(abort) = start_serve_relay(relay, &identity, node_id, token, &pending, &mut relay_tasks) else { continue; };
-                        let mut observations = Vec::new();
-                        for path in &network.paths {
-                            let candidates = path.reachable_candidates(&candidates);
-                            if candidates.is_empty() { continue; }
-                            let socket = path.punch_socket.clone();
-                            let Ok(mut receiver) = socket.register_probe(&token) else { continue; };
-                            let (tx, rx) = watch::channel(None);
-                            observations.push((path.endpoint.clone(), rx));
-                            probes.spawn(async move {
-                                for _ in 0..crate::nat::punch::PunchConfig::default().attempts {
-                                    for address in &candidates { let _ = socket.send_probe_to(&token, *address).await; }
-                                    if let Ok(Some(source)) = tokio::time::timeout(Duration::from_millis(200), receiver.recv()).await {
-                                        let _ = socket.send_probe_to(&token, source).await;
-                                        tx.send_replace(Some(source));
-                                    }
-                                }
-                            });
+                        if !config.peer_allowed(node_id) { continue; }
+                        if let Some(relay) = &network.relay {
+                            offers.retain(|_, offer| !offer.abort.is_finished() || offer.direct.as_ref().is_some_and(|c| c.close_reason().is_none()));
+                            if offers.contains_key(token.as_bytes()) || offers.len() >= DEFAULT_MAX_PENDING_HANDSHAKES { continue; }
+                            let reachable = network.reachable_candidates(&candidates);
+                            if offers.values().any(|offer| offer.peer == node_id && offer.candidates == reachable) { continue; }
+                            let Some(abort) = start_serve_relay(relay, &identity, node_id, token, &pending, &mut relay_tasks) else { continue; };
+                            let observations = spawn_punch_probes(&network, token, &candidates, &mut probes);
+                            offers.insert(*token.as_bytes(), RelayOffer {peer: node_id, candidates: reachable, observations, abort, direct: None});
+                        } else {
+                            // Direct-only serves still need to answer a peer's new
+                            // pairing. Without this probe route the reconnecting
+                            // client's fresh token is never validated, so punching
+                            // fails even though the QUIC endpoint is still alive.
+                            let _ = spawn_punch_probes(&network, token, &candidates, &mut probes);
                         }
-                        offers.insert(*token.as_bytes(), RelayOffer {peer: node_id, candidates: reachable, observations, abort, direct: None});
                     }
-                    Err(error) => { warn!(%error, "Relay signaling pairing unavailable; retiring this serve generation"); break; }
+                    Err(error) => { warn!(%error, "信令连接结束，本轮会话收尾"); break; }
                     _ => {}
                 }
                 continue;
@@ -666,8 +696,9 @@ async fn serve_streams(
 
             match first {
                 ControlMessage::TunnelOpen { target } => {
-                    let forwards = config.forwards.clone();
-                    if let Err(err) = handle_tunnel_request(send, recv, &target, &forwards).await {
+                    if let Err(err) =
+                        handle_tunnel_request(send, recv, &target, &config, peer_id).await
+                    {
                         warn!(target, error = %err, "隧道转发失败");
                     }
                 }
@@ -769,7 +800,8 @@ async fn handle_tunnel_request(
     mut send: SendStream,
     recv: RecvStream,
     target: &str,
-    allowed: &[SocketAddr],
+    config: &ServeConfig,
+    peer: NodeId,
 ) -> Result<()> {
     // 只接受 IP:端口，不接受域名：域名会引入 DNS 解析，可能绕过白名单。
     let target_addr: SocketAddr = match target.parse() {
@@ -788,18 +820,41 @@ async fn handle_tunnel_request(
         }
     };
 
-    let tcp = match connect_allowed_target(target_addr, allowed).await {
+    if !config.target_allowed(peer, target_addr) {
+        let allowed = config.targets_for(peer);
+        let reason = format!(
+            "目标 {target_addr} 不在允许转发的列表里（当前允许：{}）",
+            allowed
+                .iter()
+                .map(|addr| addr.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        warn!(%target, %peer, "拒绝了未经授权的转发请求");
+        write_frame(
+            &mut send,
+            &ControlMessage::TunnelError {
+                reason: reason.clone(),
+            },
+        )
+        .await?;
+        let _ = send.finish();
+        return Err(Error::Protocol(reason));
+    }
+
+    let tcp = match TcpStream::connect(target_addr).await {
         Ok(tcp) => tcp,
         Err(err) => {
+            let reason = format!("连接 {target_addr} 失败: {err}");
             write_frame(
                 &mut send,
                 &ControlMessage::TunnelError {
-                    reason: err.to_string(),
+                    reason: reason.clone(),
                 },
             )
             .await?;
             let _ = send.finish();
-            return Err(err);
+            return Err(Error::Transport(reason));
         }
     };
 
@@ -1032,7 +1087,11 @@ fn connection_remote(connection: Connection) -> String {
 }
 
 /// 为一条本地 TCP 连接开一条隧道。
-async fn open_tunnel(tcp: TcpStream, connection: &Connection, target: &str) -> Result<()> {
+pub(crate) async fn open_tunnel(
+    tcp: TcpStream,
+    connection: &Connection,
+    target: &str,
+) -> Result<()> {
     let (mut send, mut recv) =
         tokio::time::timeout(ACCEPT_FIRST_BI_STREAM_TIMEOUT, connection.open_bi())
             .await
@@ -1097,6 +1156,7 @@ mod tests {
     use crate::discovery::signal::{SignalServerConfig, run_signal_server_on_with};
     use crate::nat::punch::PunchConfig;
     use crate::net::{DirectConfig, establish};
+    use crate::tunnel::rules::TunnelRule;
 
     fn node_id(seed: u8) -> NodeId {
         // 用真实密钥推出来的节点 ID，保证和线上路径一致。
@@ -1616,10 +1676,10 @@ mod tests {
             forwards: vec!["127.0.0.1:22".parse().unwrap()],
             ..ServeConfig::new()
         };
-        assert!(config.target_allowed("127.0.0.1:22".parse().unwrap()));
-        assert!(!config.target_allowed("127.0.0.1:23".parse().unwrap()));
+        assert!(config.target_allowed(node_id(1), "127.0.0.1:22".parse().unwrap()));
+        assert!(!config.target_allowed(node_id(1), "127.0.0.1:23".parse().unwrap()));
         // 不配白名单就等于什么都不让转发。
-        assert!(!ServeConfig::new().target_allowed("127.0.0.1:22".parse().unwrap()));
+        assert!(!ServeConfig::new().target_allowed(node_id(1), "127.0.0.1:22".parse().unwrap()));
     }
 
     #[test]
@@ -2199,5 +2259,255 @@ mod tests {
         let _ = client_link.network.wait_idle().await;
         serve_task.abort();
         let _ = std::fs::remove_dir_all(&recv_dir);
+    }
+
+    /// Direct-only links must register and punch a brand-new pairing when the
+    /// serve side has already gone through an idle re-punch cycle. Reusing the
+    /// initial token/candidates makes every later request fail with
+    /// `no authenticated path`.
+    #[tokio::test]
+    async fn direct_only_idle_reconnects_after_serve_repunch() {
+        let signal = spawn_signal_server().await;
+        let server_id = Identity::generate();
+        let client_id = Identity::generate();
+        let echo = spawn_echo_server().await;
+
+        let mut server_direct = test_direct_config(signal, client_id.node_id());
+        server_direct.signal_timeout = Duration::from_secs(10);
+        let serve = tokio::spawn(serve_loop(
+            server_id.clone(),
+            server_direct,
+            ServeConfig {
+                allowed_peers: vec![client_id.node_id()],
+                forwards: vec![echo],
+                recv_dir: None,
+                re_punch_after: Duration::from_secs(2),
+                connection_idle_timeout: Duration::from_millis(300),
+                ..ServeConfig::new()
+            },
+        ));
+        // Let the serve side register before the client starts its lookup.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let link = establish(&client_id, &test_direct_config(signal, server_id.node_id()))
+            .await
+            .expect("client direct link");
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let forward_addr = listener.local_addr().unwrap();
+        let forwarding = tokio::spawn(forward_on(
+            link,
+            client_id.clone(),
+            echo.to_string(),
+            listener,
+        ));
+
+        roundtrip(forward_addr, b"first").await;
+
+        // The serve side closes the authenticated connection after its short
+        // business-idle timeout, then re-punches once `re_punch_after` elapses.
+        // A second request must pair/probe/authenticate again from scratch.
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        roundtrip(forward_addr, b"second").await;
+
+        forwarding.abort();
+        serve.abort();
+    }
+
+    async fn roundtrip(addr: SocketAddr, payload: &[u8]) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let mut stream = tokio::time::timeout(
+            Duration::from_secs(10),
+            tokio::net::TcpStream::connect(addr),
+        )
+        .await
+        .expect("local tunnel connect timed out")
+        .expect("local tunnel listener refused");
+        stream.write_all(payload).await.unwrap();
+        let mut buf = vec![0; payload.len()];
+        tokio::time::timeout(Duration::from_secs(10), stream.read_exact(&mut buf))
+            .await
+            .expect("tunnel roundtrip timed out")
+            .expect("tunnel closed before echoing the payload");
+        assert_eq!(buf, payload);
+    }
+
+    fn tunnel_rule(id: &str, target: SocketAddr, peer: NodeId) -> TunnelRule {
+        TunnelRule {
+            id: id.into(),
+            name: id.into(),
+            peer_node_id: peer.to_hex(),
+            listen: "127.0.0.1:0".parse().unwrap(),
+            target,
+            enabled: true,
+            auto_start: true,
+        }
+    }
+
+    async fn request_tunnel(connection: &Connection, target: SocketAddr) -> Option<ControlMessage> {
+        let (mut send, mut recv) = connection.open_bi().await.unwrap();
+        write_frame(
+            &mut send,
+            &ControlMessage::TunnelOpen {
+                target: target.to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), read_frame(&mut recv))
+            .await
+            .expect("tunnel request timed out")
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn shared_session_serves_multiple_rules_and_applies_live_changes() {
+        use std::sync::Arc;
+
+        use crate::tunnel::supervisor::{RuleSupervisor, SharedSession};
+
+        let signal = spawn_signal_server().await;
+        let server_id = Identity::generate();
+        let client_id = Identity::generate();
+        let echo_a = spawn_echo_server().await;
+        let echo_b = spawn_echo_server().await;
+        let echo_c = spawn_echo_server().await;
+
+        let (server_link, client_link) = establish_pair(signal, &server_id, &client_id).await;
+        let serve = tokio::spawn(serve_session(
+            server_link,
+            server_id.clone(),
+            ServeConfig {
+                allowed_peers: vec![client_id.node_id()],
+                forwards: vec![echo_a, echo_b, echo_c],
+                re_punch_after: Duration::from_secs(30),
+                ..ServeConfig::new()
+            },
+        ));
+
+        let session = Arc::new(SharedSession::new(Arc::new(client_link), client_id.clone()));
+        let rule_a = tunnel_rule("a", echo_a, client_id.node_id());
+        let rule_b = tunnel_rule("b", echo_b, client_id.node_id());
+        let mut supervisor = RuleSupervisor::start(session, &[rule_a.clone(), rule_b.clone()])
+            .await
+            .unwrap();
+
+        let listeners = supervisor.listeners();
+        let addr_a = listeners
+            .iter()
+            .find(|(id, _)| id == "a")
+            .map(|(_, addr)| *addr)
+            .unwrap();
+        let addr_b = listeners
+            .iter()
+            .find(|(id, _)| id == "b")
+            .map(|(_, addr)| *addr)
+            .unwrap();
+        roundtrip(addr_a, b"a").await;
+        roundtrip(addr_b, b"b").await;
+
+        // One rule is removed, one is retargeted in place, one is added.
+        let mut retargeted_b = rule_b.clone();
+        retargeted_b.target = echo_c;
+        let rule_d = tunnel_rule("d", echo_a, client_id.node_id());
+        let errors = supervisor.apply(&[retargeted_b, rule_d]).await;
+        assert!(errors.is_empty(), "{errors:?}");
+        roundtrip(addr_b, b"c").await;
+        assert!(tokio::net::TcpStream::connect(addr_a).await.is_err());
+        let addr_d = supervisor
+            .listeners()
+            .into_iter()
+            .find(|(id, _)| id == "d")
+            .map(|(_, addr)| addr)
+            .unwrap();
+        roundtrip(addr_d, b"a").await;
+
+        supervisor.shutdown().await;
+        serve.abort();
+    }
+
+    #[tokio::test]
+    async fn service_policy_hot_reload_changes_authorized_targets() {
+        use std::sync::Arc;
+
+        use crate::tunnel::rules::{AllowedForwardTarget, ServePolicy, ServiceConfig};
+
+        let signal = spawn_signal_server().await;
+        let server_id = Identity::generate();
+        let client_id = Identity::generate();
+        let echo_a = spawn_echo_server().await;
+        let echo_b = spawn_echo_server().await;
+
+        let target = |id: &str, addr: SocketAddr| AllowedForwardTarget {
+            allowed_peers: vec![client_id.node_id().to_hex()],
+            id: id.into(),
+            name: id.into(),
+            target: addr,
+            enabled: true,
+        };
+        let service_a = ServiceConfig {
+            version: crate::tunnel::rules::RULES_SCHEMA_VERSION,
+            forward_targets: vec![target("a", echo_a)],
+        };
+        let policy = Arc::new(ServePolicy::new(&service_a).unwrap());
+
+        let (server_link, client_link) = establish_pair(signal, &server_id, &client_id).await;
+        let serve = tokio::spawn(serve_session(
+            server_link,
+            server_id.clone(),
+            ServeConfig {
+                policy: Some(policy.clone()),
+                re_punch_after: Duration::from_secs(30),
+                ..ServeConfig::new()
+            },
+        ));
+        let connection = client_link.connect_authenticated(&client_id).await.unwrap();
+        assert_eq!(
+            request_tunnel(&connection, echo_a).await,
+            Some(ControlMessage::TunnelReady)
+        );
+
+        policy
+            .replace(&ServiceConfig {
+                version: crate::tunnel::rules::RULES_SCHEMA_VERSION,
+                forward_targets: vec![target("b", echo_b)],
+            })
+            .unwrap();
+        assert!(matches!(
+            request_tunnel(&connection, echo_a).await,
+            Some(ControlMessage::TunnelError { .. })
+        ));
+        assert_eq!(
+            request_tunnel(&connection, echo_b).await,
+            Some(ControlMessage::TunnelReady)
+        );
+
+        // Revoking every target also revokes the peer: a new authenticated
+        // transport must be rejected by the running serve session.
+        policy
+            .replace(&ServiceConfig {
+                version: crate::tunnel::rules::RULES_SCHEMA_VERSION,
+                forward_targets: vec![],
+            })
+            .unwrap();
+        connection.close(0u32.into(), b"done");
+        let denied = tokio::time::timeout(
+            Duration::from_secs(20),
+            client_link.connect_authenticated(&client_id),
+        )
+        .await
+        .expect("revoked peer reconnect must finish");
+        match denied {
+            Err(_) => {}
+            Ok(connection) => {
+                // QUIC/TLS authentication can complete just before the serve
+                // side applies the peer allowlist and closes the transport.
+                tokio::time::timeout(Duration::from_secs(5), connection.closed())
+                    .await
+                    .expect("revoked peer connection stayed open");
+            }
+        }
+
+        serve.abort();
     }
 }

@@ -24,6 +24,7 @@ pub mod race;
 pub use family::{AddressFamily, NetworkFamilies};
 
 use std::net::{SocketAddr, UdpSocket as StdUdpSocket};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use tokio::net::UdpSocket;
@@ -213,6 +214,9 @@ impl DirectConfig {
     }
 }
 
+/// How long a reconnecting client waits for the peer to register again.
+const RECONNECT_SIGNAL_TIMEOUT: Duration = Duration::from_secs(15);
+
 /// Prepared native paths. No candidate or probe is an authenticated winner.
 pub struct DirectLink {
     pub token: crate::nat::punch::PunchToken,
@@ -221,7 +225,12 @@ pub struct DirectLink {
     pub peer_node_id: NodeId,
     pub peer_candidates: Vec<SocketAddr>,
     signal: tokio::sync::Mutex<SignalingClient>,
-    relay_used: tokio::sync::Mutex<bool>,
+    /// Serializes attempts so concurrent local connections cannot race a fresh
+    /// signaling registration and cancel each other's pairing.
+    reconnect_lock: tokio::sync::Mutex<()>,
+    /// The initial pairing already owns a token and probes. Every later attempt
+    /// must register again and punch a fresh pairing.
+    attempts: AtomicU32,
     signal_server: String,
     signal_tls: Option<crate::discovery::signal_tls::SignalTlsClient>,
     probes: tokio::task::JoinSet<()>,
@@ -268,89 +277,128 @@ impl DirectLink {
                 .join(", ")
         )
     }
+    /// Dial and authenticate the peer.
+    ///
+    /// The first call reuses the pairing prepared by [`establish`]. Every later
+    /// call is a new transport generation: the old token, candidates and probe
+    /// observations are stale, especially after the peer's idle re-punch cycle.
+    /// Re-registering (and punching again) is required for both Direct-only and
+    /// Relay-configured links, not just the Relay fallback path.
     pub async fn connect_authenticated(&self, identity: &Identity) -> Result<quinn::Connection> {
-        let candidates = self
-            .network
-            .paths
-            .iter()
-            .flat_map(|path| {
-                self.peer_candidates
-                    .iter()
-                    .filter(|a| path.family.accepts(**a))
-                    .map(|a| (path.endpoint.clone(), *a))
-            })
-            .collect();
-        if let Some(relay) = &self.network.relay {
-            // Reconnect is a new pairing/transport, never an inherited relay socket or grant.
-            // A fresh signaling registration avoids confusing queued offers from an older attempt.
-            let mut used = self.relay_used.lock().await;
+        let _reconnect = self.reconnect_lock.lock().await;
+        let attempt = self.attempts.fetch_add(1, Ordering::Relaxed);
+        let mut reconnect_probes = None;
+
+        let (token, candidates, observations) = if attempt == 0 {
+            let candidates = self
+                .network
+                .paths
+                .iter()
+                .flat_map(|path| {
+                    self.peer_candidates
+                        .iter()
+                        .filter(|a| path.family.accepts(**a))
+                        .map(|a| (path.endpoint.clone(), *a))
+                })
+                .collect();
+            (self.token, candidates, self.observations.clone())
+        } else {
+            // A reconnect is a new pairing/transport. Never inherit the previous
+            // token or probe route, which may point at an expired NAT mapping.
+            let mut signal = SignalingClient::connect_with_tls(
+                &self.signal_server,
+                identity,
+                self.network.local_candidates.clone(),
+                self.signal_tls.as_ref(),
+            )
+            .await?;
+            let offer =
+                resolve_peer_waiting(&mut signal, self.peer_node_id, RECONNECT_SIGNAL_TIMEOUT)
+                    .await?;
+            *self.signal.lock().await = signal;
+
+            let candidates = self.offer_candidates(&offer.candidates);
             let mut probes = tokio::task::JoinSet::new();
-            let (token, candidates, observations) = if *used {
-                let mut signal = SignalingClient::connect_with_tls(
-                    &self.signal_server,
-                    identity,
-                    self.network.local_candidates.clone(),
-                    self.signal_tls.as_ref(),
-                )
-                .await?;
-                let offer =
-                    resolve_peer_waiting(&mut signal, self.peer_node_id, Duration::from_secs(15))
-                        .await?;
-                *self.signal.lock().await = signal;
-                let mut candidates = Vec::new();
-                let mut observations = Vec::new();
-                for path in &self.network.paths {
-                    let reachable = path.reachable_candidates(&offer.candidates);
-                    if reachable.is_empty() {
-                        continue;
-                    }
-                    candidates.extend(reachable.iter().map(|addr| (path.endpoint.clone(), *addr)));
-                    let socket = path.punch_socket.clone();
-                    let mut receiver = socket.register_probe(&offer.token)?;
-                    let token = offer.token;
-                    let (tx, rx) = tokio::sync::watch::channel(None);
-                    observations.push((path.endpoint.clone(), rx));
-                    probes.spawn(async move {
-                        for _ in 0..PunchConfig::default().attempts {
-                            for address in &reachable {
-                                let _ = socket.send_probe_to(&token, *address).await;
-                            }
-                            if let Ok(Some(source)) =
-                                tokio::time::timeout(Duration::from_millis(200), receiver.recv())
-                                    .await
-                            {
-                                let _ = socket.send_probe_to(&token, source).await;
-                                tx.send_replace(Some(source));
-                            }
-                        }
-                    });
-                }
-                (offer.token, candidates, observations)
-            } else {
-                (self.token, candidates, self.observations.clone())
-            };
-            *used = true;
-            let mut tasks =
-                race::prepared_tasks(candidates, observations, identity, self.peer_node_id);
+            let observations =
+                spawn_punch_probes(&self.network, offer.token, &offer.candidates, &mut probes);
+            reconnect_probes = Some(probes);
+            (offer.token, candidates, observations)
+        };
+
+        let mut tasks = race::prepared_tasks(candidates, observations, identity, self.peer_node_id);
+        if let Some(relay) = &self.network.relay {
             let fallback = relay.clone();
             let identity = identity.clone();
             let peer = self.peer_node_id;
             tasks.spawn(async move { fallback.prepare(identity, peer, token).await });
-            let result = race::finish_prepared_guard(tasks).await;
+        }
+        let result = race::finish_prepared_guard(tasks).await;
+
+        if let Some(mut probes) = reconnect_probes {
             probes.abort_all();
             while probes.join_next().await.is_some() {}
+        }
+
+        if let Some(relay) = &self.network.relay {
             let mut guard = result?;
             guard.retain_relay_endpoint(&relay.endpoints)?;
             return Ok(guard.release());
         }
-        race::authenticated_race_with_probes(
-            candidates,
-            self.observations.clone(),
-            identity,
-            self.peer_node_id,
-        )
-        .await
+        Ok(result?.release())
     }
+
+    fn offer_candidates(&self, offered: &[Candidate]) -> Vec<(quinn::Endpoint, SocketAddr)> {
+        self.network
+            .paths
+            .iter()
+            .flat_map(|path| {
+                path.reachable_candidates(offered)
+                    .into_iter()
+                    .map(|addr| (path.endpoint.clone(), addr))
+            })
+            .collect()
+    }
+}
+
+/// Register one new punch token on every usable path, send probes toward the
+/// offered candidates and publish the source address learned from the peer.
+///
+/// Both the reconnecting client and the long-lived serve session use this.
+/// Keeping the returned receivers alive is the caller's job; dropping the
+/// `JoinSet` aborts the probe loops.
+pub(crate) fn spawn_punch_probes(
+    network: &DesktopNetwork,
+    token: crate::nat::punch::PunchToken,
+    candidates: &[Candidate],
+    probes: &mut tokio::task::JoinSet<()>,
+) -> Vec<race::ProbeObservation> {
+    let mut observations = Vec::new();
+    for path in &network.paths {
+        let reachable = path.reachable_candidates(candidates);
+        if reachable.is_empty() {
+            continue;
+        }
+        let socket = path.punch_socket.clone();
+        let Ok(mut receiver) = socket.register_probe(&token) else {
+            continue;
+        };
+        let (tx, rx) = tokio::sync::watch::channel(None);
+        observations.push((path.endpoint.clone(), rx));
+        probes.spawn(async move {
+            for _ in 0..PunchConfig::default().attempts {
+                for address in &reachable {
+                    let _ = socket.send_probe_to(&token, *address).await;
+                }
+                if let Ok(Some(source)) =
+                    tokio::time::timeout(Duration::from_millis(200), receiver.recv()).await
+                {
+                    let _ = socket.send_probe_to(&token, source).await;
+                    tx.send_replace(Some(source));
+                }
+            }
+        });
+    }
+    observations
 }
 
 pub async fn establish(identity: &Identity, config: &DirectConfig) -> Result<DirectLink> {
@@ -429,7 +477,8 @@ pub async fn establish(identity: &Identity, config: &DirectConfig) -> Result<Dir
         signal_server: config.signal_server.clone(),
         signal_tls: config.signal_tls.clone(),
         signal: tokio::sync::Mutex::new(signal),
-        relay_used: tokio::sync::Mutex::new(false),
+        reconnect_lock: tokio::sync::Mutex::new(()),
+        attempts: AtomicU32::new(0),
         probes,
         observations,
     })
