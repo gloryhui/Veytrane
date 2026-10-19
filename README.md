@@ -239,6 +239,20 @@ $BIN forward --signal 203.0.113.7:7000 --config ~/.config/p2p_file/client.json
 验收边界见 [CLI 动态 TCP 转发与共享会话](docs/CLI_DYNAMIC_TUNNEL.md)，
 示例见 [service.json](docs/examples/service.json) 与 [client.json](docs/examples/client.json)。
 
+### 本机 Web 管理页
+
+不想手改 JSON 时，可以只监听 loopback 打开管理页：
+
+```bash
+$BIN serve --signal 203.0.113.7:7000 --config /etc/p2p_file/service.json \
+  --admin-listen 127.0.0.1:7788
+$BIN forward --signal 203.0.113.7:7000 --config ~/.config/p2p_file/client.json \
+  --admin-listen 127.0.0.1:7789
+```
+
+终端会打印管理 token 文件；浏览器打开 `http://127.0.0.1:7788/` 后填入 token。
+远程访问请用 SSH 隧道。安全边界、API 和限制见 [Web 管理页](docs/WEB_ADMIN.md)。
+
 ## 部署为 systemd 服务
 
 两个服务都用**用户级 unit**，这样路径里不用写死用户名。

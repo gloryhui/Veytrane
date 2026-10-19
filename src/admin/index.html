@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>p2p_file 管理</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #101418;
+    --panel: #171d23;
+    --line: #2a333c;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --accent: #4c9aff;
+    --danger: #ff6b6b;
+    --ok: #4ade80;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: .2px; }
+  .badge { color: var(--muted); font-size: 12px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 24px; }
+  section { margin-bottom: 18px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px;
+  }
+  .meta { display: flex; flex-wrap: wrap; gap: 14px 24px; color: var(--muted); }
+  .meta code { color: var(--text); word-break: break-all; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 16px 0; }
+  button {
+    background: #222b34;
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 7px 12px;
+    cursor: pointer;
+    font: inherit;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #06121f; font-weight: 600; }
+  button.danger { color: var(--danger); }
+  input {
+    background: #0d1216;
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font: inherit;
+    width: 100%;
+  }
+  input[type="checkbox"] { width: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; white-space: nowrap; }
+  td { min-width: 90px; }
+  td.narrow { width: 52px; }
+  td.actions { width: 74px; white-space: nowrap; }
+  .table-wrap { overflow-x: auto; }
+  .status { color: var(--muted); min-height: 22px; }
+  .status.error { color: var(--danger); white-space: pre-wrap; }
+  .status.ok { color: var(--ok); }
+  pre {
+    background: #0d1216;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px;
+    overflow: auto;
+    color: #c8d3de;
+    max-height: 50vh;
+  }
+  #auth { max-width: 560px; margin: 60px auto; }
+  #auth .row { display: flex; gap: 10px; margin-top: 12px; }
+  #auth input { flex: 1; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 10px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>p2p_file 管理</h1>
+  <span class="badge" id="role-badge"></span>
+</header>
+
+<main>
+  <section id="auth" class="card">
+    <h2>连接管理页</h2>
+    <p class="hint">输入服务端打印的管理 token 文件内容。token 只保存在当前浏览器标签页的 sessionStorage 中。</p>
+    <div class="row">
+      <input id="token" type="password" autocomplete="off" placeholder="管理 token">
+      <button class="primary" id="connect">连接</button>
+    </div>
+    <div class="hint" id="auth-error"></div>
+  </section>
+
+  <div id="app" hidden>
+    <section class="card">
+      <div class="meta">
+        <span>角色: <b id="role-label"></b></span>
+        <span>对端: <code id="peer"></code></span>
+        <span>配置: <code id="config-path"></code></span>
+      </div>
+      <div class="toolbar">
+        <button class="primary" id="add">新增规则</button>
+        <button class="primary" id="save">保存并应用</button>
+        <button id="reload">从文件重载</button>
+        <button id="logout">退出</button>
+        <span class="status" id="status"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead id="thead"></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>当前运行状态</h3>
+      <pre id="runtime"></pre>
+    </section>
+  </div>
+</main>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const TOKEN_KEY = "p2p_file_admin_token";
+  let token = sessionStorage.getItem(TOKEN_KEY) || "";
+  let state = null;
+  let config = null;
+
+  class ApiError extends Error {
+    constructor(message, details) {
+      super(message || "请求失败");
+      this.details = details || [];
+    }
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? "" : value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  async function api(path, options = {}) {
+    const headers = new Headers(options.headers || {});
+    headers.set("Authorization", `Bearer ${token}`);
+    if (options.body) headers.set("Content-Type", "application/json");
+    const response = await fetch(path, { ...options, headers });
+    const text = await response.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text }; }
+    if (!response.ok) throw new ApiError(data.error || response.statusText, data.details);
+    return data;
+  }
+
+  function isService() {
+    return state && state.role === "service";
+  }
+
+  function setStatus(message, kind = "") {
+    const element = $("status");
+    element.textContent = message || "";
+    element.className = "status" + (kind ? " " + kind : "");
+  }
+
+  function setAuthError(message) {
+    $("auth-error").textContent = message || "";
+  }
+
+  function showError(error) {
+    const details = error && error.details && error.details.length
+      ? "\n" + error.details.join("\n")
+      : "";
+    setStatus((error && error.message ? error.message : String(error)) + details, "error");
+  }
+
+  function rowHtml(rule, index) {
+    const commonStart = `<td class="narrow"><input type="checkbox" data-field="enabled" ${rule.enabled ? "checked" : ""}></td>
+      <td><input data-field="id" value="${escapeHtml(rule.id)}"></td>
+      <td><input data-field="name" value="${escapeHtml(rule.name)}"></td>`;
+    const commonEnd = `<td class="actions"><button class="danger" data-action="delete">删除</button></td>`;
+    if (isService()) {
+      return `<tr data-index="${index}">${commonStart}
+        <td><input data-field="target" value="${escapeHtml(rule.target)}" placeholder="127.0.0.1:8080"></td>
+        <td><input data-field="allowed_peers" value="${escapeHtml((rule.allowed_peers || []).join(", "))}" placeholder="${escapeHtml(state.peer)}"></td>
+        ${commonEnd}</tr>`;
+    }
+    return `<tr data-index="${index}">${commonStart}
+      <td><input data-field="listen" value="${escapeHtml(rule.listen)}" placeholder="127.0.0.1:8080"></td>
+      <td><input data-field="target" value="${escapeHtml(rule.target)}" placeholder="127.0.0.1:8080"></td>
+      <td><input data-field="peer_node_id" value="${escapeHtml(rule.peer_node_id || state.peer)}" placeholder="${escapeHtml(state.peer)}"></td>
+      <td class="narrow"><input type="checkbox" data-field="auto_start" ${rule.auto_start ? "checked" : ""}></td>
+      ${commonEnd}</tr>`;
+  }
+
+  function render() {
+    $("role-label").textContent = isService() ? "服务端（目标授权）" : "客户端（本机转发）";
+    $("role-badge").textContent = isService() ? "serve" : "forward";
+    $("peer").textContent = state.peer;
+    $("config-path").textContent = state.config_path;
+
+    if (isService()) {
+      $("thead").innerHTML = "<tr><th>启用</th><th>ID</th><th>名称</th><th>目标 IP:端口</th><th>授权节点（逗号分隔）</th><th></th></tr>";
+    } else {
+      $("thead").innerHTML = "<tr><th>启用</th><th>ID</th><th>名称</th><th>本机监听</th><th>目标 IP:端口</th><th>对端 NodeId</th><th>自动启动</th><th></th></tr>";
+    }
+
+    const list = isService() ? (config.forward_targets || []) : (config.rules || []);
+    if (!list.length) {
+      $("tbody").innerHTML = `<tr><td colspan="${isService() ? 6 : 8}" class="status">还没有规则，点击“新增规则”。</td></tr>`;
+    } else {
+      $("tbody").innerHTML = list.map(rowHtml).join("");
+    }
+
+    const runtime = isService()
+      ? { role: state.role, peer: state.peer, config_path: state.config_path, targets: state.targets, last_error: state.last_error }
+      : { role: state.role, peer: state.peer, config_path: state.config_path, rules: state.rules, listeners: state.listeners, last_error: state.last_error };
+    $("runtime").textContent = JSON.stringify(runtime, null, 2);
+    if (state.last_error) setStatus(state.last_error, "error");
+  }
+
+  function value(row, field) {
+    const input = row.querySelector(`[data-field="${field}"]`);
+    return input ? input.value.trim() : "";
+  }
+
+  function checked(row, field) {
+    const input = row.querySelector(`[data-field="${field}"]`);
+    return !!(input && input.checked);
+  }
+
+  function collect() {
+    const rows = [...$("tbody").querySelectorAll("tr[data-index]")];
+    if (isService()) {
+      config.forward_targets = rows.map((row) => ({
+        id: value(row, "id"),
+        name: value(row, "name"),
+        target: value(row, "target"),
+        enabled: checked(row, "enabled"),
+        allowed_peers: value(row, "allowed_peers").split(",").map((entry) => entry.trim()).filter(Boolean),
+      }));
+    } else {
+      config.rules = rows.map((row) => ({
+        id: value(row, "id"),
+        name: value(row, "name"),
+        peer_node_id: value(row, "peer_node_id") || state.peer,
+        listen: value(row, "listen"),
+        target: value(row, "target"),
+        enabled: checked(row, "enabled"),
+        auto_start: checked(row, "auto_start"),
+      }));
+    }
+    return config;
+  }
+
+  async function load() {
+    const [status, configResponse] = await Promise.all([
+      api("/api/v1/status"),
+      api("/api/v1/config"),
+    ]);
+    state = status;
+    config = configResponse.config;
+    $("auth").hidden = true;
+    $("app").hidden = false;
+    setStatus("");
+    render();
+  }
+
+  async function connect() {
+    const input = $("token").value.trim();
+    if (!input) {
+      setAuthError("请输入管理 token");
+      return;
+    }
+    token = input;
+    try {
+      await load();
+      sessionStorage.setItem(TOKEN_KEY, token);
+      setAuthError("");
+    } catch (error) {
+      token = "";
+      sessionStorage.removeItem(TOKEN_KEY);
+      setAuthError(error.message || "连接失败");
+    }
+  }
+
+  $("connect").addEventListener("click", connect);
+  $("token").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") connect();
+  });
+
+  $("add").addEventListener("click", () => {
+    const id = `rule-${Date.now().toString(36)}`;
+    if (isService()) {
+      config.forward_targets.push({
+        id,
+        name: "新目标",
+        target: "127.0.0.1:8080",
+        enabled: true,
+        allowed_peers: state.peer ? [state.peer] : [],
+      });
+    } else {
+      config.rules.push({
+        id,
+        name: "新规则",
+        peer_node_id: state.peer,
+        listen: "127.0.0.1:8080",
+        target: "127.0.0.1:8080",
+        enabled: true,
+        auto_start: true,
+      });
+    }
+    render();
+    setStatus("已新增一行，修改后点击“保存并应用”", "");
+  });
+
+  $("tbody").addEventListener("click", (event) => {
+    const button = event.target.closest('[data-action="delete"]');
+    if (!button) return;
+    const row = button.closest("tr[data-index]");
+    const index = Number(row && row.dataset.index);
+    const list = isService() ? config.forward_targets : config.rules;
+    if (Number.isInteger(index) && index >= 0) {
+      list.splice(index, 1);
+      render();
+      setStatus("已删除一行，点击“保存并应用”写入文件", "");
+    }
+  });
+
+  $("save").addEventListener("click", async () => {
+    setStatus("正在保存并应用…");
+    try {
+      await api("/api/v1/config", { method: "PUT", body: JSON.stringify(collect()) });
+      await load();
+      setStatus("已保存并应用", "ok");
+    } catch (error) {
+      showError(error);
+    }
+  });
+
+  $("reload").addEventListener("click", async () => {
+    setStatus("正在从文件重载…");
+    try {
+      await api("/api/v1/reload", { method: "POST" });
+      await load();
+      setStatus("已从文件重载", "ok");
+    } catch (error) {
+      showError(error);
+    }
+  });
+
+  $("logout").addEventListener("click", () => {
+    token = "";
+    state = null;
+    config = null;
+    sessionStorage.removeItem(TOKEN_KEY);
+    $("app").hidden = true;
+    $("auth").hidden = false;
+    $("token").value = "";
+    setAuthError("");
+  });
+
+  if (token) {
+    load().catch((error) => {
+      token = "";
+      sessionStorage.removeItem(TOKEN_KEY);
+      setAuthError(error.message || "连接失败");
+    });
+  }
+})();
+</script>
+</body>
+</html>

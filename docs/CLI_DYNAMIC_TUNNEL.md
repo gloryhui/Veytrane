@@ -149,6 +149,13 @@ p2p_file rules --client ~/.config/p2p_file/client.json
 未指定 `--service` / `--client` 时按 JSON 顶层字段自动识别。命令成功退出码为 0，
 非法文件、重复 ID、非 loopback 监听、无效 NodeId 等会以非零退出并打印原因。
 
+也可以不手改 JSON，启动仅监听 loopback 的 [Web 管理页](WEB_ADMIN.md)：
+
+```bash
+p2p_file serve ... --config /etc/p2p_file/service.json --admin-listen 127.0.0.1:7788
+p2p_file forward ... --config ~/.config/p2p_file/client.json --admin-listen 127.0.0.1:7789
+```
+
 ## 4. 空闲后重连
 
 原来的 Direct-only 重连复用首次配对的 token、候选地址和探测观测。服务端在
@@ -176,6 +183,7 @@ no authenticated path: ... authenticated path timeout
 | --- | --- |
 | `src/tunnel/rules.rs` | 桌面/CLI 共用 `AllowedForwardTarget`、`TunnelRule`、配置校验、`ServePolicy` 原子快照 |
 | `src/tunnel/supervisor.rs` | `SharedSession` 与多监听 `RuleSupervisor`，支持运行时增删/改目标 |
+| `src/admin/` | loopback Web 管理页、token/Host/Origin 校验、API 与原子持久化 |
 | `src/tunnel/mod.rs` | Direct-only 重连、服务端动态 `PeerCandidates`、按 peer 校验目标 |
 | `src/desktop/config.rs` | 重新导出共用规则类型，settings.json 字段名保持不变 |
 | `src/cli.rs` / `src/main.rs` | `serve --config`、`forward --config`、SIGHUP 热加载入口 |

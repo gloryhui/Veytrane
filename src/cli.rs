@@ -50,6 +50,18 @@ fn parse_speedtest_block_size(raw: &str) -> std::result::Result<u32, String> {
     Ok(value)
 }
 
+fn parse_admin_listen(raw: &str) -> std::result::Result<SocketAddr, String> {
+    let address: SocketAddr = raw
+        .parse()
+        .map_err(|_| format!("Web 管理监听地址必须是 IP:端口，收到 {raw}"))?;
+    if !address.ip().is_loopback() {
+        return Err(format!(
+            "Web 管理只能监听 loopback（127.0.0.1 或 ::1），收到 {address}；远程访问请用 SSH 隧道"
+        ));
+    }
+    Ok(address)
+}
+
 /// 点对点文件传输。
 ///
 /// 目标是在公网上把文件直接发给对方：STUN 探出各自的公网映射，双方同时
@@ -126,6 +138,17 @@ pub struct DirectOpts {
     /// 打洞重试次数
     #[arg(long, default_value_t = 30, value_name = "N")]
     pub punch_attempts: u32,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct AdminOpts {
+    /// 本机 Web 管理页监听地址（仅允许 loopback；默认关闭）
+    #[arg(long, value_name = "ADDR", value_parser = parse_admin_listen)]
+    pub admin_listen: Option<SocketAddr>,
+
+    /// 管理 token 文件（默认与配置文件同目录）
+    #[arg(long, requires = "admin_listen", value_name = "FILE")]
+    pub admin_token_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -216,6 +239,9 @@ pub enum Command {
         #[command(flatten)]
         direct: DirectOpts,
 
+        #[command(flatten)]
+        admin: AdminOpts,
+
         /// 只允许这个节点连进来（本机 `id` 或对方 `id` 的输出），可重复指定
         #[arg(long = "allow", value_name = "NODE_ID")]
         allow: Vec<NodeId>,
@@ -263,6 +289,9 @@ pub enum Command {
     Forward {
         #[command(flatten)]
         direct: DirectOpts,
+
+        #[command(flatten)]
+        admin: AdminOpts,
 
         /// 本机转发规则文件（JSON）
         #[arg(long, value_name = "FILE")]
@@ -706,9 +735,11 @@ mod tests {
                 recv_dir,
                 re_punch_after,
                 config,
+                admin,
             } => {
                 assert_eq!(re_punch_after, 60);
                 assert_eq!(config, None);
+                assert_eq!(admin.admin_listen, None);
                 assert_eq!(direct.signal, "1.2.3.4:7000");
                 assert_eq!(direct.port, 9100);
                 assert_eq!(allow.len(), 1);
@@ -766,12 +797,64 @@ mod tests {
             "/etc/p2p_file/client.json",
         ]);
         match cli.command {
-            Command::Forward { direct, config } => {
+            Command::Forward { direct, config, .. } => {
                 assert_eq!(direct.signal, "1.2.3.4:7000");
                 assert_eq!(config, PathBuf::from("/etc/p2p_file/client.json"));
             }
             other => panic!("解析结果不对: {other:?}"),
         }
+    }
+
+    #[test]
+    fn 解析_forward_web_管理参数() {
+        let cli = Cli::parse_from([
+            "p2p_file",
+            "forward",
+            "--signal",
+            "1.2.3.4:7000",
+            "--config",
+            "/etc/p2p_file/client.json",
+            "--admin-listen",
+            "127.0.0.1:7789",
+            "--admin-token-file",
+            "/etc/p2p_file/admin.token",
+        ]);
+        match cli.command {
+            Command::Forward { admin, .. } => {
+                assert_eq!(admin.admin_listen, Some("127.0.0.1:7789".parse().unwrap()));
+                assert_eq!(
+                    admin.admin_token_file,
+                    Some(PathBuf::from("/etc/p2p_file/admin.token"))
+                );
+            }
+            other => panic!("解析结果不对: {other:?}"),
+        }
+        assert!(
+            Cli::try_parse_from([
+                "p2p_file",
+                "forward",
+                "--signal",
+                "1.2.3.4:7000",
+                "--config",
+                "/etc/p2p_file/client.json",
+                "--admin-listen",
+                "0.0.0.0:7789",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "p2p_file",
+                "forward",
+                "--signal",
+                "1.2.3.4:7000",
+                "--config",
+                "/etc/p2p_file/client.json",
+                "--admin-token-file",
+                "/etc/p2p_file/admin.token",
+            ])
+            .is_err()
+        );
     }
 
     #[test]

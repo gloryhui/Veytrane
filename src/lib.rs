@@ -12,6 +12,7 @@
 //! - [`tunnel`]     TCP-over-QUIC 端口转发
 //! - [`storage`]    落盘与续传状态
 
+pub mod admin;
 pub mod cli;
 pub mod discovery;
 pub mod error;
