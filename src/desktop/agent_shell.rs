@@ -111,6 +111,7 @@ struct AgentShell {
     connection_note: SharedString,
     busy: bool,
     active_request: Option<String>,
+    child_exit: Option<Receiver<std::io::Result<std::process::ExitStatus>>>,
     dirty: bool,
     pending: Option<(Request, Kind)>,
 }
@@ -137,6 +138,7 @@ impl AgentShell {
             connection_note: "正在附着后台节点…".into(),
             busy: false,
             active_request: None,
+            child_exit: None,
             dirty: false,
             pending: None,
         };
@@ -147,6 +149,10 @@ impl AgentShell {
                     .update(cx, |shell, cx| {
                         while let Ok(update) = shell.worker.receive.try_recv() {
                             shell.receive(update, cx);
+                        }
+                        if let Some(receiver)=&shell.child_exit && let Ok(result)=receiver.try_recv(){
+                            shell.message=match result{Ok(status) if status.success()=>"后台节点已退出。".into(),Ok(status)=>format!("后台节点启动或运行失败（{status}）；请检查旧身份迁移和节点配置，未自动替换身份。").into(),Err(error)=>format!("无法取得后台进程结果：{error}").into()};
+                            shell.child_exit=None;
                         }
                         cx.notify();
                     })
@@ -226,6 +232,9 @@ impl AgentShell {
             Kind::Status => {
                 self.state = value;
                 self.connection_note = "已附着同一后台节点".into();
+                if self.draft.is_none() && !self.busy {
+                    self.send(Command::Config, Kind::Config, cx);
+                }
             }
             Kind::Tasks => {
                 self.tasks = value["tasks"].as_array().cloned().unwrap_or_default();
@@ -449,9 +458,10 @@ impl Render for AgentShell {
             .child(div().text_2xl().child("P2P File · 节点管理"))
             .child(self.connection_note.clone())
             .child(div().text_sm().child(format!(
-                "本机：{} · 信令：{} · 草稿 revision {}{}",
+                "本机：{} · 信令：{} · 有效 revision {} · 草稿 revision {}{}",
                 self.state["node"]["node_id"].as_str().unwrap_or("未连接"),
                 self.state["node"]["signal"].as_str().unwrap_or("未知"),
+                self.state["revision"].as_u64().unwrap_or(self.revision),
                 self.revision,
                 if self.dirty {
                     " · 有未保存草稿"
@@ -471,7 +481,8 @@ impl Render for AgentShell {
                                     return;
                                 }
                                 match start_agent(&shell.paths, true) {
-                                    Ok(()) => {
+                                    Ok(receiver) => {
+                                        shell.child_exit = Some(receiver);
                                         shell.message = "已请求启动；等待身份锁与IPC就绪。".into()
                                     }
                                     Err(e) => shell.message = e.to_string().into(),
@@ -845,7 +856,10 @@ impl Render for AgentShell {
         root.child(files)
     }
 }
-pub(crate) fn start_agent(paths: &AgentPaths, initialize: bool) -> std::io::Result<()> {
+pub(crate) fn start_agent(
+    paths: &AgentPaths,
+    initialize: bool,
+) -> std::io::Result<Receiver<std::io::Result<std::process::ExitStatus>>> {
     let executable = std::env::current_exe()?.with_file_name(if cfg!(windows) {
         "p2p-agent.exe"
     } else {
@@ -866,10 +880,11 @@ pub(crate) fn start_agent(paths: &AgentPaths, initialize: bool) -> std::io::Resu
         command.creation_flags(0x08000000);
     }
     let mut child = command.spawn()?;
+    let (send, receive) = mpsc::channel();
     std::thread::spawn(move || {
-        let _ = child.wait();
+        let _ = send.send(child.wait());
     });
-    Ok(())
+    Ok(receive)
 }
 pub fn run(root: PathBuf, background: bool) {
     let paths = match AgentPaths::new(&root) {
