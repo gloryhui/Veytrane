@@ -74,14 +74,14 @@ pub struct PartialDownload {
 // CLI continues to use its existing ambient directory and publication behavior.
 struct DownloadDirectory {
     path: PathBuf,
-    #[cfg(feature = "gui")]
+    #[cfg(feature = "node")]
     capability: Option<std::sync::Arc<cap_std::fs::Dir>>,
 }
 impl DownloadDirectory {
     fn open_part(&self, path: &Path) -> Result<File> {
-        #[cfg(feature = "gui")]
+        #[cfg(feature = "node")]
         if let Some(dir) = &self.capability {
-            return crate::desktop::secure_fs::open(
+            return crate::node::secure_fs::open(
                 dir,
                 path.file_name().unwrap().to_str().unwrap(),
                 true,
@@ -96,9 +96,9 @@ impl DownloadDirectory {
             .open(path)?)
     }
     fn open_existing_part(&self, path: &Path) -> Result<Option<File>> {
-        #[cfg(feature = "gui")]
+        #[cfg(feature = "node")]
         if let Some(dir) = &self.capability {
-            return match crate::desktop::secure_fs::open(
+            return match crate::node::secure_fs::open(
                 dir,
                 path.file_name().unwrap().to_str().unwrap(),
                 true,
@@ -116,10 +116,10 @@ impl DownloadDirectory {
         }
     }
     fn load(&self, path: &Path, chunks: u32) -> Result<(ChunkBitmap, bool)> {
-        #[cfg(feature = "gui")]
+        #[cfg(feature = "node")]
         if let Some(dir) = &self.capability {
             let name = path.file_name().unwrap().to_str().unwrap();
-            return match crate::desktop::secure_fs::open(dir, name, false, false) {
+            return match crate::node::secure_fs::open(dir, name, false, false) {
                 Ok(file) => {
                     let mut bytes = Vec::new();
                     file.take(u64::from(chunks.div_ceil(8)) + 1)
@@ -138,7 +138,7 @@ impl DownloadDirectory {
         load_bitmap(path, chunks)
     }
     fn save(&self, path: &Path, bitmap: &ChunkBitmap) -> Result<()> {
-        #[cfg(feature = "gui")]
+        #[cfg(feature = "node")]
         if let Some(dir) = &self.capability {
             use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
             let name = path.file_name().unwrap().to_str().unwrap();
@@ -153,7 +153,7 @@ impl DownloadDirectory {
             file.sync_all()?;
             drop(file);
             dir.rename(&temp, dir, name)?;
-            return crate::desktop::secure_fs::sync(dir);
+            return crate::node::secure_fs::sync(dir);
         }
         save_bitmap(path, bitmap)
     }
@@ -200,7 +200,7 @@ impl PartialDownload {
         Self::create_in(
             DownloadDirectory {
                 path: dir.to_path_buf(),
-                #[cfg(feature = "gui")]
+                #[cfg(feature = "node")]
                 capability: None,
             },
             manifest,
@@ -208,7 +208,7 @@ impl PartialDownload {
         )
     }
 
-    #[cfg(all(feature = "gui", test))]
+    #[cfg(all(feature = "node", test))]
     pub(crate) fn create_desktop(
         path: &Path,
         dir: std::sync::Arc<cap_std::fs::Dir>,
@@ -224,7 +224,7 @@ impl PartialDownload {
         )
     }
 
-    #[cfg(feature = "gui")]
+    #[cfg(feature = "node")]
     pub(crate) fn create_desktop_with_admission<T>(
         path: &Path,
         dir: std::sync::Arc<cap_std::fs::Dir>,
@@ -260,7 +260,7 @@ impl PartialDownload {
         let target_path = Self::target_path_for(dir, &manifest);
         let temp_path = Self::temp_path_for(dir, &manifest);
         let state_path = Self::state_path_for(dir, &manifest);
-        #[cfg(feature = "gui")]
+        #[cfg(feature = "node")]
         let (temp_path, state_path) = if let Some(capability) = &directory.capability {
             // Preserve T006 staging on recovery. New tasks use fixed internal names,
             // so a portable 255-byte source name does not exceed filesystem limits.
@@ -482,12 +482,12 @@ impl PartialDownload {
 
     /// Desktop publication keeps the staged inode/bitmap until its durable receipt.
     /// The caller owns its task-specific directory and the no-replace publication.
-    #[cfg(feature = "gui")]
+    #[cfg(feature = "node")]
     pub(crate) fn desktop_directory(&self) -> Option<std::sync::Arc<cap_std::fs::Dir>> {
         self.directory.capability.clone()
     }
 
-    #[cfg(feature = "gui")]
+    #[cfg(feature = "node")]
     pub(crate) fn prepare_desktop_publication(&mut self) -> Result<PathBuf> {
         if !self.written_bitmap.is_complete() {
             return Err(Error::Protocol("下载尚未完整，不能发布".into()));

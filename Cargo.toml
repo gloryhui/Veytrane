@@ -22,6 +22,7 @@ node = [
     "dep:cap-fs-ext",
     "dep:unicode-normalization",
     "dep:rustix",
+    "dep:windows-sys",
 ]
 gui = [
     "node",
@@ -33,7 +34,6 @@ gui = [
     "dep:x11rb",
     "dep:objc2",
     "dep:objc2-app-kit",
-    "dep:windows-sys",
     "dep:notify-rust",
 ]
 

@@ -5,15 +5,15 @@
 
 ## 特性和依赖
 
-新增 `node` 特性（默认启用），包含 Argon2/HMAC/SHA2/getrandom、dirs、cap-std/cap-fs-ext、unicode-normalization 与 Unix rustix；`gui` 依赖 `node`，仅追加 GPUI、托盘、通知、原生窗口和界面字符串依赖。无 GUI 编译命令 `cargo check --locked --no-default-features --features node --all-targets`。既有纯 CLI 可通过 `--no-default-features` 构建。不得给 node 添加桌面反向依赖。
+新增 `node` 特性（默认启用），包含 Argon2/HMAC/SHA2/getrandom、dirs、cap-std/cap-fs-ext、unicode-normalization 、Unix rustix 与 Windows 文件系统接口 windows-sys；`gui` 依赖 `node`，仅追加 GPUI、托盘、通知、原生窗口和界面字符串依赖。无 GUI 编译命令 `cargo check --locked --no-default-features --features node --all-targets`。既有纯 CLI 可通过 `--no-default-features` 构建。不得给 node 添加桌面反向依赖。
 
 ## 分批精确清单
 
 | 任务 | 移动 desktop → node 的模块 | 必要适配 |
 | --- | --- | --- |
 | T12 | config、remote_auth、trusted_devices、protocol、task_model、task_store、task_recovery、task_events、bandwidth、instance_lock（任务库存储锁的直接依赖） | 新建 preferences 保存 BackgroundOptions；新建 receive_policy 保存安全余量默认及校验，旧 background/space_budget 重导出。protocol 与 task_model 有实际相互类型依赖，先一并迁移，保留线格式。Cargo、lib.rs、desktop/mod.rs 特性与重导出 |
-| T13 | activity、auto_resume、drop_send、files、frame_budget、incremental、publish、queue、secure_fs、space_budget、speed、transfer_files、transfer、task_details、ui_model | ui_model 是无图形依赖的领域投影，改为 node/snapshot.rs 并以 ui_model 别名过渡；network_state 纯模型一并迁移以满足投影依赖。修正测试 worker 字符串路径，不重新生成夹具 |
-| T14 | session、tunnel、diagnostics | 全部使用 node 内领域类型；instance_lock 已在 T12 随任务库迁移；原 DesktopSessionConfig/Handle 名作为兼容别名，新增 NodeSessionConfig/Handle 作为正式名 |
+| T13 | activity、auto_resume、drop_send、files、frame_budget、incremental、publish、queue、secure_fs、space_budget、speed、transfer_files、transfer、task_details、ui_model | ui_model 是无图形依赖的领域投影，改为 node/snapshot.rs 并以 ui_model 别名过渡；network_state 纯模型一并迁移以满足投影依赖，tunnel 线格式适配器因文件分发直接调用也一并提前迁移。将 storage 中目录 capability 的 feature 门槛及引用由 gui 改为 node；windows-sys 文件系统依赖移入 node；修正测试 worker 字符串路径，不重新生成夹具 |
+| T14 | session、diagnostics（tunnel 已在 T13 随分发器迁移） | 全部使用 node 内领域类型；instance_lock 已在 T12 随任务库迁移；原 DesktopSessionConfig/Handle 名作为兼容别名，新增 NodeSessionConfig/Handle 作为正式名 |
 | T15 | 新建 node/control.rs；修改 desktop/mod.rs 的命令及事件入口 | 进程内控制宿主复用同一 session，不另启网络；不返回 Quinn/GPUI 对象 |
 
 旧 desktop 文件以 module 重导出适配，不能复制业务实现。UI、主题、布局、托盘、通知、autostart、background 窗口行为留在 desktop。允许模型的 crate 内可见性扩展供两边调用；不以抽取改变协议 magic、枚举序号、auth context、密码算法、schema、发布顺序、默认冲突策略。
