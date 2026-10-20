@@ -16,6 +16,8 @@
 
 查询：status、config（敏感字段只返回是否存在）、tasks、services(peer)、events(after)。变更：connect、disconnect、send/pause/resume/cancel、转发、资源授权、密码、配置应用及stop。配置应用必须带 expected_revision。IPC 管理权来自本地 OS 身份，peer 授权仍独立校验，不因管理权产生远程密码证明。
 
+任务查询每页128，offset默认0，返回total/next_offset；同时返回有界目录预览和测速快照。目录预览ID/peer由核心生成，peer投影为规范文本，必须显式ConfirmDirectory或CancelDirectory；不能由管理端篡改比较结果/路径后确认。预览缓存32条/300秒，失效仍由核心验证。StartSpeed/StopSpeed复用当前会话与能力协商，管理确认不等于测速完成。status附带最多32条、每条8192字符的核心诊断，不包含管理凭据。
+
 变更请求的 ID 在单次进程内最多缓存1024条/5分钟，相同 ID+相同规范命令返回相同响应，不重复执行；同ID不同命令拒绝；执行中的请求也必须保留去重记录。到期/重启的重试只能通过 revision、任务 ID 和状态确认，不承诺跨重启的任意命令 exactly-once。配置持久提交额外保存最后一次请求 ID/摘要，以识别同revision重试。超时区分未入队与结果未知，不能因为客户端断开回滚已提交结果。
 
 快照包含配置 revision 与事件 sequence，二者含义不同。事件环有界256条；游标过旧/进程 epoch 不同返回 resync_required 和新快照。文件进度通过任务快照查询；网络事件序号不能充当文件持久 checkpoint。IPC事件响应单批最多128条，不持无界推送队列。

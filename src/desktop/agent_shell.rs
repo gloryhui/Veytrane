@@ -54,7 +54,7 @@ impl ClientWorker {
                 for (command, kind) in [
                     (Command::Status, Kind::Status),
                     (Command::Config, Kind::Config),
-                    (Command::Tasks, Kind::Tasks),
+                    (Command::Tasks { offset: 0 }, Kind::Tasks),
                 ] {
                     if !perform(Job {
                         request: Request::new(command),
@@ -74,7 +74,7 @@ impl ClientWorker {
                         Err(mpsc::RecvTimeoutError::Timeout) => {
                             for (command, kind) in [
                                 (Command::Status, Kind::Status),
-                                (Command::Tasks, Kind::Tasks),
+                                (Command::Tasks { offset: 0 }, Kind::Tasks),
                             ] {
                                 if !perform(Job {
                                     request: Request::new(command),
@@ -103,6 +103,7 @@ struct AgentShell {
     signal: Entity<TextField>,
     state: Value,
     tasks: Vec<Value>,
+    previews: Vec<Value>,
     services: Vec<Value>,
     draft: Option<Value>,
     revision: u64,
@@ -128,6 +129,7 @@ impl AgentShell {
             signal: cx.new(|cx| TextField::new(cx, "信令地址，如signal.example:9000")),
             state: Value::Null,
             tasks: vec![],
+            previews: vec![],
             services: vec![],
             draft: None,
             revision: 0,
@@ -227,6 +229,10 @@ impl AgentShell {
             }
             Kind::Tasks => {
                 self.tasks = value["tasks"].as_array().cloned().unwrap_or_default();
+                self.previews = value["directory_previews"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
             }
             Kind::Config => {
                 self.revision = value["revision"].as_u64().unwrap_or(0);
@@ -392,7 +398,7 @@ impl AgentShell {
             cx,
         );
     }
-    fn choose_files(&mut self, cx: &mut Context<Self>) {
+    fn choose_files(&mut self, directory: bool, cx: &mut Context<Self>) {
         if self.busy {
             return;
         }
@@ -403,8 +409,8 @@ impl AgentShell {
             return;
         }
         let picked = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
+            files: !directory,
+            directories: directory,
             multiple: true,
             prompt: Some("选择发送文件".into()),
         });
@@ -443,7 +449,7 @@ impl Render for AgentShell {
             .child(div().text_2xl().child("P2P File · 节点管理"))
             .child(self.connection_note.clone())
             .child(div().text_sm().child(format!(
-                "本机：{} · 信令：{} · revision {}{}",
+                "本机：{} · 信令：{} · 草稿 revision {}{}",
                 self.state["node"]["node_id"].as_str().unwrap_or("未连接"),
                 self.state["node"]["signal"].as_str().unwrap_or("未知"),
                 self.revision,
@@ -755,8 +761,54 @@ impl Render for AgentShell {
             .child("文件任务（来自后台持久记录）")
             .child(
                 ui_components::primary_button("选择文件并发送给上述设备", enabled)
-                    .on_click(cx.listener(|s, _, _, cx| s.choose_files(cx))),
+                    .on_click(cx.listener(|s, _, _, cx| s.choose_files(false, cx))),
             );
+        files = files.child(
+            ui_components::primary_button("选择文件夹并预览", enabled)
+                .on_click(cx.listener(|s, _, _, cx| s.choose_files(true, cx))),
+        );
+        for preview in &self.previews {
+            let request = preview["id"].as_str().unwrap_or("").to_owned();
+            let cancel = request.clone();
+            let peer = preview["peer"].as_str().unwrap_or("").to_owned();
+            // Peer is projected as canonical text by the Agent DTO.
+            files = files.child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .items_center()
+                    .child(format!(
+                        "目录预览：新增{}，变化{}，不变{}，待传{}字节",
+                        preview["added"],
+                        preview["changed"],
+                        preview["unchanged"],
+                        preview["transfer_bytes"]
+                    ))
+                    .child(
+                        ui_components::primary_button(format!("确认目录 {request}"), enabled)
+                            .on_click(cx.listener(move |s, _, _, cx| {
+                                if let Ok(request) = TaskId::parse(&request) {
+                                    s.send(
+                                        Command::ConfirmDirectory {
+                                            peer: peer.clone(),
+                                            request,
+                                        },
+                                        Kind::Action,
+                                        cx,
+                                    );
+                                }
+                            })),
+                    )
+                    .child(
+                        ui_components::primary_button(format!("取消预览 {cancel}"), enabled)
+                            .on_click(cx.listener(move |s, _, _, cx| {
+                                if let Ok(request) = TaskId::parse(&cancel) {
+                                    s.send(Command::CancelDirectory { request }, Kind::Action, cx);
+                                }
+                            })),
+                    ),
+            );
+        }
         for task in &self.tasks {
             let id = task["id"].as_str().unwrap_or("").to_owned();
             let peer = task["peer"].as_str().unwrap_or("").to_owned();

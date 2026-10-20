@@ -21,7 +21,7 @@ use std::{
 pub const COMPARE_TIMEOUT: Duration = Duration::from_secs(120);
 pub const PREVIEW_LIFETIME: Duration = Duration::from_secs(300);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct Preview {
     pub id: TaskId,
     pub peer: NodeId,

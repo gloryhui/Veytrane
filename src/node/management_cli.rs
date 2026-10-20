@@ -30,7 +30,10 @@ pub enum Action {
     },
     Status,
     Config,
-    Tasks,
+    Tasks {
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+    },
     Services {
         peer: String,
     },
@@ -55,6 +58,24 @@ pub enum Action {
         task: String,
     },
     Cancel {
+        task: String,
+    },
+    ConfirmDirectory {
+        peer: String,
+        request: String,
+    },
+    CancelDirectory {
+        request: String,
+    },
+    Speed {
+        peer: String,
+        #[arg(long, default_value_t = 30)]
+        seconds: u16,
+        #[arg(long)]
+        download: bool,
+    },
+    StopSpeed {
+        peer: String,
         task: String,
     },
     StartForward {
@@ -204,7 +225,7 @@ pub async fn run(args: Args) -> io::Result<Response> {
         }
         Action::Status => Command::Status,
         Action::Config => Command::Config,
-        Action::Tasks => Command::Tasks,
+        Action::Tasks { offset } => Command::Tasks { offset },
         Action::Services { peer } => Command::Services { peer },
         Action::Connect {
             peer,
@@ -233,6 +254,30 @@ pub async fn run(args: Args) -> io::Result<Response> {
             task: TaskId::parse(&task).map_err(io::Error::other)?,
         },
         Action::Cancel { task } => Command::Cancel {
+            task: TaskId::parse(&task).map_err(io::Error::other)?,
+        },
+        Action::ConfirmDirectory { peer, request } => Command::ConfirmDirectory {
+            peer,
+            request: TaskId::parse(&request).map_err(io::Error::other)?,
+        },
+        Action::CancelDirectory { request } => Command::CancelDirectory {
+            request: TaskId::parse(&request).map_err(io::Error::other)?,
+        },
+        Action::Speed {
+            peer,
+            seconds,
+            download,
+        } => Command::StartSpeed {
+            peer,
+            seconds,
+            direction: if download {
+                super::config::SpeedtestDirection::Download
+            } else {
+                super::config::SpeedtestDirection::Upload
+            },
+        },
+        Action::StopSpeed { peer, task } => Command::StopSpeed {
+            peer,
             task: TaskId::parse(&task).map_err(io::Error::other)?,
         },
         Action::StartForward { rule } => Command::StartForward { rule },

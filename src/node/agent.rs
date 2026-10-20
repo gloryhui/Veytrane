@@ -36,6 +36,8 @@ pub struct Agent {
     cache: Mutex<HashMap<String, Cached>>,
     pub(crate) mutations: Mutex<()>,
     workers: Mutex<JoinSet<()>>,
+    previews: Mutex<VecDeque<(Instant, super::incremental::Preview)>>,
+    diagnostics: Mutex<VecDeque<String>>,
     pub(crate) restart_pending: std::sync::atomic::AtomicBool,
     pub(crate) last_error: Mutex<Option<String>>,
     pub(crate) forwards: Mutex<super::agent_forward::ForwardManager>,
@@ -52,7 +54,7 @@ impl Agent {
         }
         match command {
             Command::Status => Ok(
-                json!({"restart_pending":self.restart_pending.load(std::sync::atomic::Ordering::Acquire),"budgets":{"peers":16,"pending_peers":8,"tcp_streams":256,"tcp_per_rule":32,"management_connections":32,"service_controls_per_peer":8},"data_dir":self.paths.root,"epoch":self.epoch,"revision":self.config.lock().await.revision,"node":self.control.snapshot().map_err(|e|e.to_string())?,"last_error":*self.last_error.lock().await,"forwards":self.forwards.lock().await.snapshot()}),
+                json!({"diagnostics":self.diagnostics.lock().await.clone(),"restart_pending":self.restart_pending.load(std::sync::atomic::Ordering::Acquire),"budgets":{"peers":16,"pending_peers":8,"tcp_streams":256,"tcp_per_rule":32,"management_connections":32,"service_controls_per_peer":8},"data_dir":self.paths.root,"epoch":self.epoch,"revision":self.config.lock().await.revision,"node":self.control.snapshot().map_err(|e|e.to_string())?,"last_error":*self.last_error.lock().await,"forwards":self.forwards.lock().await.snapshot()}),
             ),
             Command::Config => {
                 let record = self.config.lock().await;
@@ -60,10 +62,16 @@ impl Agent {
                     json!({"revision":record.revision,"settings":record.settings.redacted(),"password_configured":record.settings.remote_auth.is_some()}),
                 )
             }
-            Command::Tasks => {
+            Command::Tasks { offset } => {
                 let snapshot = self.control.task_snapshot().map_err(|e| e.to_string())?;
-                let tasks=snapshot.as_ref().map(|s| s.tasks.iter().take(128).map(|t|json!({"id":t.id,"peer":t.peer.to_hex(),"name":t.name,"state":t.state,"direction":t.direction,"total":t.total,"confirmed":t.confirmed,"rate":t.rate,"retryable":t.retryable})).collect::<Vec<_>>()).unwrap_or_default();
-                Ok(json!({"tasks":tasks,"truncated":snapshot.is_some_and(|s|s.tasks.len()>128)}))
+                let tasks=snapshot.as_ref().map(|s| s.tasks.iter().skip(offset).take(128).map(|t|json!({"id":t.id,"peer":t.peer.to_hex(),"name":t.name,"state":t.state,"direction":t.direction,"total":t.total,"confirmed":t.confirmed,"rate":t.rate,"retryable":t.retryable})).collect::<Vec<_>>()).unwrap_or_default();
+                let mut previews = self.previews.lock().await;
+                previews.retain(|(created, _)| created.elapsed() < Duration::from_secs(300));
+                let total = snapshot.as_ref().map_or(0, |s| s.tasks.len());
+                let speeds=snapshot.as_ref().map(|s|s.speeds.iter().map(|(peer,s)|json!({"peer":peer.to_hex(),"id":s.test_id,"direction":s.direction,"state":format!("{:?}",s.status),"bytes":s.bytes,"bytes_per_second":s.bytes_per_second,"elapsed_ms":s.elapsed.as_millis(),"rtt_ms":s.rtt.as_millis()})).collect::<Vec<_>>()).unwrap_or_default();
+                Ok(
+                    json!({"tasks":tasks,"offset":offset,"next_offset":if offset.saturating_add(128)<total{Some(offset.saturating_add(128))}else{None},"total":total,"truncated":offset.saturating_add(128)<total,"directory_previews":previews.iter().map(|(_,preview)|{let mut value=serde_json::to_value(preview).expect("preview DTO");value["peer"]=json!(preview.peer.to_hex());value}).collect::<Vec<_>>(),"speeds":speeds}),
+                )
             }
             Command::Events { epoch, after } => {
                 let journal = self.journal.lock().await;
@@ -137,6 +145,37 @@ impl Agent {
                     .await
                     .map_err(|e| e.to_string())?;
                 Ok(json!({"cancelled":true}))
+            }
+            Command::ConfirmDirectory { peer, request } => {
+                self.control.confirm_directory(
+                    NodeId::from_hex(&peer).map_err(|e| e.to_string())?,
+                    request.clone(),
+                )?;
+                self.previews.lock().await.retain(|(_, p)| p.id != request);
+                Ok(json!({"accepted":true}))
+            }
+            Command::CancelDirectory { request } => {
+                self.control.cancel_directory_preview(request.clone())?;
+                self.previews.lock().await.retain(|(_, p)| p.id != request);
+                Ok(json!({"accepted":true}))
+            }
+            Command::StartSpeed {
+                peer,
+                direction,
+                seconds,
+            } => {
+                super::config::validate_speedtest_seconds(seconds).map_err(|e| e.to_string())?;
+                self.control.start_speed(
+                    NodeId::from_hex(&peer).map_err(|e| e.to_string())?,
+                    direction,
+                    seconds,
+                )?;
+                Ok(json!({"accepted":true}))
+            }
+            Command::StopSpeed { peer, task } => {
+                self.control
+                    .cancel_speed(NodeId::from_hex(&peer).map_err(|e| e.to_string())?, task)?;
+                Ok(json!({"accepted":true}))
             }
             Command::StartForward { rule } => {
                 let record = self.config.lock().await;
@@ -394,6 +433,8 @@ pub async fn run(paths: AgentPaths) -> io::Result<()> {
         cache: Mutex::new(HashMap::new()),
         mutations: Mutex::new(()),
         workers: Mutex::new(JoinSet::new()),
+        previews: Mutex::new(VecDeque::new()),
+        diagnostics: Mutex::new(VecDeque::new()),
         restart_pending: std::sync::atomic::AtomicBool::new(false),
         last_error: Mutex::new(None),
         forwards: Mutex::new(super::agent_forward::ForwardManager::default()),
@@ -413,7 +454,12 @@ pub async fn run(paths: AgentPaths) -> io::Result<()> {
     let drain = tokio::spawn(async move {
         loop {
             tokio::select! {
-                raw=raw.recv()=>{if raw.is_none(){break;}},
+                raw=raw.recv()=>{match raw {
+                    Some(control::SessionEvent::DirectoryPreview(preview))=>{let mut previews=collector.previews.lock().await;previews.retain(|(_,p)|p.id!=preview.id);if previews.len()==32{previews.pop_front();}previews.push_back((Instant::now(),preview));},
+                    Some(control::SessionEvent::DirectoryPreviewFailed(id))=>collector.previews.lock().await.retain(|(_,p)|p.id!=id),
+                    Some(control::SessionEvent::Diagnostic(message))=>{let mut lines=collector.diagnostics.lock().await;if lines.len()==32{lines.pop_front();}lines.push_back(message.chars().take(8192).collect());},
+                    Some(_)=>{},None=>break,
+                }},
                 event=events.recv()=>{match event {
                     Ok(event)=>{let mut journal=collector.journal.lock().await;if journal.events.len()==256{journal.events.pop_front();}journal.events.push_back(event);},
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_))=>{let mut journal=collector.journal.lock().await;journal.events.clear();journal.floor=collector.control.snapshot().map(|s|s.sequence).unwrap_or(u64::MAX);},

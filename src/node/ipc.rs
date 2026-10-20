@@ -47,7 +47,10 @@ impl Request {
 pub enum Command {
     Status,
     Config,
-    Tasks,
+    Tasks {
+        #[serde(default)]
+        offset: usize,
+    },
     Events {
         epoch: String,
         after: u64,
@@ -74,6 +77,22 @@ pub enum Command {
         task: TaskId,
     },
     Cancel {
+        task: TaskId,
+    },
+    ConfirmDirectory {
+        peer: String,
+        request: TaskId,
+    },
+    CancelDirectory {
+        request: TaskId,
+    },
+    StartSpeed {
+        peer: String,
+        direction: super::config::SpeedtestDirection,
+        seconds: u16,
+    },
+    StopSpeed {
+        peer: String,
         task: TaskId,
     },
     StartForward {
@@ -106,7 +125,11 @@ impl Command {
     pub fn is_query(&self) -> bool {
         matches!(
             self,
-            Self::Status | Self::Config | Self::Tasks | Self::Events { .. } | Self::Services { .. }
+            Self::Status
+                | Self::Config
+                | Self::Tasks { .. }
+                | Self::Events { .. }
+                | Self::Services { .. }
         )
     }
 }
