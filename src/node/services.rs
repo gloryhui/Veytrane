@@ -1,0 +1,204 @@
+//! Authorized service discovery and ID-based TCP streams for node-v1.
+
+use std::net::SocketAddr;
+use std::time::Duration;
+
+use quinn::Connection;
+use tokio::sync::{mpsc, watch};
+use tokio::task::JoinSet;
+
+use super::authorization::ResourcePolicy;
+use super::config::AllowedForwardTarget;
+use super::dispatch::{self, BiStream};
+use super::remote_auth::LiveAuthorization;
+use super::wire::{self, NodeErrorCode, NodeFrame, NodeMessage, ServiceDescriptor, StreamKind};
+use crate::error::{Error, Result};
+use crate::identity::NodeId;
+
+const MAX_STREAMS: usize = 8;
+const RPC_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn visible(entry: &AllowedForwardTarget, peer: NodeId) -> bool {
+    entry.enabled
+        && entry
+            .allowed_peers
+            .iter()
+            .any(|id| NodeId::from_hex(id).ok() == Some(peer))
+}
+fn target_for(targets: &[AllowedForwardTarget], peer: NodeId, id: &str) -> Option<SocketAddr> {
+    targets
+        .iter()
+        .find(|entry| entry.id == id && visible(entry, peer))
+        .map(|entry| entry.target)
+}
+
+pub async fn serve(
+    peer: NodeId,
+    authorization: LiveAuthorization,
+    targets: watch::Receiver<Vec<AllowedForwardTarget>>,
+    resources: watch::Receiver<ResourcePolicy>,
+    mut incoming: mpsc::Receiver<BiStream>,
+) -> Result<()> {
+    let mut streams = JoinSet::new();
+    loop {
+        tokio::select! {
+            stream = incoming.recv() => {
+                let Some(mut stream) = stream else { break };
+                if streams.len() >= MAX_STREAMS {
+                    let _ = stream.send.reset(dispatch::RESET_BUSY.into());
+                    let _ = stream.recv.stop(dispatch::RESET_BUSY.into());
+                    continue;
+                }
+                let authorization = authorization.clone();
+                let targets = targets.clone();
+                let resources = resources.clone();
+                streams.spawn(async move {
+                    authorization.guard(true, handle(peer, &targets, &resources, stream)).await
+                });
+            }
+            _ = streams.join_next(), if !streams.is_empty() => {}
+        }
+    }
+    streams.abort_all();
+    while streams.join_next().await.is_some() {}
+    Ok(())
+}
+
+async fn reply(stream: &mut BiStream, id: u64, message: NodeMessage) -> Result<()> {
+    wire::write(&mut stream.send, &NodeFrame::new(id, message)).await
+}
+async fn reject(stream: &mut BiStream, id: u64, code: NodeErrorCode) -> Result<()> {
+    reply(stream, id, NodeMessage::Error { code }).await?;
+    let _ = stream.send.finish();
+    Ok(())
+}
+
+async fn handle(
+    peer: NodeId,
+    targets: &watch::Receiver<Vec<AllowedForwardTarget>>,
+    resources: &watch::Receiver<ResourcePolicy>,
+    mut stream: BiStream,
+) -> Result<()> {
+    let prepared =
+        tokio::time::timeout(RPC_TIMEOUT, prepare(peer, targets, resources, &mut stream)).await;
+    match prepared {
+        Ok(Ok(Some(tcp))) => crate::tunnel::bridge_tcp(tcp, stream.send, stream.recv).await,
+        Ok(Ok(None)) => Ok(()),
+        Ok(Err(error)) => Err(error),
+        Err(_) => {
+            let _ = stream.send.reset(dispatch::RESET_INVALID.into());
+            let _ = stream.recv.stop(dispatch::RESET_INVALID.into());
+            Err(Error::Protocol("节点服务控制阶段超时".into()))
+        }
+    }
+}
+
+async fn prepare(
+    peer: NodeId,
+    targets: &watch::Receiver<Vec<AllowedForwardTarget>>,
+    resources: &watch::Receiver<ResourcePolicy>,
+    stream: &mut BiStream,
+) -> Result<Option<tokio::net::TcpStream>> {
+    let request = tokio::time::timeout(Duration::from_secs(5), wire::read(&mut stream.recv))
+        .await
+        .map_err(|_| Error::Protocol("服务请求首帧超时".into()))??;
+    let id = request.request_id;
+    if id == 0 {
+        return Err(Error::Protocol("服务请求必须使用非零请求号".into()));
+    }
+    if resources.borrow().for_peer(peer).disabled {
+        return reject(stream, id, NodeErrorCode::Unauthorized)
+            .await
+            .map(|_| None);
+    }
+    match request.message {
+        NodeMessage::Services => {
+            let entries = targets
+                .borrow()
+                .iter()
+                .filter(|entry| visible(entry, peer))
+                .take(wire::MAX_SERVICES + 1)
+                .map(|entry| ServiceDescriptor {
+                    id: entry.id.clone(),
+                    name: entry.name.clone(),
+                })
+                .collect::<Vec<_>>();
+            if entries.len() > wire::MAX_SERVICES {
+                return reject(stream, id, NodeErrorCode::Busy).await.map(|_| None);
+            }
+            reply(stream, id, NodeMessage::ServiceList { services: entries }).await?;
+            let _ = stream.send.finish();
+            Ok(None)
+        }
+        NodeMessage::OpenTcp { service_id } => {
+            let target = target_for(&targets.borrow(), peer, &service_id);
+            let Some(target) = target else {
+                return reject(stream, id, NodeErrorCode::UnknownService)
+                    .await
+                    .map(|_| None);
+            };
+            let tcp = match crate::tunnel::connect_allowed_target(target, &[target]).await {
+                Ok(tcp) => tcp,
+                Err(_) => {
+                    return reject(stream, id, NodeErrorCode::TargetUnavailable)
+                        .await
+                        .map(|_| None);
+                }
+            };
+            if resources.borrow().for_peer(peer).disabled
+                || target_for(&targets.borrow(), peer, &service_id) != Some(target)
+            {
+                return reject(stream, id, NodeErrorCode::UnknownService)
+                    .await
+                    .map(|_| None);
+            }
+            reply(stream, id, NodeMessage::TcpReady).await?;
+            Ok(Some(tcp))
+        }
+        _ => reject(stream, id, NodeErrorCode::InvalidRequest)
+            .await
+            .map(|_| None),
+    }
+}
+
+async fn request(connection: &Connection, message: NodeMessage) -> Result<(BiStream, NodeMessage)> {
+    tokio::time::timeout(RPC_TIMEOUT, async {
+        let id = rand::random::<u64>().max(1);
+        let mut stream = dispatch::open_bi(connection, StreamKind::Service, true).await?;
+        wire::write(&mut stream.send, &NodeFrame::new(id, message)).await?;
+        let response = wire::read(&mut stream.recv).await?;
+        if response.request_id != id {
+            return Err(Error::Protocol("服务响应请求号不匹配".into()));
+        }
+        match response.message {
+            NodeMessage::Error { code } => Err(Error::Protocol(code.message().into())),
+            message => Ok((stream, message)),
+        }
+    })
+    .await
+    .map_err(|_| Error::Transport("节点服务请求超时".into()))?
+}
+
+pub async fn list(connection: &Connection) -> Result<Vec<ServiceDescriptor>> {
+    let (mut stream, reply) = request(connection, NodeMessage::Services).await?;
+    let _ = stream.send.finish();
+    match reply {
+        NodeMessage::ServiceList { services } => Ok(services),
+        _ => Err(Error::Protocol("服务目录响应类型无效".into())),
+    }
+}
+
+pub async fn open_tcp(connection: &Connection, service_id: &str) -> Result<BiStream> {
+    wire::validate_service_id(service_id)?;
+    let (stream, reply) = request(
+        connection,
+        NodeMessage::OpenTcp {
+            service_id: service_id.into(),
+        },
+    )
+    .await?;
+    match reply {
+        NodeMessage::TcpReady => Ok(stream),
+        _ => Err(Error::Protocol("服务开流响应类型无效".into())),
+    }
+}
