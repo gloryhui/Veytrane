@@ -35,3 +35,5 @@ pub(crate) mod transfer;
 pub(crate) mod transfer_files;
 pub(crate) mod tunnel;
 pub(crate) use snapshot as ui_model;
+pub(crate) mod diagnostics;
+pub(crate) mod session;

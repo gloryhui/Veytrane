@@ -266,7 +266,7 @@ fn relay_optional_server_validation_does_not_resolve_dns() {
     }
 }
 
-#[cfg(feature = "gui")]
+#[cfg(feature = "node")]
 pub(crate) async fn signaling_fixture() -> (
     SocketAddr,
     SocketAddr,

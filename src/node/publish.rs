@@ -848,7 +848,7 @@ mod tests {
                 std::process::Command::new(std::env::current_exe().unwrap())
                     .args([
                         "--exact",
-                        "desktop::publish::tests::publication_process_entry",
+                        "node::publish::tests::publication_process_entry",
                         "--nocapture",
                     ])
                     .env("P2P_PUBLICATION_KILL_ROOT", &root)
