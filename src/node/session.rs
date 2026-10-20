@@ -259,6 +259,13 @@ impl Drop for SessionLifetime {
 }
 
 impl NodeSessionHandle {
+    /// Internal listener demand; unlike an explicit user connect this does not
+    /// clear manual disconnect fences or invent a credential.
+    pub(crate) fn request_peer_connection(&self, peer: NodeId) -> std::result::Result<(), String> {
+        self.commands
+            .try_send(SessionCommand::ConnectPeer(peer))
+            .map_err(|_| "重连请求队列已满或节点已停止".into())
+    }
     pub(crate) async fn connection_updates(
         &self,
         peer: NodeId,

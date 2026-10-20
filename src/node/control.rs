@@ -32,6 +32,7 @@ pub struct PeerSnapshot {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct NodeSnapshot {
+    pub configuration_revision: u64,
     pub sequence: u64,
     pub node_id: String,
     pub signal: String,
@@ -339,6 +340,23 @@ pub enum NodeCommand {
 }
 
 impl NodeControl {
+    pub(crate) fn configuration_committed(&self, revision: u64) -> Result<()> {
+        let mut snapshot = self
+            .control
+            .snapshot
+            .lock()
+            .map_err(|_| Error::Protocol("节点快照锁不可用".into()))?;
+        snapshot.configuration_revision = revision;
+        snapshot.sequence = snapshot
+            .sequence
+            .checked_add(1)
+            .ok_or_else(|| Error::Protocol("事件序号耗尽".into()))?;
+        let _ = self.control.events.send(SequencedEvent {
+            sequence: snapshot.sequence,
+            event: NodeEvent::Changed,
+        });
+        Ok(())
+    }
     pub fn snapshot(&self) -> Result<NodeSnapshot> {
         self.control.subscribe().map(|(s, _)| s)
     }

@@ -149,6 +149,12 @@ impl Agent {
             forwards.commit(prepared)
         };
         *current = record;
+        if let Err(error) = self.control.configuration_committed(current.revision) {
+            self.control.shutdown();
+            return Err(format!(
+                "recovery_required: 配置已提交但快照不可用：{error}"
+            ));
+        }
         *self.last_error.lock().await = outcome.durability_warning.clone();
         let result = json!({"revision":current.revision,"durability_warning":outcome.durability_warning,"restart_required":options.restart});
         drop(forwards);

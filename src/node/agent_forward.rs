@@ -14,6 +14,8 @@ use tokio::{
 
 #[derive(Clone)]
 struct Route {
+    control: NodeControl,
+    peer: NodeId,
     connection: watch::Receiver<Option<quinn::Connection>>,
     target: SocketAddr,
     service: Option<String>,
@@ -75,6 +77,8 @@ impl ForwardManager {
                 )
             };
             let route = Route {
+                control: control.clone(),
+                peer,
                 connection,
                 target: rule.target,
                 service,
@@ -109,6 +113,7 @@ impl ForwardManager {
         for (id, (listen, route)) in plan.desired {
             if let Some(old) = self.active.get(&id) {
                 old.route.send_replace(route);
+                *old.error.lock().unwrap() = None;
                 continue;
             }
             let listener = plan
@@ -161,7 +166,7 @@ impl ForwardManager {
         Ok(())
     }
     pub fn snapshot(&self) -> serde_json::Value {
-        serde_json::json!({"active_streams":self.owner.active(),"rules":self.active.iter().map(|(id,r)|serde_json::json!({"id":id,"listen":r.listen,"running":!r.task.is_finished(),"last_error":*r.error.lock().unwrap()})).collect::<Vec<_>>()})
+        serde_json::json!({"active_streams":self.owner.active(),"rules":self.active.iter().map(|(id,r)|serde_json::json!({"id":id,"listen":r.listen,"listening":!r.task.is_finished(),"peer_ready":r.route.borrow().connection.borrow().as_ref().is_some_and(|c|c.close_reason().is_none()),"last_error":*r.error.lock().unwrap()})).collect::<Vec<_>>()})
     }
     pub async fn shutdown(&mut self) {
         for (_, old) in self.active.drain() {
@@ -172,6 +177,17 @@ impl ForwardManager {
     }
 }
 async fn open(tcp: tokio::net::TcpStream, mut route: Route) -> Result<()> {
+    if route
+        .connection
+        .borrow()
+        .as_ref()
+        .is_none_or(|c| c.close_reason().is_some())
+    {
+        route
+            .control
+            .request_peer_connection(route.peer)
+            .map_err(Error::Protocol)?;
+    }
     let connection = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             if let Some(connection) = route
