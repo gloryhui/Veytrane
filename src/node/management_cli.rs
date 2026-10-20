@@ -77,6 +77,8 @@ pub enum Action {
         name: String,
     },
     Apply {
+        #[arg(long)]
+        restart: bool,
         file: PathBuf,
         #[arg(long)]
         revision: u64,
@@ -250,10 +252,23 @@ pub async fn run(args: Args) -> io::Result<Response> {
             generation,
             name,
         },
-        Action::Apply { file, revision } => Command::ApplyConfig {
-            expected_revision: revision,
-            settings: read_json(&file)?,
-        },
+        Action::Apply {
+            file,
+            revision,
+            restart,
+        } => {
+            if restart {
+                Command::ConfigureRestart {
+                    expected_revision: revision,
+                    settings: read_json(&file)?,
+                }
+            } else {
+                Command::ApplyConfig {
+                    expected_revision: revision,
+                    settings: read_json(&file)?,
+                }
+            }
+        }
         Action::Stop => Command::Stop,
     };
     AgentClient::new(paths).execute(command).await

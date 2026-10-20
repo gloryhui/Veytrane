@@ -36,14 +36,23 @@ pub struct Agent {
     cache: Mutex<HashMap<String, Cached>>,
     pub(crate) mutations: Mutex<()>,
     workers: Mutex<JoinSet<()>>,
+    pub(crate) restart_pending: std::sync::atomic::AtomicBool,
     pub(crate) last_error: Mutex<Option<String>>,
     pub(crate) forwards: Mutex<super::agent_forward::ForwardManager>,
 }
 impl Agent {
     async fn execute(&self, command: Command, id: &str, digest: &str) -> Result<Value, String> {
+        if self
+            .restart_pending
+            .load(std::sync::atomic::Ordering::Acquire)
+            && !command.is_query()
+            && !matches!(command, Command::Stop)
+        {
+            return Err("restart_required: 节点已提交重启配置，请停止后重新启动".into());
+        }
         match command {
             Command::Status => Ok(
-                json!({"budgets":{"peers":16,"pending_peers":8,"tcp_streams":256,"tcp_per_rule":32,"management_connections":32,"service_controls_per_peer":8},"data_dir":self.paths.root,"epoch":self.epoch,"revision":self.config.lock().await.revision,"node":self.control.snapshot().map_err(|e|e.to_string())?,"last_error":*self.last_error.lock().await,"forwards":self.forwards.lock().await.snapshot()}),
+                json!({"restart_pending":self.restart_pending.load(std::sync::atomic::Ordering::Acquire),"budgets":{"peers":16,"pending_peers":8,"tcp_streams":256,"tcp_per_rule":32,"management_connections":32,"service_controls_per_peer":8},"data_dir":self.paths.root,"epoch":self.epoch,"revision":self.config.lock().await.revision,"node":self.control.snapshot().map_err(|e|e.to_string())?,"last_error":*self.last_error.lock().await,"forwards":self.forwards.lock().await.snapshot()}),
             ),
             Command::Config => {
                 let record = self.config.lock().await;
@@ -164,7 +173,14 @@ impl Agent {
                 expected_revision,
                 settings,
             } => {
-                self.apply_settings(expected_revision, settings, id, digest)
+                self.apply_settings(expected_revision, settings, id, digest, false)
+                    .await
+            }
+            Command::ConfigureRestart {
+                expected_revision,
+                settings,
+            } => {
+                self.apply_settings(expected_revision, settings, id, digest, true)
                     .await
             }
             Command::TrustVerified {
@@ -197,7 +213,10 @@ impl Agent {
                     settings,
                     id,
                     digest,
-                    Some((peer, generation)),
+                    super::agent_state::CommitOptions {
+                        verified: Some((peer, generation)),
+                        restart: false,
+                    },
                 )
                 .await
             }
@@ -215,8 +234,15 @@ impl Agent {
                 let mut record = self.config.lock().await;
                 let mut settings = record.settings.clone();
                 settings.remote_auth = Some(verifier);
-                self.commit_settings(&mut record, expected_revision, settings, id, digest, None)
-                    .await
+                self.commit_settings(
+                    &mut record,
+                    expected_revision,
+                    settings,
+                    id,
+                    digest,
+                    Default::default(),
+                )
+                .await
             }
             Command::Stop => Ok(json!({"stopping":true})),
         }
@@ -368,6 +394,7 @@ pub async fn run(paths: AgentPaths) -> io::Result<()> {
         cache: Mutex::new(HashMap::new()),
         mutations: Mutex::new(()),
         workers: Mutex::new(JoinSet::new()),
+        restart_pending: std::sync::atomic::AtomicBool::new(false),
         last_error: Mutex::new(None),
         forwards: Mutex::new(super::agent_forward::ForwardManager::default()),
     });
@@ -428,7 +455,7 @@ pub async fn run(paths: AgentPaths) -> io::Result<()> {
                     let _permit=permit;
                     let request=tokio::time::timeout(Duration::from_secs(5),ipc::read::<Request>(&mut *stream)).await;
                     if let Ok(Ok(request))=request {
-                        let stopping=matches!(request.command,Command::Stop);
+                        let stopping=matches!(request.command,Command::Stop|Command::ConfigureRestart{..});
                         let response=agent.submit(request).await;
                         let success=response.error.is_none();
                         let _=tokio::time::timeout(Duration::from_secs(5),ipc::write(&mut *stream,&response)).await;

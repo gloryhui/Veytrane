@@ -274,14 +274,14 @@ impl NodeSessionHandle {
         &self,
         record: super::agent_config::ConfigRecord,
         path: std::path::PathBuf,
-        verified: Option<(NodeId, u64)>,
+        options: super::agent_state::CommitOptions,
     ) -> std::result::Result<crate::storage::atomic::WriteOutcome, String> {
         let (done, result) = oneshot::channel();
         self.commands
             .send(SessionCommand::CommitAgentPolicy {
                 record: Box::new(record),
                 path,
-                verified,
+                options,
                 done,
             })
             .await
@@ -746,7 +746,7 @@ enum SessionCommand {
     CommitAgentPolicy {
         record: Box<super::agent_config::ConfigRecord>,
         path: std::path::PathBuf,
-        verified: Option<(NodeId, u64)>,
+        options: super::agent_state::CommitOptions,
         done: oneshot::Sender<std::result::Result<crate::storage::atomic::WriteOutcome, String>>,
     },
     UpdateTunnelSettings {
@@ -1321,7 +1321,7 @@ async fn run_session(
             Wake::Command(Some(SessionCommand::CommitAgentPolicy {
                 record,
                 path,
-                verified,
+                options,
                 done,
             })) => {
                 // Bind preparation belongs to Agent. This actor is the single
@@ -1330,7 +1330,7 @@ async fn run_session(
                     let _ = done.send(Err(error.to_string()));
                     continue;
                 }
-                if let Some((peer, generation)) = verified {
+                if let Some((peer, generation)) = options.verified {
                     let valid = connections
                         .get(&peer)
                         .is_some_and(|(g, c)| *g == generation && c.close_reason().is_none())
@@ -1372,6 +1372,7 @@ async fn run_session(
                         let old = previous.for_peer(*peer);
                         let next = record.settings.resources.for_peer(*peer);
                         password_changed
+                            || options.restart
                             || next.disabled
                             || (old.files && !next.files)
                             || (old.speed && !next.speed)
@@ -1416,6 +1417,9 @@ async fn run_session(
                     let _ = service
                         .receive_space
                         .set_safety_mib(record.settings.receive_safety_mib);
+                }
+                if options.restart {
+                    session_shutdown = true;
                 }
                 let _ = done.send(Ok(outcome));
             }

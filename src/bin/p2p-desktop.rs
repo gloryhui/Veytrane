@@ -1,39 +1,52 @@
-//! GPUI desktop shell entry point.
+//! Native management by default; historical embedded desktop is explicit.
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
-
+use clap::Parser;
+#[derive(Parser)]
+#[command(about = "P2P File desktop · 原生节点管理", disable_version_flag = true)]
+struct Args {
+    #[arg(long)]
+    background: bool,
+    #[arg(long)]
+    legacy: bool,
+    #[arg(long, conflicts_with = "legacy")]
+    data_dir: Option<std::path::PathBuf>,
+    #[arg(long, short = 'V')]
+    version: bool,
+    #[arg(long)]
+    build_info: bool,
+}
 fn main() {
-    let arguments = std::env::args().skip(1).collect::<Vec<_>>();
-    let background_start = arguments.as_slice() == ["--background"];
-    if !arguments.is_empty() && !background_start {
-        if arguments.len() != 1 {
-            eprintln!("Use p2p-desktop --help");
-            std::process::exit(2);
-        }
-        match arguments[0].as_str() {
-            "--version" | "-V" => println!(
-                "p2p-desktop {} ({}; {}; {})",
-                env!("CARGO_PKG_VERSION"),
-                env!("P2P_BUILD_SHA"),
-                env!("P2P_BUILD_TARGET"),
-                env!("P2P_BUILD_STATE")
-            ),
-            "--build-info" => println!(
-                "{}",
-                serde_json::json!({
-                    "name": "p2p-desktop", "version": env!("CARGO_PKG_VERSION"),
-                    "build_sha": env!("P2P_BUILD_SHA"), "target": env!("P2P_BUILD_TARGET"),
-                    "source_state": env!("P2P_BUILD_STATE")
-                })
-            ),
-            "--help" | "-h" => println!(
-                "P2P File desktop\n\nRun without arguments to open the native window.\n  --background  Start in the tray when login startup is enabled\n  --version, -V  Version and source commit\n  --build-info   Machine-readable build metadata\n  --help, -h     This help\n\nConfigure your signaling server and receive folder in Settings."
-            ),
-            _ => {
-                eprintln!("Unknown argument. Use p2p-desktop --help");
-                std::process::exit(2);
-            }
-        }
+    let args = Args::parse();
+    if args.version {
+        println!(
+            "p2p-desktop {} ({}; {}; {})",
+            env!("CARGO_PKG_VERSION"),
+            env!("P2P_BUILD_SHA"),
+            env!("P2P_BUILD_TARGET"),
+            env!("P2P_BUILD_STATE")
+        );
         return;
     }
-    p2p_file::desktop::run(background_start);
+    if args.build_info {
+        println!(
+            "{}",
+            serde_json::json!({"name":"p2p-desktop","version":env!("CARGO_PKG_VERSION"),"build_sha":env!("P2P_BUILD_SHA"),"target":env!("P2P_BUILD_TARGET"),"source_state":env!("P2P_BUILD_STATE")})
+        );
+        return;
+    }
+    if args.legacy {
+        p2p_file::desktop::run(args.background);
+        return;
+    }
+    let root = match args.data_dir {
+        Some(path) => path,
+        None => match p2p_file::node::agent_paths::AgentPaths::default_root() {
+            Ok(path) => path,
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        },
+    };
+    p2p_file::desktop::agent_shell::run(root, args.background);
 }

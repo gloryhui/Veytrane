@@ -92,6 +92,10 @@ pub enum Command {
         generation: u64,
         name: String,
     },
+    ConfigureRestart {
+        expected_revision: u64,
+        settings: serde_json::Value,
+    },
     SetPassword {
         expected_revision: u64,
         password: String,

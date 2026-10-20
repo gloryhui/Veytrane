@@ -9,6 +9,7 @@
 //! MIT-licensed application code. See docs/gpui-mvp/THIRD_PARTY_NOTICES.md.
 
 mod activity;
+pub mod agent_shell;
 mod auto_resume;
 mod autostart;
 mod background;
