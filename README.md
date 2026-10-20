@@ -9,7 +9,23 @@ Direct 成功时服务器只负责信令，不承载业务数据。用户配置 
 及时建立 authenticated transport 时，Relay UDP 服务延迟转发**端到端加密的 QUIC
 datagram**。Relay 看不到业务明文，QUIC / Ed25519 身份认证仍然是设备间端到端。
 
+## 统一节点实施分支
+
+当前默认入口为无GUI的`p2p-agent`、共享IPC的`p2p-node`/Web和原生客户端。Agent统一持有身份、连接、文件任务与本机转发；Mac/Windows可分别从老家授权目录选择服务、设置本机端口，并继续传文件。
+
+```sh
+cargo build --locked --release --bin p2p-agent --bin p2p-node
+target/release/p2p-node init
+target/release/p2p-agent
+```
+
+已有旧身份请先按[宿主/迁移说明](packaging/node/README.md)预览导入；`init`不会覆盖现有配置，默认目录发现旧桌面身份时会拒绝另建身份。桌面包须包含同SHA的Agent和CLI；默认窗口只附着后台，关闭窗口后节点继续。原CLI v3和显式`p2p-desktop --legacy`暂留，新旧协议兼容范围见[发布矩阵草案](docs/specs/NODE_RELEASE_DECISION.md)。
+
+本轮按用户要求完成代码与静态检查，测试/回归/真实设备验收后置；三个缺陷未据此关闭。进度见[任务台账](docs/task-reports/IMPLEMENTATION_STATUS.md)，四设备准备见[验收计划](docs/FOUR_DEVICE_ACCEPTANCE.md)。
+
 ## 快速开始
+
+以下为保留的旧CLI v3独立使用流程；统一Agent流程以[节点宿主说明](packaging/node/README.md)为准，不把两种协议视作自动互通。
 
 整个流程你只需要提供 **3 个值**：
 

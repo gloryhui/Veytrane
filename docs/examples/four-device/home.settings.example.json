@@ -1,0 +1,80 @@
+{
+  "signal_server": "signal.example.invalid:9000",
+  "signal_tls": {
+    "ca_file": null,
+    "server_name": "signal.example.invalid"
+  },
+  "relay_server": null,
+  "receive_root": "/var/lib/p2pfile/receive",
+  "trusted_devices": [
+    {
+      "node_id": "22222222222222222222222222222222",
+      "display_name": "SYNTHETIC-REPLACE-ID",
+      "last_short_id": null,
+      "trusted_at": 0,
+      "updated_at": 0
+    },
+    {
+      "node_id": "33333333333333333333333333333333",
+      "display_name": "SYNTHETIC-REPLACE-ID",
+      "last_short_id": null,
+      "trusted_at": 0,
+      "updated_at": 0
+    }
+  ],
+  "trust_sources": {
+    "22222222222222222222222222222222": "administrator",
+    "33333333333333333333333333333333": "administrator"
+  },
+  "peer_modes": {},
+  "resources": {
+    "peers": [
+      {
+        "node_id": "22222222222222222222222222222222",
+        "files": true,
+        "speed": true,
+        "disabled": false
+      },
+      {
+        "node_id": "33333333333333333333333333333333",
+        "files": true,
+        "speed": true,
+        "disabled": false
+      }
+    ]
+  },
+  "services": [
+    {
+      "id": "home-http",
+      "name": "home-http",
+      "target": "127.0.0.1:8080",
+      "enabled": true,
+      "allowed_peers": [
+        "22222222222222222222222222222222",
+        "33333333333333333333333333333333"
+      ]
+    },
+    {
+      "id": "home-stream",
+      "name": "home-stream",
+      "target": "127.0.0.1:8081",
+      "enabled": true,
+      "allowed_peers": [
+        "22222222222222222222222222222222",
+        "33333333333333333333333333333333"
+      ]
+    }
+  ],
+  "forwards": [],
+  "service_ids": {},
+  "send_concurrency": 1,
+  "auto_resume": true,
+  "receive_safety_mib": 64,
+  "file_limits": {
+    "upload_kib": 0,
+    "download_kib": 0
+  },
+  "enable_files": true,
+  "enable_speed": true,
+  "enable_tcp": true
+}

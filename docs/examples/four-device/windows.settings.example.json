@@ -1,0 +1,81 @@
+{
+  "signal_server": "signal.example.invalid:9000",
+  "signal_tls": {
+    "ca_file": null,
+    "server_name": "signal.example.invalid"
+  },
+  "relay_server": null,
+  "receive_root": "C:\\Users\\REPLACE\\Downloads\\P2PFile",
+  "trusted_devices": [
+    {
+      "node_id": "11111111111111111111111111111111",
+      "display_name": "SYNTHETIC-REPLACE-ID",
+      "last_short_id": null,
+      "trusted_at": 0,
+      "updated_at": 0
+    },
+    {
+      "node_id": "22222222222222222222222222222222",
+      "display_name": "SYNTHETIC-REPLACE-ID",
+      "last_short_id": null,
+      "trusted_at": 0,
+      "updated_at": 0
+    }
+  ],
+  "trust_sources": {
+    "11111111111111111111111111111111": "administrator",
+    "22222222222222222222222222222222": "administrator"
+  },
+  "peer_modes": {},
+  "resources": {
+    "peers": [
+      {
+        "node_id": "11111111111111111111111111111111",
+        "files": true,
+        "speed": true,
+        "disabled": false
+      },
+      {
+        "node_id": "22222222222222222222222222222222",
+        "files": true,
+        "speed": true,
+        "disabled": false
+      }
+    ]
+  },
+  "services": [],
+  "forwards": [
+    {
+      "id": "local-home-http",
+      "name": "home-http",
+      "peer_node_id": "11111111111111111111111111111111",
+      "listen": "127.0.0.1:28080",
+      "target": "127.0.0.1:1",
+      "enabled": true,
+      "auto_start": true
+    },
+    {
+      "id": "local-home-stream",
+      "name": "home-stream",
+      "peer_node_id": "11111111111111111111111111111111",
+      "listen": "127.0.0.1:28081",
+      "target": "127.0.0.1:1",
+      "enabled": true,
+      "auto_start": true
+    }
+  ],
+  "service_ids": {
+    "local-home-http": "home-http",
+    "local-home-stream": "home-stream"
+  },
+  "send_concurrency": 1,
+  "auto_resume": true,
+  "receive_safety_mib": 64,
+  "file_limits": {
+    "upload_kib": 0,
+    "download_kib": 0
+  },
+  "enable_files": true,
+  "enable_speed": true,
+  "enable_tcp": true
+}

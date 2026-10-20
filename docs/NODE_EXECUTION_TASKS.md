@@ -1,7 +1,7 @@
 # 统一节点迁移：Agent 执行任务与审核流程
 
 - 文档编号：TASK-NODE-001
-- 状态：任务拆分已编写，所有实现、检查和审核任务均待执行
+- 状态：Codex 已接手本轮代码实施；测试、独立审核和阶段验收后置，逐卡状态见实施进度
 - 设计基线：`eb4b9d9a0b8eb6994faa2c645cb90e841b711b30`
 - 依据：[目标架构](NODE_ARCHITECTURE.md)、[迁移及验收计划](NODE_MIGRATION_PLAN.md)
 - 角色：工作 Agent 使用 `deepseek-v4.1-flash-1017`；规格与代码由 GPT 独立审核。
