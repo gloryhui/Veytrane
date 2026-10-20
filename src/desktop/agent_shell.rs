@@ -425,13 +425,28 @@ impl AgentShell {
         let picked = cx.prompt_for_paths(PathPromptOptions {
             files: !directory,
             directories: directory,
-            multiple: true,
-            prompt: Some("选择发送文件".into()),
+            multiple: !directory,
+            prompt: Some(
+                if directory {
+                    "选择预览目录"
+                } else {
+                    "选择发送文件"
+                }
+                .into(),
+            ),
         });
         cx.spawn(async move |shell, cx| {
             if let Ok(Ok(Some(paths))) = picked.await {
                 let _ = shell.update(cx, |shell, cx| {
-                    shell.send(Command::Send { peer, paths }, Kind::Action, cx)
+                    let command = if directory {
+                        let Some(path) = paths.into_iter().next() else {
+                            return;
+                        };
+                        Command::PreviewDirectory { peer, path }
+                    } else {
+                        Command::Send { peer, paths }
+                    };
+                    shell.send(command, Kind::Action, cx)
                 });
             }
         })
@@ -954,7 +969,12 @@ pub fn run(root: PathBuf, background: bool) {
         let bounds = Bounds::centered(None, size(px(1180.), px(900.)), cx);
         if let Err(e) = cx.open_window(
             WindowOptions {
+                titlebar: Some(gpui::TitlebarOptions {
+                    title: Some("P2P File · 节点管理".into()),
+                    ..Default::default()
+                }),
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                window_min_size: Some(size(px(760.), px(560.))),
                 ..Default::default()
             },
             |_, cx| cx.new(|cx| AgentShell::new(paths, worker, cx)),

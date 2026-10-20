@@ -75,6 +75,7 @@ async fn boundary(State(state): State<Gateway>, request: Request, next: Next) ->
     }
 }
 async fn request(State(state): State<Gateway>, Json(request): Json<ipc::Request>) -> Response {
+    let request_id = request.request_id.clone();
     match state.client.request(request).await {
         Ok(response) => {
             let status = match response.error.as_ref().map(|e| e.code.as_str()) {
@@ -86,7 +87,11 @@ async fn request(State(state): State<Gateway>, Json(request): Json<ipc::Request>
         }
         Err(error) => (
             StatusCode::BAD_GATEWAY,
-            Json(ipc::Response::error("gateway", "agent_unavailable", error)),
+            Json(ipc::Response::error(
+                &request_id,
+                "agent_unavailable",
+                error,
+            )),
         )
             .into_response(),
     }

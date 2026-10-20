@@ -16,7 +16,8 @@ import time
 
 def run(argv, *, check=True, env=None):
     result = subprocess.run([str(arg) for arg in argv], capture_output=True, text=True,
-                            encoding='utf-8', errors='replace', env=env, timeout=45)
+                            encoding='utf-8', errors='replace', env=env, timeout=45,
+                            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
     if check and result.returncode:
         raise RuntimeError(f'{argv[0]} failed ({result.returncode}): {result.stderr.strip()}')
     return result
@@ -52,7 +53,7 @@ def powershell(script, settings=None):
     env = os.environ.copy()
     env.pop('PSModulePath', None)
     env['P2P_NODE_HOST_SETTINGS'] = json.dumps(settings or {}, ensure_ascii=True)
-    return run([host, '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command',
+    return run([host, '-NoProfile', '-NonInteractive', '-Command',
                 "$ErrorActionPreference='Stop';$s=$env:P2P_NODE_HOST_SETTINGS|ConvertFrom-Json;" + script], env=env)
 
 
@@ -174,7 +175,7 @@ def install(source, base, data_dir, allow_dirty):
     agent = metadata['p2p-agent']
     if not re.fullmatch('[0-9a-f]{40}', agent['build_sha']):
         raise RuntimeError('invalid build SHA')
-    if any(metadata[name][key] != agent[key] for name in metadata for key in ('build_sha', 'target', 'version', 'source_state')):
+    if agent.get('api_version') != 1 or any(metadata[name].get(key) != agent.get(key) for name in metadata for key in ('build_sha', 'target', 'version', 'source_state', 'api_version')):
         raise RuntimeError('Agent and CLI must come from exactly the same build')
     if not allow_dirty and agent['source_state'] != 'clean':
         raise RuntimeError('dirty build cannot be installed without explicit --allow-dirty')

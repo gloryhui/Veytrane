@@ -3444,6 +3444,12 @@ async fn next_input(
     pause: &mut watch::Receiver<bool>,
     pausing: Option<Instant>,
 ) -> Result<Input> {
+    // A throttled chunk may consume watch::changed() while unblocking its
+    // current payload. The pause flag is latched: observing that notification
+    // in the byte limiter must not lose the protocol pause handshake.
+    if pausing.is_none() && *pause.borrow_and_update() {
+        return Ok(Input::Pause);
+    }
     if let Some(frame) = io.pending.pop_front() {
         return Ok(Input::Frame(frame));
     }
@@ -4402,6 +4408,35 @@ mod tests {
             assert_eq!(pair.a.task(id).await.unwrap().state(), TaskState::Completed);
             pair.shutdown().await;
         }
+    }
+
+    #[tokio::test]
+    async fn file_limits_pause_during_budget_wait_is_not_consumed_by_the_limiter() {
+        let pair = Pair::new().await;
+        pair.a
+            .set_file_limits(super::super::bandwidth::FileLimits {
+                upload_kib: 1,
+                download_kib: 0,
+            })
+            .unwrap();
+        let (id, _) = pair.select(8 * 1024 * 1024).await;
+        let sender = pair.sender(id.clone());
+        wait_state(&pair.b, &id, TaskState::Transferring).await;
+        // Ensure the pause arrives during an active rate wait rather than
+        // before the first chunk. No more than a few bytes can pass at 1KiB/s.
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        pair.a.pause_task(id.clone()).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), sender)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            pair.a.task(id.clone()).await.unwrap().state(),
+            TaskState::Paused
+        );
+        assert_eq!(pair.b.task(id).await.unwrap().state(), TaskState::Paused);
+        pair.shutdown().await;
     }
     #[tokio::test]
     async fn file_limits_reject_legacy_peer_without_silent_protocol_change() {

@@ -143,6 +143,14 @@ impl Agent {
                     .send_paths(NodeId::from_hex(&peer).map_err(|e| e.to_string())?, paths)?;
                 Ok(json!({"accepted":true}))
             }
+            Command::PreviewDirectory { peer, path } => {
+                super::drop_send::validate_paths(std::slice::from_ref(&path))
+                    .map_err(|e| e.to_string())?;
+                let request = self
+                    .control
+                    .preview_directory(NodeId::from_hex(&peer).map_err(|e| e.to_string())?, path)?;
+                Ok(json!({"accepted":true,"request":request}))
+            }
             Command::Pause { task } => {
                 self.control.pause_task(task)?;
                 Ok(json!({"accepted":true}))
@@ -490,6 +498,7 @@ pub async fn run(paths: AgentPaths) -> io::Result<()> {
                     Some(control::SessionEvent::DirectoryPreview(preview))=>{let mut previews=collector.previews.lock().await;previews.retain(|(_,p)|p.id!=preview.id);if previews.len()==32{previews.pop_front();}previews.push_back((Instant::now(),preview));},
                     Some(control::SessionEvent::DirectoryPreviewFailed(id))=>collector.previews.lock().await.retain(|(_,p)|p.id!=id),
                     Some(control::SessionEvent::Diagnostic(message))=>{let mut lines=collector.diagnostics.lock().await;if lines.len()==32{lines.pop_front();}lines.push_back(message.chars().take(512).collect());},
+                    Some(control::SessionEvent::PeerState { peer, state: super::network_state::PeerLifecycle::Failed(message), .. })=>{let mut lines=collector.diagnostics.lock().await;if lines.len()==32{lines.pop_front();}lines.push_back(format!("设备 {}：{}",peer.short(),message).chars().take(512).collect());},
                     Some(_)=>{},None=>break,
                 }},
                 event=events.recv()=>{match event {

@@ -12,18 +12,21 @@ body{font:15px system-ui;max-width:1200px;margin:28px auto;padding:0 18px;backgr
 <h2>本机端口转发</h2><p class="hint">先连接远端设备并查询服务，再填写服务 ID；监听只能为本机 loopback 地址。</p><div class="scroll" id="forwardTable"></div><button id="addForward">新增转发</button>
 <h2>文件与测速授权</h2><div class="scroll" id="resourceTable"></div><button id="addResource">新增设备权限</button>
 <button id="save">保存草稿</button></section>
-<section><h2>文件任务</h2><label>本机绝对路径 <input id="path" size="60"></label><button id="send">发送给上述设备</button><button id="tasks">刷新任务</button><div id="taskList"></div></section>
+<section><h2>文件任务</h2><label>本机绝对路径 <input id="path" size="60"></label><button id="send">发送给上述设备</button><button id="preview">预览目录</button><button id="tasks">刷新任务</button><div id="taskList"></div></section>
 <script>
 'use strict';
 let draft=null,revision=null,busy=false,retryRequest=null;
 const $=id=>document.getElementById(id),say=text=>$('message').textContent=text;
 const id=()=>crypto.randomUUID().replaceAll('-','');
+const queries=new Set(['status','config','tasks','services','events']);
+function uncertain(req){if(!queries.has(req.command.method)){retryRequest=req;$('retry').hidden=false}}
 async function request(command,retry=null){
  const req=retry||{api_version:1,request_id:id(),timeout_ms:30000,command};
- const response=await fetch('/api/v1/request',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+$('token').value},body:JSON.stringify(req)});
- let value;try{value=await response.json()}catch{throw new Error('网关响应异常；请查询状态确认变更结果')}
- if(value.error){if(value.error.code==='outcome_unknown'){retryRequest=req;$('retry').hidden=false}throw new Error(value.error.code+'：'+value.error.message)}
- if(!response.ok)throw new Error('请求失败：'+response.status);
+ if(retryRequest&&!retry&&!queries.has(command.method))throw new Error('请先重试上次未确认的变更，再执行其他变更');
+ let response;try{response=await fetch('/api/v1/request',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+$('token').value},body:JSON.stringify(req)})}catch{uncertain(req);throw new Error('网络中断；变更结果未知，请重试上次请求')}
+ let value;try{value=await response.json()}catch{uncertain(req);throw new Error('网关响应异常；变更结果未知，请重试上次请求')}
+ if(value.error){if(['outcome_unknown','agent_unavailable'].includes(value.error.code)||response.status>=500)uncertain(req);throw new Error(value.error.code+'：'+value.error.message)}
+ if(!response.ok){if(response.status>=500)uncertain(req);throw new Error('请求失败：'+response.status)}
  if(retryRequest?.request_id===req.request_id){retryRequest=null;$('retry').hidden=true}
  return value.result;
 }
@@ -47,6 +50,7 @@ $('addResource').onclick=()=>{draft.resources.peers.push({node_id:$('peer').valu
 $('connect').onclick=()=>action(async()=>{const password=$('password').value;$('password').value='';await request({method:'connect',peer:$('peer').value.trim(),password:password||null})});
 $('disconnect').onclick=()=>action(()=>request({method:'disconnect',peer:$('peer').value.trim()}));
 $('services').onclick=()=>action(async()=>{$('directory').textContent=JSON.stringify(await request({method:'services',peer:$('peer').value.trim()}),null,2)});
+$('preview').onclick=()=>action(()=>request({method:'preview_directory',peer:$('peer').value.trim(),path:$('path').value}));
 $('send').onclick=()=>action(()=>request({method:'send',peer:$('peer').value.trim(),paths:[$('path').value]}));
 async function tasks(offset=0){const value=await request({method:'tasks',offset});$('taskList').replaceChildren();for(const task of value.tasks){const row=document.createElement('p');row.textContent=task.name+' · '+task.state+' · '+task.confirmed+'/'+task.total+' ';for(const [label,method]of[['暂停','pause'],['继续','resume'],['取消','cancel']]){const b=document.createElement('button');b.textContent=label;b.onclick=()=>action(async()=>{await request({method,task:task.id,...(method==='resume'?{peer:task.peer}:{})});await tasks()});row.append(b)}$('taskList').append(row)}for(const preview of value.directory_previews||[]){const row=document.createElement('p');row.textContent='目录预览：新增'+preview.added+'，变化'+preview.changed+'，不变'+preview.unchanged+' ';for(const [label,method]of[['确认目录','confirm_directory'],['取消预览','cancel_directory']]){const button=document.createElement('button');button.textContent=label;button.onclick=()=>action(async()=>{await request({method,request:preview.id,...(method==='confirm_directory'?{peer:preview.peer}:{})});await tasks(offset)});row.append(button)}$('taskList').append(row)}if(value.next_offset!==null){const next=document.createElement('button');next.textContent='下一页';next.onclick=()=>action(()=>tasks(value.next_offset));$('taskList').append(next)}if(value.truncated){const note=document.createElement('p');note.textContent='任务超过当前页上限，请使用CLI查看。';$('taskList').append(note)}}
 $('tasks').onclick=()=>action(tasks);

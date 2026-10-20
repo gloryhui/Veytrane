@@ -298,3 +298,123 @@ pub async fn negotiate(connection: &quinn::Connection, initiator: bool, local: u
 fn invalid(message: &str) -> Error {
     Error::Protocol(message.into())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frozen_v1_bytes_and_request_ids_are_independent_of_current_encoder() {
+        let vectors: &[(&[u8], u64, NodeMessage)] = &[
+            (
+                b"P2PN\x01\x01\x00\x00\x80\x82\x14",
+                0,
+                NodeMessage::Hello {
+                    capabilities: 327936,
+                },
+            ),
+            (b"P2PN\x01\x01\x00\x01", 0, NodeMessage::Ready),
+            (b"P2PN\x01\x01\x07\x02", 7, NodeMessage::Services),
+            (
+                b"P2PN\x01\x01\x07\x03\x01\x04echo\x04Echo",
+                7,
+                NodeMessage::ServiceList {
+                    services: vec![ServiceDescriptor {
+                        id: "echo".into(),
+                        name: "Echo".into(),
+                    }],
+                },
+            ),
+            (
+                b"P2PN\x01\x01\x07\x04\x04echo",
+                7,
+                NodeMessage::OpenTcp {
+                    service_id: "echo".into(),
+                },
+            ),
+            (b"P2PN\x01\x01\x07\x05", 7, NodeMessage::TcpReady),
+            (
+                b"P2PN\x01\x01\x07\x06\x02",
+                7,
+                NodeMessage::Error {
+                    code: NodeErrorCode::Unauthorized,
+                },
+            ),
+        ];
+        for (bytes, request, message) in vectors {
+            let frame = NodeFrame::new(*request, message.clone());
+            assert_eq!(frame.encode().unwrap(), *bytes);
+            assert_eq!(NodeFrame::decode(bytes).unwrap(), frame);
+            let mut trailing = bytes.to_vec();
+            trailing.push(0);
+            assert!(NodeFrame::decode(&trailing).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_legacy_unknown_versions_oversized_directory_and_invalid_services() {
+        for bytes in [
+            b"P2PD\x01\x01\x00\x01".as_slice(),
+            b"P2PN\x01\x02\x00\x01",
+            b"P2PN\x01\x01\x00\x02",
+            b"P2PN\x01\x01\x07\x03\x81\x01",
+        ] {
+            assert!(NodeFrame::decode(bytes).is_err());
+        }
+        for id in ["", "../secret", "127.0.0.1:8080", "服务", "with space"] {
+            assert!(
+                NodeFrame::new(
+                    1,
+                    NodeMessage::OpenTcp {
+                        service_id: id.into()
+                    }
+                )
+                .encode()
+                .is_err()
+            );
+        }
+        let entry = ServiceDescriptor {
+            id: "same".into(),
+            name: "Name".into(),
+        };
+        assert!(
+            NodeFrame::new(
+                1,
+                NodeMessage::ServiceList {
+                    services: vec![entry.clone(), entry]
+                }
+            )
+            .encode()
+            .is_err()
+        );
+        let tcp_only = capabilities(false, false, true);
+        assert_eq!(tcp_only & REQUIRED, REQUIRED);
+        assert_eq!(tcp_only & protocol::CAP_FILE_TRANSFER, 0);
+        assert_eq!(tcp_only & protocol::CAP_SPEED_EXECUTION, 0);
+        assert_ne!(tcp_only & protocol::CAP_TCP_TUNNEL, 0);
+    }
+
+    #[tokio::test]
+    async fn rejects_length_before_waiting_for_body_and_keeps_little_endian_outer_frame() {
+        let (mut writer, mut reader) = tokio::io::duplex(128);
+        use tokio::io::AsyncWriteExt;
+        writer
+            .write_all(&(MAX_FRAME_BYTES + 1).to_le_bytes())
+            .await
+            .unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), read(&mut reader))
+                .await
+                .unwrap()
+                .is_err()
+        );
+        let (mut writer, mut reader) = tokio::io::duplex(128);
+        write(&mut writer, &NodeFrame::new(7, NodeMessage::Services))
+            .await
+            .unwrap();
+        use tokio::io::AsyncReadExt;
+        let mut bytes = [0u8; 12];
+        reader.read_exact(&mut bytes).await.unwrap();
+        assert_eq!(&bytes, b"\x08\x00\x00\x00P2PN\x01\x01\x07\x02");
+    }
+}

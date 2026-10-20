@@ -58,7 +58,7 @@ pub struct TunnelRule {
 }
 
 /// Headless service policy: which peers may reach which targets.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServiceConfig {
     #[serde(default = "default_version")]
@@ -67,14 +67,32 @@ pub struct ServiceConfig {
     pub forward_targets: Vec<AllowedForwardTarget>,
 }
 
+impl Default for ServiceConfig {
+    fn default() -> Self {
+        Self {
+            version: RULES_SCHEMA_VERSION,
+            forward_targets: Vec::new(),
+        }
+    }
+}
+
 /// Headless client policy: local listeners sharing one peer session.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientConfig {
     #[serde(default = "default_version")]
     pub version: u32,
     #[serde(default)]
     pub rules: Vec<TunnelRule>,
+}
+
+impl Default for ClientConfig {
+    fn default() -> Self {
+        Self {
+            version: RULES_SCHEMA_VERSION,
+            rules: Vec::new(),
+        }
+    }
 }
 
 impl ServiceConfig {

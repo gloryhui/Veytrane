@@ -997,8 +997,27 @@ async fn run_session(
             tls: config.signal_tls.is_some(),
         })
         .await;
-    emit_lifecycle(&events, NetworkLifecycle::ConnectingSignal).await;
-    let mut network = match prepare_desktop_network(&config.network).await {
+    let unconfigured = config.signal_server.trim().is_empty();
+    emit_lifecycle(
+        &events,
+        if unconfigured {
+            NetworkLifecycle::Unconfigured
+        } else {
+            NetworkLifecycle::ConnectingSignal
+        },
+    )
+    .await;
+    let prepared = if unconfigured {
+        Ok(crate::net::DesktopNetwork {
+            relay: None,
+            paths: Vec::new(),
+            local_candidates: Vec::new(),
+            diagnostics: Vec::new(),
+        })
+    } else {
+        prepare_desktop_network(&config.network).await
+    };
+    let mut network = match prepared {
         Ok(network) => network,
         Err(error) => {
             for rule in config
@@ -2272,6 +2291,44 @@ async fn run_session(
                         relay_server,
                         signal_tls: updated_tls,
                     } => {
+                        if !server.trim().is_empty()
+                            && network.paths.is_empty()
+                            && network.relay.is_none()
+                        {
+                            let mut preparation = config.network.clone();
+                            preparation.relay_server = None;
+                            match prepare_desktop_network(&preparation).await {
+                                Ok(prepared) => network = prepared,
+                                Err(error) => {
+                                    emit_lifecycle(
+                                        &events,
+                                        NetworkLifecycle::Failed {
+                                            detail: error.to_string(),
+                                        },
+                                    )
+                                    .await;
+                                    continue;
+                                }
+                            }
+                            for path in &network.paths {
+                                let endpoint = path.endpoint.clone();
+                                let family = path.family;
+                                let inputs = input_tx.clone();
+                                session_tasks.spawn(async move {
+                                    accept_incoming_loop(endpoint, family, inputs).await;
+                                });
+                            }
+                            let _ = events
+                                .send(SessionEvent::NetworkPaths(network.diagnostics.join("; ")))
+                                .await;
+                            let _ = events
+                                .send(SessionEvent::NetworkFamilies {
+                                    ipv4: network.path(AddressFamily::Ipv4).is_some(),
+                                    ipv6: network.path(AddressFamily::Ipv6).is_some(),
+                                    relay_configured: relay_server.is_some(),
+                                })
+                                .await;
+                        }
                         signal_server = server;
                         signal_tls = updated_tls;
                         credentials.clear();
@@ -2358,7 +2415,15 @@ async fn run_session(
                             tls: signal_tls.is_some(),
                         })
                         .await;
-                    emit_lifecycle(&events, NetworkLifecycle::ConnectingSignal).await;
+                    emit_lifecycle(
+                        &events,
+                        if signal_server.trim().is_empty() {
+                            NetworkLifecycle::Unconfigured
+                        } else {
+                            NetworkLifecycle::ConnectingSignal
+                        },
+                    )
+                    .await;
                     start_signal_connect(
                         &identity,
                         (&signal_server, signal_tls.as_ref()),
@@ -3976,6 +4041,9 @@ fn start_signal_connect(
     task: &mut Option<tokio::task::AbortHandle>,
     tasks: &mut JoinSet<()>,
 ) {
+    if target.0.trim().is_empty() {
+        return;
+    }
     let identity = identity.clone();
     let signal_server = target.0.to_owned();
     let signal_tls = target.1.cloned();

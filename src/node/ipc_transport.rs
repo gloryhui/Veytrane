@@ -43,14 +43,19 @@ impl Listener {
     pub async fn accept(&mut self) -> io::Result<Stream> {
         #[cfg(unix)]
         {
-            let (stream, _) = self.inner.accept().await?;
-            if stream.peer_cred()?.uid() != rustix::process::getuid().as_raw() {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "IPC用户不匹配",
-                ));
+            loop {
+                let (stream, _) = self.inner.accept().await?;
+                if stream
+                    .peer_cred()
+                    .is_ok_and(|peer| peer.uid() == rustix::process::getuid().as_raw())
+                {
+                    return Ok(Box::new(stream));
+                }
+                // Rejection belongs to this client, not to the listener. An
+                // unauthorized connection must not shut down the whole Agent.
+                drop(stream);
+                tokio::task::yield_now().await;
             }
-            Ok(Box::new(stream))
         }
         #[cfg(windows)]
         {

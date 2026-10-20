@@ -73,6 +73,10 @@ pub enum Action {
     Pause {
         task: String,
     },
+    PreviewDirectory {
+        peer: String,
+        path: PathBuf,
+    },
     Resume {
         peer: String,
         task: String,
@@ -320,6 +324,10 @@ pub async fn run(args: Args) -> io::Result<Response> {
         },
         Action::Pause { task } => Command::Pause {
             task: TaskId::parse(&task).map_err(io::Error::other)?,
+        },
+        Action::PreviewDirectory { peer, path } => Command::PreviewDirectory {
+            peer,
+            path: std::path::absolute(path)?,
         },
         Action::Resume { peer, task } => Command::Resume {
             peer,

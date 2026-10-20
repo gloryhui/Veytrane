@@ -15,6 +15,7 @@
 # NAT 穿透的关键逻辑由 src/nat/punch.rs 的单元测试覆盖（含地址相关映射场景）。
 
 set -euo pipefail
+export NO_COLOR=1
 
 PROFILE="debug"
 NATIVE_FAMILY="ipv4-only"
@@ -40,7 +41,7 @@ advertise_address() {
 }
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$ROOT/target/$PROFILE/p2p_file"
+BIN="${P2P_E2E_BIN:-$ROOT/target/$PROFILE/p2p_file}"
 
 if [[ ! -x "$BIN" ]]; then
     echo "找不到 $BIN，先 cargo build $([[ $PROFILE == release ]] && echo --release)" >&2
@@ -196,7 +197,28 @@ if [[ "$RELAY_MODE" == true ]]; then
     pass 'direct blackholes → authenticated Relay winner'
 fi
 
-step "2.25 纯网络测速（不读写文件、不经过文件协议）"
+step "2.5 让隧道跨过重新打洞的宽限期（${RE_PUNCH}s），确认不会被误拆"
+sleep $((RE_PUNCH + 8))
+python3 - <<'PY' || fail "隧道在宽限期后被误拆了"
+import socket
+s = socket.create_connection(("127.0.0.1", 2222), timeout=30)
+s.sendall(b"still-alive")
+assert s.recv(100) == b"still-alive", "跨过宽限期后隧道不能用了"
+s.close()
+PY
+pass "隧道在宽限期后依然可用（空闲计时不会误拆活跃连接）"
+
+# Legacy CLI commands each own the identity exclusively. Wait for the tunnel
+# process to release its lock before starting another owner of the same key.
+kill "$TUNNEL_PID" 2>/dev/null || true
+wait "$TUNNEL_PID" 2>/dev/null || true
+REMAINING_PIDS=()
+for pid in "${PIDS[@]}"; do
+    [[ "$pid" == "$TUNNEL_PID" ]] || REMAINING_PIDS+=("$pid")
+done
+PIDS=("${REMAINING_PIDS[@]}")
+
+step "2.75 停止旧 CLI 隧道并释放身份后，纯网络测速（不读写文件、不经过文件协议）"
 RUST_LOG=info "$BIN" --key-file "$WORK/laptop.key" --log info speedtest \
     --signal 127.0.0.1:7000 "${DIRECT_OPTIONS[@]}" \
     --peer "$HOME_ID" \
@@ -212,18 +234,7 @@ if find "$WORK/recv" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
 fi
 pass "speedtest 成功，bytes > 0，接收目录保持为空"
 
-step "2.5 让隧道跨过重新打洞的宽限期（${RE_PUNCH}s），确认不会被误拆"
-sleep $((RE_PUNCH + 8))
-python3 - <<'PY' || fail "隧道在宽限期后被误拆了"
-import socket
-s = socket.create_connection(("127.0.0.1", 2222), timeout=30)
-s.sendall(b"still-alive")
-assert s.recv(100) == b"still-alive", "跨过宽限期后隧道不能用了"
-s.close()
-PY
-pass "隧道在宽限期后依然可用（空闲计时不会误拆活跃连接）"
-
-step "3. 隧道还开着时直推文件（此时 serve 不会再打洞，走候选重试）"
+step "3. 同一旧 CLI 身份顺序直推文件（文件与 TCP 并行由新 Agent 流程验证）"
 head -c 2000000 /dev/urandom > "$WORK/big.bin"
 RUST_LOG=info "$BIN" --key-file "$WORK/laptop.key" --log info push \
     --signal 127.0.0.1:7000 "${DIRECT_OPTIONS[@]}" \
@@ -240,8 +251,7 @@ pass "文件直推正确，sha256 一致（$(stat -c%s "$RECEIVED") 字节）"
 grep -qa "换用了后面的候选地址" "$WORK/push.log" \
     && pass "打洞未确认时自动回退到其他候选地址（这条兜底很关键）"
 
-step "4. 断开隧道，等 serve 空闲后重新打洞，再连一次"
-kill "$TUNNEL_PID" 2>/dev/null || true
+step "4. 等 serve 空闲后重新打洞，再连一次"
 wait_for "$WORK/serve.log" "重新打洞" 90 || fail "serve 没有在空闲后重新打洞"
 pass "serve 空闲后已重新进入等待"
 

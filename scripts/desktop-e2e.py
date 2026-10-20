@@ -51,14 +51,14 @@ def main():
         parser.error("output directory must be empty; old failure logs must be preserved")
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=repo))
-    command = ["cargo", "test", "--locked", "--offline", "--features", "gui", "--lib", "desktop::", "--", "--nocapture"]
+    command = ["cargo", "test", "--locked", "--offline", "--features", "gui", "--lib", "--", "--nocapture"]
     started = datetime.datetime.now(datetime.timezone.utc).isoformat()
     begin = time.monotonic()
     log_file = output / "desktop.log"
     with log_file.open("w", encoding="utf-8") as log:
         result = subprocess.run(command, cwd=repo, stdout=log, stderr=subprocess.STDOUT)
     text = log_file.read_text(encoding="utf-8", errors="replace")
-    passed = set(re.findall(r"test (desktop::[\w:]+) \.\.\. ok", text))
+    passed = set(re.findall(r"test ((?:desktop|node)::[\w:]+) \.\.\. ok", text))
     proofs = []
     for line in text.splitlines():
         marker = "DESKTOP_E2E_PROOF "

@@ -16,7 +16,7 @@
 
 查询：status、config（敏感字段只返回是否存在）、tasks、services(peer)、events(after)。变更：connect、disconnect、send/pause/resume/cancel、转发、资源授权、密码、配置应用及stop。配置应用必须带 expected_revision。IPC 管理权来自本地 OS 身份，peer 授权仍独立校验，不因管理权产生远程密码证明。
 
-任务查询每页128，offset默认0，返回total/next_offset；同时返回有界目录预览和测速快照。目录预览ID/peer由核心生成，peer投影为规范文本，源只投影128字符名称；必须显式ConfirmDirectory或CancelDirectory，不能由管理端篡改比较结果/路径后确认。预览缓存32条/300秒，失效仍由核心验证。任务名称展示限256字符并标name_truncated，完整绑定保留在核心。StartSpeed/StopSpeed复用当前会话与能力协商，管理确认不等于测速完成。status附带最多32条、每条512字符诊断，规则错误256字符，管理错误4096字符；不包含管理凭据。在途管理变更另限32，已超时未完成任务仍占名额，不能依靠不断重建连接突破预算。
+任务查询每页128，offset默认0，返回total/next_offset；同时返回有界目录预览和测速快照。PreviewDirectory(peer,path)只接收一个绝对本机目录路径，返回accepted/request，异步产生预览；ConfirmDirectory前不创建发送任务。Send保留直接发送文件/目录的明确语义，原生“选择文件夹并预览”、Web“预览目录”及CLI preview-directory必须调用PreviewDirectory。目录预览ID/peer由核心生成，peer投影为规范文本，源只投影128字符名称；必须显式ConfirmDirectory或CancelDirectory，不能由管理端篡改比较结果/路径后确认。预览缓存32条/300秒，失效仍由核心验证。任务名称展示限256字符并标name_truncated，完整绑定保留在核心。StartSpeed/StopSpeed复用当前会话与能力协商，管理确认不等于测速完成。status附带最多32条、每条512字符诊断，规则错误256字符，管理错误4096字符；不包含管理凭据。在途管理变更另限32，已超时未完成任务仍占名额，不能依靠不断重建连接突破预算。
 
 变更请求的 ID 在单次进程内最多缓存1024条/5分钟，相同 ID+相同规范命令返回相同响应，不重复执行；同ID不同命令拒绝；执行中的请求也必须保留去重记录。到期/重启的重试只能通过 revision、任务 ID 和状态确认，不承诺跨重启的任意命令 exactly-once。配置持久提交额外保存最后一次请求 ID/摘要，以识别同revision重试。超时区分未入队与结果未知，不能因为客户端断开回滚已提交结果。
 

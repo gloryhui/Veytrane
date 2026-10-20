@@ -69,6 +69,10 @@ pub enum Command {
         peer: String,
         paths: Vec<PathBuf>,
     },
+    PreviewDirectory {
+        peer: String,
+        path: PathBuf,
+    },
     Pause {
         task: TaskId,
     },
