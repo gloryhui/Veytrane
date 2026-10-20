@@ -8,7 +8,7 @@ pub(crate) const MAX_PATHS: usize = 128;
 const MAX_PATH_BYTES: usize = 32_768;
 const MAX_BATCH_BYTES: usize = 1024 * 1024;
 #[derive(Clone, Copy, Default)]
-pub(crate) struct Admission {
+pub struct Admission {
     pub authorized: bool,
     pub storage_ready: bool,
     pub modal: bool,

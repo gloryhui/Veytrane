@@ -8,13 +8,13 @@ use std::{
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum Selection {
+pub enum Selection {
     Task(TaskId),
     Group(TaskId),
 }
 const MAX_SAMPLES: usize = 4096;
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Sample {
+pub struct Sample {
     pub attempts: u32,
     pub automatic: u32,
     pub elapsed: Duration,
@@ -26,7 +26,7 @@ struct Measurement {
     serial: u64,
 }
 #[derive(Default)]
-pub(crate) struct Measurements {
+pub struct Measurements {
     entries: HashMap<TaskId, Measurement>,
     serial: u64,
 }
@@ -98,7 +98,7 @@ impl Measurements {
     }
 }
 #[derive(Clone, Debug)]
-pub(crate) struct Member {
+pub struct Member {
     pub id: TaskId,
     pub name: String,
     pub directory: bool,
@@ -108,7 +108,7 @@ pub(crate) struct Member {
     pub diagnostic: Option<&'static str>,
 }
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Counts {
+pub struct Counts {
     pub files: usize,
     pub directories: usize,
     pub completed: usize,
@@ -120,7 +120,7 @@ pub(crate) struct Counts {
     pub active: usize,
 }
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct RunTotals {
+pub struct RunTotals {
     pub covered: usize,
     pub attempts: u64,
     pub retries: u64,
@@ -128,7 +128,7 @@ pub(crate) struct RunTotals {
     pub seconds: u64,
 }
 #[derive(Clone, Debug)]
-pub(crate) struct Detail {
+pub struct Detail {
     pub scope_label: &'static str,
     pub parent_group: Option<TaskId>,
     pub selection: Selection,
@@ -162,7 +162,7 @@ fn records_for<'a>(records: &'a [TaskRecord], selected: &Selection) -> Vec<&'a T
             .collect(),
     }
 }
-pub(crate) fn eta(remaining: u64, rate: f64, blocked: bool) -> Option<u64> {
+pub fn eta(remaining: u64, rate: f64, blocked: bool) -> Option<u64> {
     if blocked || remaining == 0 || !rate.is_finite() || rate <= 0. {
         return None;
     }
@@ -231,7 +231,7 @@ fn location(records: &[&TaskRecord], selection: &Selection) -> Result<(PathBuf, 
         Ok((record.local_path().to_path_buf(), "定位原接收目录"))
     }
 }
-pub(crate) fn project(
+pub fn project(
     records: &[TaskRecord],
     selection: &Selection,
     rate: impl Fn(&TaskRecord) -> f64,
@@ -444,7 +444,7 @@ pub(crate) fn project(
     })
 }
 /// Revalidate the stored task's own no-follow location off the UI thread.
-pub(crate) fn reveal(records: &[TaskRecord], selection: &Selection) -> Result<PathBuf> {
+pub fn reveal(records: &[TaskRecord], selection: &Selection) -> Result<PathBuf> {
     let selected = records_for(records, selection);
     let first = selected
         .first()
@@ -528,7 +528,7 @@ pub(crate) fn reveal(records: &[TaskRecord], selection: &Selection) -> Result<Pa
     }
     Ok(path)
 }
-pub(crate) fn duration(seconds: u64) -> String {
+pub fn duration(seconds: u64) -> String {
     if seconds >= 86_400 {
         format!("{} 天 {} 小时", seconds / 86_400, (seconds % 86_400) / 3600)
     } else {

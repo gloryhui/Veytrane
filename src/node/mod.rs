@@ -27,13 +27,15 @@ pub(crate) mod network_state;
 pub(crate) mod publish;
 pub(crate) mod queue;
 pub(crate) mod secure_fs;
-pub(crate) mod snapshot;
+pub mod snapshot;
 pub(crate) mod space_budget;
 pub(crate) mod speed;
-pub(crate) mod task_details;
+pub mod task_details;
 pub(crate) mod transfer;
 pub(crate) mod transfer_files;
 pub(crate) mod tunnel;
 pub(crate) use snapshot as ui_model;
-pub(crate) mod diagnostics;
+pub mod diagnostics;
 pub(crate) mod session;
+
+pub mod control;

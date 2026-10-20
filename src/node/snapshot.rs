@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 /// Bounded UI diagnostics follow the same generation fence as peer lifecycle.
-pub(crate) fn project_peer_path(
+pub fn project_peer_path(
     paths: &mut HashMap<NodeId, (u64, String)>,
     generations: &HashMap<NodeId, u64>,
     peer: NodeId,
@@ -40,7 +40,7 @@ pub(crate) fn project_peer_path(
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct TaskRow {
+pub struct TaskRow {
     pub id: TaskId,
     pub group: Option<TaskId>,
     pub name: String,
@@ -133,7 +133,7 @@ impl TaskRow {
         }
     }
 }
-pub(crate) fn state_label(state: TaskState) -> &'static str {
+pub fn state_label(state: TaskState) -> &'static str {
     match state {
         TaskState::Scanning => "扫描中",
         TaskState::Queued => "排队中",
@@ -149,7 +149,7 @@ pub(crate) fn state_label(state: TaskState) -> &'static str {
     }
 }
 #[derive(Clone, Debug)]
-pub(crate) struct GroupRow {
+pub struct GroupRow {
     pub id: TaskId,
     pub name: String,
     pub children: usize,
@@ -182,11 +182,11 @@ impl GroupRow {
     }
 }
 #[derive(Clone, Debug)]
-pub(crate) enum ListRow {
+pub enum ListRow {
     Group(GroupRow),
     Task(TaskRow),
 }
-pub(crate) struct Snapshot {
+pub struct Snapshot {
     pub detail_selection: Option<super::task_details::Selection>,
     pub detail: Option<super::task_details::Detail>,
     pub space: super::space_budget::Summary,
@@ -249,7 +249,7 @@ impl Snapshot {
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct TaskFilter {
+pub struct TaskFilter {
     pub query: String,
     pub peer: Option<NodeId>,
     pub direction: Option<TaskDirection>,
@@ -292,13 +292,13 @@ impl TaskFilter {
     }
 }
 #[derive(Clone)]
-pub(crate) struct SpeedView {
+pub struct SpeedView {
     pub snapshot: SpeedSnapshot,
     pub instant: f64,
     updated: Instant,
 }
 #[derive(Default)]
-pub(crate) struct SpeedViews(pub HashMap<NodeId, SpeedView>);
+pub struct SpeedViews(pub HashMap<NodeId, SpeedView>);
 impl SpeedViews {
     pub fn update(&mut self, incoming: HashMap<NodeId, SpeedSnapshot>, now: Instant) {
         for (peer, old) in &mut self.0 {
@@ -356,7 +356,7 @@ impl SpeedViews {
     }
 }
 /// GUI eligibility is projected from a verified live session, never Short ID metadata.
-pub(crate) fn can_trust_peer(
+pub fn can_trust_peer(
     peer: crate::identity::NodeId,
     local: Option<crate::identity::NodeId>,
     state: Option<&super::network_state::PeerLifecycle>,

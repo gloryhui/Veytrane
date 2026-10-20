@@ -25,7 +25,7 @@ const BLOCK: usize = 64 * 1024;
 const HEADER_LIMIT: u32 = 4096;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum SpeedStatus {
+pub enum SpeedStatus {
     Running,
     Completed,
     Cancelled,
@@ -33,7 +33,7 @@ pub(crate) enum SpeedStatus {
 }
 #[derive(Clone, Debug)]
 #[allow(dead_code)] // T010 reads the domain snapshot.
-pub(crate) struct SpeedSnapshot {
+pub struct SpeedSnapshot {
     pub test_id: TaskId,
     pub direction: SpeedDirection,
     pub owner: NodeId,

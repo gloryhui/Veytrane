@@ -22,6 +22,8 @@
 
 `NodeControl` 独占 NodeSessionHandle 及 TransferService。界面只取得其 clone；发送命令由控制接口委托当前状态机处理，禁止解析 CLI 文本。操作保留身份、会话代际、任务绑定及显式暂停意图。
 
+当前进程内实现以 NodeSessionHandle 的公开控制别名 NodeControl 保持既有命令适配，增加 ControlState、NodeSnapshot、SequencedEvent 和 NodeCommand；state 内保存同一 TransferService clone，不创建第二个任务库或网络。SessionEvents 在原有界事件队列接纳时同步更新权威网络快照并发布容量 256 的广播；订阅者通过同一快照锁取得订阅点及快照，Lagged 必须重读。原单消费者 ControlEvents 保留给内嵌桌面，宿主负责持续读取或 drain；管理订阅者使用广播。文件任务通过同一 TransferService 的 task_snapshot 查询，网络序号不伪装成文件 checkpoint 序号。纯领域投影和诊断类型可公开，无 GPUI/Quinn 对象；原有细节事件也可供进程内入口消费，IPC 序列化使用 T22 独立白名单 DTO。
+
 - 请求：连接/断开 peer（密码只存在 zeroizing 值）、更新转发、选择文件、预览/确认目录、暂停/继续/取消任务、测速/停止、查询快照、停止宿主。
 - 结果：有类型的领域结果或统一错误；提交成功仅代表已接纳，不代表任务完成。文件完成仍由持久收据决定。
 - 快照：网络生命周期、peer 代际/授权、规则状态、文件/目录任务、队列、测速及诊断；只包含有界投影，不含文件清单、大块数据、凭据或 Quinn 对象。

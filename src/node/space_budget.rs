@@ -58,7 +58,7 @@ impl SpaceError {
     }
 }
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Summary {
+pub struct Summary {
     pub reserved: u64,
     pub filesystems: usize,
 }

@@ -1021,7 +1021,7 @@ struct DesktopShell {
     is_saving_settings: bool,
     _instance_lock: InstanceLock,
     transfer_service: Option<transfer::TransferService>,
-    network_session: Option<session::DesktopSessionHandle>,
+    network_session: Option<crate::node::control::NodeControl>,
     network_status: SharedString,
     signal_state: background::SignalState,
     background_files: (usize, usize, u64),
@@ -2727,7 +2727,7 @@ impl DesktopShell {
         config.transfer = self.transfer_service.clone();
         config.allowed_forward_targets = self.settings.enabled_forward_targets();
         config.tunnel_rules = self.settings.tunnel_rules.clone();
-        match session::spawn(identity, config) {
+        match crate::node::control::spawn(identity, config) {
             Ok((handle, mut session_events)) => {
                 self.directory_preview = None;
                 self.directory_preview_request = None;

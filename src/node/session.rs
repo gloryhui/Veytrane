@@ -166,11 +166,20 @@ pub enum SessionEvent {
 struct SessionEvents {
     sender: mpsc::Sender<SessionEvent>,
     shutdown: watch::Receiver<bool>,
+    control: super::control::ControlState,
 }
 
 impl SessionEvents {
-    fn new(sender: mpsc::Sender<SessionEvent>, shutdown: watch::Receiver<bool>) -> Self {
-        Self { sender, shutdown }
+    fn new(
+        sender: mpsc::Sender<SessionEvent>,
+        shutdown: watch::Receiver<bool>,
+        control: super::control::ControlState,
+    ) -> Self {
+        Self {
+            sender,
+            shutdown,
+            control,
+        }
     }
 
     async fn send(&self, event: SessionEvent) -> bool {
@@ -184,7 +193,9 @@ impl SessionEvents {
             _ = shutdown.changed() => false,
             permit = self.sender.reserve() => match permit {
                 Ok(permit) => {
-                    permit.send(event.take().expect("event is sent only once"));
+                    let event = event.take().expect("event is sent only once");
+                    self.control.observe(&event);
+                    permit.send(event);
                     true
                 }
                 Err(_) => false,
@@ -195,6 +206,7 @@ impl SessionEvents {
 
 #[derive(Clone)]
 pub struct NodeSessionHandle {
+    pub(crate) control: super::control::ControlState,
     commands: mpsc::Sender<SessionCommand>,
     allowed_forward_targets: watch::Sender<Vec<super::config::AllowedForwardTarget>>,
     lifetime: Arc<SessionLifetime>,
@@ -479,7 +491,7 @@ impl NodeSessionHandle {
     }
 
     /// Wait off the UI thread for structured task cleanup and durable checkpoints.
-    pub(crate) fn shutdown_and_wait(&self) {
+    pub fn shutdown_and_wait(&self) {
         self.shutdown();
         if self
             .lifetime
@@ -513,7 +525,7 @@ pub enum TrustedDeviceChange {
 
 /// Shell mutations use a live actor for runtime revocation, or the latest
 /// durable configuration after the command channel has closed. Trust is live-only.
-pub(crate) async fn change_trusted_device(
+pub async fn change_trusted_device(
     session: Option<&NodeSessionHandle>,
     path: &std::path::Path,
     change: TrustedDeviceChange,
@@ -739,6 +751,8 @@ pub fn spawn(
 ) -> std::io::Result<(NodeSessionHandle, mpsc::Receiver<SessionEvent>)> {
     super::trusted_devices::validate(&config.trusted_devices)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let control = super::control::ControlState::new(identity.node_id(), config.transfer.clone());
+    let runtime_control = control.clone();
     let (command_tx, command_rx) = mpsc::channel(COMMAND_CAPACITY);
     let session_command_tx = command_tx.clone();
     let (event_tx, event_rx) = mpsc::channel(EVENT_CAPACITY);
@@ -749,7 +763,7 @@ pub fn spawn(
     let event_shutdown = stopped.clone();
     let (done_tx, done_rx) = std::sync::mpsc::channel();
     let thread = std::thread::Builder::new()
-        .name("p2p-desktop-network".into())
+        .name("p2p-node-network".into())
         .spawn(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
@@ -766,7 +780,7 @@ pub fn spawn(
                             command_rx,
                             runtime_allowed_targets,
                             stopped,
-                            SessionEvents::new(event_tx.clone(), event_shutdown),
+                            SessionEvents::new(event_tx.clone(), event_shutdown, runtime_control),
                         )
                         .await;
                         if let Some(transfer) = transfer {
@@ -787,6 +801,7 @@ pub fn spawn(
         })?;
     Ok((
         NodeSessionHandle {
+            control,
             commands: command_tx,
             allowed_forward_targets,
             lifetime: Arc::new(SessionLifetime {
@@ -3953,6 +3968,12 @@ fn test_verifier() -> RemoteVerifier {
         .get_or_init(|| RemoteVerifier::create(&test_password()).unwrap())
         .clone()
 }
+
+/// Compatibility names during the in-process desktop transition.
+#[cfg(feature = "gui")]
+pub(crate) type DesktopSessionConfig = NodeSessionConfig;
+#[cfg(feature = "gui")]
+pub(crate) type DesktopSessionHandle = NodeSessionHandle;
 
 #[cfg(test)]
 mod tests {
@@ -7882,7 +7903,3 @@ mod tests {
         server.abort();
     }
 }
-
-/// Compatibility names during the in-process desktop transition.
-pub(crate) type DesktopSessionConfig = NodeSessionConfig;
-pub(crate) type DesktopSessionHandle = NodeSessionHandle;

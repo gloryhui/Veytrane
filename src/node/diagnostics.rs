@@ -108,7 +108,7 @@ impl Peer {
         }
     }
 }
-pub(crate) struct Diagnostics {
+pub struct Diagnostics {
     signal_tls: Option<bool>,
     signal: Signal,
     signal_since: Instant,
@@ -414,7 +414,7 @@ fn allowed(value: bool) -> &'static str {
     if value { "已授权" } else { "未授权" }
 }
 
-pub(crate) fn export(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+pub fn export(path: &std::path::Path, text: &str) -> std::io::Result<()> {
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
