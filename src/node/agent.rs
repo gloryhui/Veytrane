@@ -53,9 +53,18 @@ impl Agent {
             return Err("restart_required: 节点已提交重启配置，请停止后重新启动".into());
         }
         match command {
-            Command::Status => Ok(
-                json!({"core_running":self.control.is_running(),"build":super::build_info::value("p2p-agent"),"diagnostics":self.diagnostics.lock().await.clone(),"restart_pending":self.restart_pending.load(std::sync::atomic::Ordering::Acquire),"budgets":{"peers":16,"pending_peers":8,"tcp_streams":256,"tcp_per_rule":32,"management_connections":32,"service_controls_per_peer":8},"data_dir":self.paths.root,"epoch":self.epoch,"revision":self.config.lock().await.revision,"node":self.control.snapshot().map_err(|e|e.to_string())?,"last_error":*self.last_error.lock().await,"forwards":self.forwards.lock().await.snapshot()}),
-            ),
+            Command::Status => {
+                // Never retain temporary mutex guards across another lock in
+                // json!: use the same config-first order as the coordinator.
+                let configuration = self.config.lock().await;
+                let node = self.control.snapshot().map_err(|e| e.to_string())?;
+                let forwards = self.forwards.lock().await.snapshot();
+                let last_error = self.last_error.lock().await.clone();
+                let diagnostics = self.diagnostics.lock().await.clone();
+                Ok(
+                    json!({"core_running":self.control.is_running(),"build":super::build_info::value("p2p-agent"),"diagnostics":diagnostics,"restart_pending":self.restart_pending.load(std::sync::atomic::Ordering::Acquire),"budgets":{"peers":16,"pending_peers":8,"tcp_streams":256,"tcp_per_rule":32,"management_connections":32,"service_controls_per_peer":8},"data_dir":self.paths.root,"epoch":self.epoch,"revision":configuration.revision,"node":node,"last_error":last_error,"forwards":forwards}),
+                )
+            }
             Command::Config => {
                 let record = self.config.lock().await;
                 Ok(
