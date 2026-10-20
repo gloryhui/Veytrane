@@ -86,6 +86,12 @@ pub enum Command {
         expected_revision: u64,
         settings: serde_json::Value,
     },
+    TrustVerified {
+        expected_revision: u64,
+        peer: String,
+        generation: u64,
+        name: String,
+    },
     SetPassword {
         expected_revision: u64,
         password: String,

@@ -31,6 +31,10 @@ pub struct NodeSettings {
     pub services: Vec<AllowedForwardTarget>,
     pub forwards: Vec<TunnelRule>,
     pub service_ids: HashMap<String, String>,
+    pub send_concurrency: u8,
+    pub auto_resume: bool,
+    pub receive_safety_mib: u16,
+    pub file_limits: super::bandwidth::FileLimits,
     pub enable_files: bool,
     pub enable_speed: bool,
     pub enable_tcp: bool,
@@ -50,6 +54,10 @@ impl NodeSettings {
             services: vec![],
             forwards: vec![],
             service_ids: HashMap::new(),
+            send_concurrency: 1,
+            auto_resume: true,
+            receive_safety_mib: 64,
+            file_limits: Default::default(),
             enable_files: true,
             enable_speed: true,
             enable_tcp: true,
@@ -72,6 +80,24 @@ impl NodeSettings {
         }
         if let Some(verifier) = &self.remote_auth {
             verifier.validate()?;
+        }
+        super::config::validate_send_concurrency(self.send_concurrency)
+            .map_err(|e| Error::Protocol(e.to_string()))?;
+        super::receive_policy::validate_safety_mib(self.receive_safety_mib)
+            .map_err(|e| Error::Protocol(e.to_string()))?;
+        self.file_limits
+            .validate()
+            .map_err(|e| Error::Protocol(e.into()))?;
+        if !self.signal_server.is_empty() {
+            let (host, port) = self
+                .signal_server
+                .rsplit_once(':')
+                .ok_or_else(|| Error::Protocol("信令地址须为HOST:PORT".into()))?;
+            if host.is_empty() || port.parse::<u16>().ok().is_none_or(|p| p == 0) {
+                return Err(Error::Protocol("信令地址/端口无效".into()));
+            }
+            super::config::validate_signal_host(host.trim_start_matches('[').trim_end_matches(']'))
+                .map_err(|e| Error::Protocol(e.to_string()))?;
         }
         self.resources.validate()?;
         super::trusted_devices::validate(&self.trusted_devices)
@@ -102,6 +128,9 @@ impl NodeSettings {
             ..Default::default()
         }
         .validate()?;
+        for service in &self.services {
+            super::wire::validate_service_id(&service.id)?;
+        }
         let mut listeners = HashSet::new();
         for rule in &self.forwards {
             if !rule.listen.ip().is_loopback() {

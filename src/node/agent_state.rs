@@ -36,7 +36,7 @@ impl Agent {
             serde_json::to_value(&current.settings.remote_auth).map_err(|e| e.to_string())?,
         );
         let settings: NodeSettings = serde_json::from_value(value).map_err(|e| e.to_string())?;
-        self.commit_settings(&mut current, expected, settings, id, digest)
+        self.commit_settings(&mut current, expected, settings, id, digest, None)
             .await
     }
     pub(crate) async fn commit_settings(
@@ -46,6 +46,7 @@ impl Agent {
         settings: NodeSettings,
         id: &str,
         digest: &str,
+        verified: Option<(crate::identity::NodeId, u64)>,
     ) -> Result<Value, String> {
         if expected != current.revision {
             return Err(format!(
@@ -66,6 +67,10 @@ impl Agent {
             "trusted_devices",
             "trust_sources",
             "remote_auth",
+            "send_concurrency",
+            "auto_resume",
+            "receive_safety_mib",
+            "file_limits",
         ] {
             before.as_object_mut().unwrap().remove(key);
             after.as_object_mut().unwrap().remove(key);
@@ -80,6 +85,8 @@ impl Agent {
             let source = settings.trust_sources[&device.node_id];
             if current.settings.trust_sources.get(&device.node_id) != Some(&source)
                 && source != super::authorization::TrustSource::Administrator
+                && !(source == super::authorization::TrustSource::PasswordVerified
+                    && verified.is_some_and(|(peer, _)| peer.to_hex() == device.node_id))
             {
                 return Err(
                     "新增或变更授权来源必须显式为administrator；密码证明/旧数据导入有独立入口"
@@ -102,7 +109,7 @@ impl Agent {
         // same event-loop turn. No grant is published on disk failure.
         let outcome = match self
             .control
-            .commit_agent_policy(record.clone(), self.paths.config())
+            .commit_agent_policy(record.clone(), self.paths.config(), verified)
             .await
         {
             Ok(outcome) => outcome,

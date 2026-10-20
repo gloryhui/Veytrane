@@ -43,7 +43,7 @@ impl Agent {
     async fn execute(&self, command: Command, id: &str, digest: &str) -> Result<Value, String> {
         match command {
             Command::Status => Ok(
-                json!({"data_dir":self.paths.root,"epoch":self.epoch,"revision":self.config.lock().await.revision,"node":self.control.snapshot().map_err(|e|e.to_string())?,"last_error":*self.last_error.lock().await,"forwards":self.forwards.lock().await.snapshot()}),
+                json!({"budgets":{"peers":16,"pending_peers":8,"tcp_streams":256,"tcp_per_rule":32,"management_connections":32,"service_controls_per_peer":8},"data_dir":self.paths.root,"epoch":self.epoch,"revision":self.config.lock().await.revision,"node":self.control.snapshot().map_err(|e|e.to_string())?,"last_error":*self.last_error.lock().await,"forwards":self.forwards.lock().await.snapshot()}),
             ),
             Command::Config => {
                 let record = self.config.lock().await;
@@ -167,6 +167,40 @@ impl Agent {
                 self.apply_settings(expected_revision, settings, id, digest)
                     .await
             }
+            Command::TrustVerified {
+                expected_revision,
+                peer,
+                generation,
+                name,
+            } => {
+                let peer = NodeId::from_hex(&peer).map_err(|e| e.to_string())?;
+                let mut record = self.config.lock().await;
+                if record
+                    .settings
+                    .trusted_devices
+                    .iter()
+                    .any(|d| d.node_id == peer.to_hex())
+                {
+                    return Err("设备已被信任".into());
+                }
+                let mut settings = record.settings.clone();
+                settings
+                    .trusted_devices
+                    .push(super::trusted_devices::TrustedDevice::new(peer, name, None));
+                settings.trust_sources.insert(
+                    peer.to_hex(),
+                    super::authorization::TrustSource::PasswordVerified,
+                );
+                self.commit_settings(
+                    &mut record,
+                    expected_revision,
+                    settings,
+                    id,
+                    digest,
+                    Some((peer, generation)),
+                )
+                .await
+            }
             Command::SetPassword {
                 expected_revision,
                 password,
@@ -181,7 +215,7 @@ impl Agent {
                 let mut record = self.config.lock().await;
                 let mut settings = record.settings.clone();
                 settings.remote_auth = Some(verifier);
-                self.commit_settings(&mut record, expected_revision, settings, id, digest)
+                self.commit_settings(&mut record, expected_revision, settings, id, digest, None)
                     .await
             }
             Command::Stop => Ok(json!({"stopping":true})),
@@ -204,9 +238,10 @@ impl Agent {
                 Err(_) => Response::error(&request.request_id, "timeout", "查询超时"),
             };
         }
-        let bytes =
+        let bytes = zeroize::Zeroizing::new(
             serde_json::to_vec(&serde_json::to_value(&request.command).expect("command JSON"))
-                .expect("command bytes");
+                .expect("command bytes"),
+        );
         let digest = blake3::hash(&bytes).to_hex().to_string();
         {
             let record = self.config.lock().await;
@@ -260,7 +295,7 @@ impl Agent {
                     Ok(v) => Response::ok(&id, v),
                     Err(e) => {
                         *owner.last_error.lock().await = Some(e.clone());
-                        Response::error(&id, "command_failed", e)
+                        Response::error(&id, error_code(&e), e)
                     }
                 };
                 response.send_replace(Some(result));
@@ -308,6 +343,18 @@ pub async fn run(paths: AgentPaths) -> io::Result<()> {
         record.settings.receive_root.clone(),
     )
     .map_err(io::Error::other)?;
+    control
+        .set_auto_resume(record.settings.auto_resume)
+        .map_err(io::Error::other)?;
+    control
+        .set_send_limit(record.settings.send_concurrency)
+        .map_err(io::Error::other)?;
+    control
+        .set_file_limits(record.settings.file_limits)
+        .map_err(io::Error::other)?;
+    control
+        .set_receive_safety_mib(record.settings.receive_safety_mib)
+        .map_err(io::Error::other)?;
     let (_, mut events) = control.subscribe().map_err(io::Error::other)?;
     let agent = Arc::new(Agent {
         control,
@@ -456,4 +503,13 @@ fn read_candidate(path: &std::path::Path) -> io::Result<Request> {
         return Err(io::Error::other("SIGHUP候选只能是apply_config请求"));
     }
     Ok(request)
+}
+
+fn error_code(message: &str) -> &'static str {
+    for code in ["revision_conflict", "restart_required", "recovery_required"] {
+        if message.starts_with(code) {
+            return code;
+        }
+    }
+    "command_failed"
 }

@@ -274,12 +274,14 @@ impl NodeSessionHandle {
         &self,
         record: super::agent_config::ConfigRecord,
         path: std::path::PathBuf,
+        verified: Option<(NodeId, u64)>,
     ) -> std::result::Result<crate::storage::atomic::WriteOutcome, String> {
         let (done, result) = oneshot::channel();
         self.commands
             .send(SessionCommand::CommitAgentPolicy {
                 record: Box::new(record),
                 path,
+                verified,
                 done,
             })
             .await
@@ -744,6 +746,7 @@ enum SessionCommand {
     CommitAgentPolicy {
         record: Box<super::agent_config::ConfigRecord>,
         path: std::path::PathBuf,
+        verified: Option<(NodeId, u64)>,
         done: oneshot::Sender<std::result::Result<crate::storage::atomic::WriteOutcome, String>>,
     },
     UpdateTunnelSettings {
@@ -1315,12 +1318,29 @@ async fn run_session(
                 sender.send_replace(current);
                 let _ = done.send(Ok(sender.subscribe()));
             }
-            Wake::Command(Some(SessionCommand::CommitAgentPolicy { record, path, done })) => {
+            Wake::Command(Some(SessionCommand::CommitAgentPolicy {
+                record,
+                path,
+                verified,
+                done,
+            })) => {
                 // Bind preparation belongs to Agent. This actor is the single
                 // authorization publisher and persists before exposing grants.
                 if let Err(error) = record.settings.validate() {
                     let _ = done.send(Err(error.to_string()));
                     continue;
+                }
+                if let Some((peer, generation)) = verified {
+                    let valid = connections
+                        .get(&peer)
+                        .is_some_and(|(g, c)| *g == generation && c.close_reason().is_none())
+                        && authorizations.get(&peer).is_some_and(|(g, _, rights)| {
+                            *g == generation && rights.borrow().inbound.password
+                        });
+                    if !valid {
+                        let _ = done.send(Err("密码证明已失效；请重新连接后再信任设备".into()));
+                        continue;
+                    }
                 }
                 let outcome = match crate::storage::atomic::write_json(&path, &record) {
                     Ok(outcome) => outcome,
@@ -1387,6 +1407,15 @@ async fn run_session(
                     if let Some(service) = &config.transfer {
                         service.cancel_peer_recovery(peer);
                     }
+                }
+                if let Some(service) = &config.transfer {
+                    // Values have already been validated before persistence.
+                    service.set_auto_resume(record.settings.auto_resume);
+                    let _ = service.set_send_limit(record.settings.send_concurrency);
+                    let _ = service.set_file_limits(record.settings.file_limits);
+                    let _ = service
+                        .receive_space
+                        .set_safety_mib(record.settings.receive_safety_mib);
                 }
                 let _ = done.send(Ok(outcome));
             }

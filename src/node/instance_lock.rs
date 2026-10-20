@@ -23,6 +23,18 @@ impl InstanceLock {
             super::config::ensure_private_app_dir(parent)?;
         }
 
+        if let Ok(metadata) = std::fs::symlink_metadata(path) {
+            if !metadata.is_file() || metadata.file_type().is_symlink() {
+                return Err(io::Error::other("实例锁必须是普通文件").into());
+            }
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                if metadata.file_attributes() & 0x400 != 0 {
+                    return Err(io::Error::other("实例锁不能是reparse point").into());
+                }
+            }
+        }
         let mut options = OpenOptions::new();
         options.create(true).read(true).write(true);
         #[cfg(unix)]

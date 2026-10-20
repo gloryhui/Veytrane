@@ -2,7 +2,7 @@
 use std::{io, path::Path};
 
 pub fn ensure_directory(path: &Path) -> io::Result<()> {
-    super::config::ensure_private_app_dir(path)?;
+    std::fs::create_dir_all(path)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
@@ -13,6 +13,7 @@ pub fn ensure_directory(path: &Path) -> io::Result<()> {
             ));
         }
     }
+    super::config::ensure_private_app_dir(path)?;
     #[cfg(windows)]
     windows::protect_directory(path)?;
     Ok(())
