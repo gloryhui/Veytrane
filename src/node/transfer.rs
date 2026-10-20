@@ -45,6 +45,8 @@ type TestGate = Arc<
 #[derive(Clone)]
 pub(crate) struct TransferService {
     unified_connections: Arc<Mutex<HashSet<usize>>>,
+    resource_scopes:
+        Arc<Mutex<HashMap<usize, watch::Receiver<super::authorization::ResourcePolicy>>>>,
     store: Arc<Mutex<TaskStore>>,
     receive_root: Arc<Mutex<PathBuf>>,
     active: Arc<Mutex<HashMap<TaskId, Active>>>,
@@ -187,6 +189,11 @@ impl Drop for TransportModeGuard {
             .lock()
             .unwrap()
             .remove(&self.transport);
+        self.service
+            .resource_scopes
+            .lock()
+            .unwrap()
+            .remove(&self.transport);
     }
 }
 
@@ -246,12 +253,19 @@ impl TransferService {
         &self,
         connection: &Connection,
         unified: bool,
+        scope: Option<watch::Receiver<super::authorization::ResourcePolicy>>,
     ) -> TransportModeGuard {
         let mut modes = self.unified_connections.lock().unwrap();
         if unified {
             modes.insert(connection.stable_id());
         } else {
             modes.remove(&connection.stable_id());
+        }
+        let mut scopes = self.resource_scopes.lock().unwrap();
+        if let Some(scope) = scope {
+            scopes.insert(connection.stable_id(), scope);
+        } else {
+            scopes.remove(&connection.stable_id());
         }
         TransportModeGuard {
             service: self.clone(),
@@ -300,6 +314,7 @@ impl TransferService {
         let (changed, _) = watch::channel(0);
         Self {
             unified_connections: Default::default(),
+            resource_scopes: Default::default(),
             store: Arc::new(Mutex::new(store)),
             receive_root: Arc::new(Mutex::new(receive_root)),
             active: Arc::new(Mutex::new(HashMap::new())),
@@ -2358,7 +2373,8 @@ impl TransferService {
             tokio::select! {
                 accepted=next_incoming(&connection, &mut incoming)=> {
                     let Some((kind, super::dispatch::BiStream {mut send, mut recv})) = accepted else { break };
-                    let resources = incoming.as_ref().map(|inlets| inlets.resources.clone());
+                    let resources = incoming.as_ref().map(|inlets| inlets.resources.clone())
+                        .or_else(|| self.resource_scopes.lock().unwrap().get(&connection.stable_id()).cloned());
                     if !authorization.current().inbound_authorized() || streams.len()>=8 {let _=send.reset(4u32.into());let _=recv.stop(4u32.into());continue;}
                     let service=self.clone();let connection=connection.clone();let speed=speed.clone();let allowed_forward_targets=allowed_forward_targets.clone();
                     let authorization = authorization.clone();
@@ -2366,17 +2382,23 @@ impl TransferService {
                         authorization.guard(true, async {
                         let buffered=tokio::time::timeout(Duration::from_secs(5),service.frame_budget.read(&mut recv,None)).await.map_err(|_|disk::failure("文件流首帧超时"))??;
                         let super::frame_budget::BufferedFrame {frame:mut first,_lease}=buffered;
-                        if let Some(kind) = kind {
+                        if kind.is_some() || resources.is_some() {
                             let allowed = resources.as_ref().map(|r| r.borrow().for_peer(peer)).unwrap_or_default();
+                            let actual = kind.unwrap_or(match first.message {
+                                Message::Speed(_) => super::wire::StreamKind::Speed,
+                                Message::TunnelOpen { .. } => super::wire::StreamKind::Service,
+                                _ => super::wire::StreamKind::File,
+                            });
                             let kind_matches = match kind {
-                                super::wire::StreamKind::File => !matches!(first.message, Message::Speed(_) | Message::TunnelOpen { .. }),
-                                super::wire::StreamKind::Speed => matches!(first.message, Message::Speed(_)),
-                                _ => false,
+                                Some(super::wire::StreamKind::File) => !matches!(first.message, Message::Speed(_) | Message::TunnelOpen { .. }),
+                                Some(super::wire::StreamKind::Speed) => matches!(first.message, Message::Speed(_)),
+                                Some(_) => false,
+                                None => true,
                             };
-                            let permitted = !allowed.disabled && match kind {
+                            let permitted = !allowed.disabled && match actual {
                                 super::wire::StreamKind::File => allowed.files,
                                 super::wire::StreamKind::Speed => allowed.speed,
-                                _ => false,
+                                super::wire::StreamKind::Service => kind.is_none(),
                             };
                             if !kind_matches || !permitted {
                                 let code = if !kind_matches { super::dispatch::RESET_INVALID } else { super::dispatch::RESET_UNAUTHORIZED };

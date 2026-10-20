@@ -1997,6 +1997,25 @@ async fn run_session(
                 let _ = command_tx.try_send(SessionCommand::ConnectPeer(peer));
             }
             Wake::Command(Some(SessionCommand::ConnectPeer(peer))) => {
+                if mode_for(peer) == super::wire::PeerWireMode::LegacyCliV3 {
+                    credentials.remove(&peer);
+                    let detail =
+                        "统一 Agent 尚不支持旧 CLI v3；请升级对端或使用独立旧命令".to_owned();
+                    if let BeginPeerAttempt::Started(generation) = peers.begin_attempt(peer) {
+                        peers.transition(peer, generation, PeerLifecycle::Failed(detail.clone()));
+                        emit_peer_state(
+                            &events,
+                            peer,
+                            generation,
+                            PeerLifecycle::Failed(detail.clone()),
+                        )
+                        .await;
+                    }
+                    let _ = events.send(SessionEvent::Diagnostic(detail.clone())).await;
+                    fail_peer_tunnels(peer, &detail, &running_tunnels, &mut forced_tunnel_errors);
+                    continue;
+                }
+
                 if manually_disconnected.contains(&peer)
                     || resource_policy.borrow().for_peer(peer).disabled
                 {
@@ -2911,9 +2930,12 @@ async fn run_session(
                 }
                 let unified = mode_for(peer) == super::wire::PeerWireMode::UnifiedV1;
                 let transfer = config.transfer.clone();
-                let wire_binding = transfer
-                    .as_ref()
-                    .map(|service| service.set_unified_connection(&connection, unified));
+                let resource_scope = (config.wire_mode == super::wire::PeerWireMode::UnifiedV1
+                    || unified)
+                    .then(|| resource_policy.subscribe());
+                let wire_binding = transfer.as_ref().map(|service| {
+                    service.set_unified_connection(&connection, unified, resource_scope.clone())
+                });
                 let business_connection = connection.clone();
                 let allowed_targets = allowed_forward_targets.subscribe();
                 let resources = resource_policy.subscribe();
@@ -2987,9 +3009,14 @@ async fn run_session(
                                 ))
                                 .await;
                         }
-                    } else if let Err(error) =
-                        super::tunnel::serve_peer(business_connection, peer, live, allowed_targets)
-                            .await
+                    } else if let Err(error) = super::tunnel::serve_peer_scoped(
+                        business_connection,
+                        peer,
+                        live,
+                        allowed_targets,
+                        resource_scope,
+                    )
+                    .await
                     {
                         debug!(peer = %peer.short(), %error, "TCP tunnel peer service ended");
                     }
@@ -3940,6 +3967,20 @@ async fn start_peer_attempt(
         },
     };
     let generation = generation?;
+    if options.mode == super::wire::PeerWireMode::LegacyCliV3 {
+        let detail = "统一 Agent 尚不支持旧 CLI v3；请升级对端或使用独立旧命令".to_owned();
+        peers.transition(peer, generation, PeerLifecycle::Failed(detail.clone()));
+        emit_peer_state(
+            events,
+            peer,
+            generation,
+            PeerLifecycle::Failed(detail.clone()),
+        )
+        .await;
+        let _ = events.send(SessionEvent::Diagnostic(detail)).await;
+        return None;
+    }
+
     let Ok(permit) = Arc::clone(semaphore).try_acquire_owned() else {
         let detail = "待认证连接已达资源上限".to_owned();
         peers.transition(peer, generation, PeerLifecycle::Failed(detail.clone()));

@@ -100,11 +100,21 @@ pub(crate) async fn serve_open(
 
 /// Serve tunnel streams when the task store is unavailable. This preserves
 /// TCP forwarding as an independent service while retaining structured cleanup.
+#[cfg(test)]
 pub(crate) async fn serve_peer(
     connection: Connection,
     peer: NodeId,
     authorization: super::remote_auth::LiveAuthorization,
     allowed_updates: watch::Receiver<Vec<super::config::AllowedForwardTarget>>,
+) -> Result<()> {
+    serve_peer_scoped(connection, peer, authorization, allowed_updates, None).await
+}
+pub(crate) async fn serve_peer_scoped(
+    connection: Connection,
+    peer: NodeId,
+    authorization: super::remote_auth::LiveAuthorization,
+    allowed_updates: watch::Receiver<Vec<super::config::AllowedForwardTarget>>,
+    resources: Option<watch::Receiver<super::authorization::ResourcePolicy>>,
 ) -> Result<()> {
     let mut streams = JoinSet::new();
     loop {
@@ -137,6 +147,7 @@ pub(crate) async fn serve_peer(
                     continue;
                 }
                 let allowed_updates = allowed_updates.clone();
+                let resources = resources.clone();
                 let authorization = authorization.clone();
                 streams.spawn(async move {
                     authorization.guard(true, async {
@@ -144,6 +155,11 @@ pub(crate) async fn serve_peer(
                     let frame = tokio::time::timeout(STREAM_OPEN_TIMEOUT, protocol::read(&mut recv))
                         .await
                         .map_err(|_| Error::Protocol("等待隧道请求超时".into()))??;
+                    if resources.as_ref().is_some_and(|r| r.borrow().for_peer(peer).disabled) {
+                        let _ = send.reset(super::dispatch::RESET_UNAUTHORIZED.into());
+                        let _ = recv.stop(super::dispatch::RESET_UNAUTHORIZED.into());
+                        return Err(Error::Protocol("设备已被禁用".into()));
+                    }
                     match frame.message {
                         Message::TunnelOpen { target } => {
                             let allowed = allowed_updates.borrow().clone();
