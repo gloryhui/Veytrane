@@ -44,6 +44,7 @@ type TestGate = Arc<
 
 #[derive(Clone)]
 pub(crate) struct TransferService {
+    unified_connections: Arc<Mutex<HashSet<usize>>>,
     store: Arc<Mutex<TaskStore>>,
     receive_root: Arc<Mutex<PathBuf>>,
     active: Arc<Mutex<HashMap<TaskId, Active>>>,
@@ -175,10 +176,108 @@ async fn blocking<T: Send + 'static>(
         .map_err(|_| disk::failure("文件后台任务中断"))?
 }
 
+pub(crate) struct FileInlets {
+    pub files: tokio::sync::mpsc::Receiver<super::dispatch::BiStream>,
+    pub speed: tokio::sync::mpsc::Receiver<super::dispatch::BiStream>,
+    pub resources: watch::Receiver<super::authorization::ResourcePolicy>,
+    files_open: bool,
+    speed_open: bool,
+}
+impl FileInlets {
+    pub(crate) fn new(
+        files: tokio::sync::mpsc::Receiver<super::dispatch::BiStream>,
+        speed: tokio::sync::mpsc::Receiver<super::dispatch::BiStream>,
+        resources: watch::Receiver<super::authorization::ResourcePolicy>,
+    ) -> Self {
+        Self {
+            files,
+            speed,
+            resources,
+            files_open: true,
+            speed_open: true,
+        }
+    }
+}
+async fn next_incoming(
+    connection: &Connection,
+    incoming: &mut Option<FileInlets>,
+) -> Option<(Option<super::wire::StreamKind>, super::dispatch::BiStream)> {
+    let Some(inlets) = incoming else {
+        return connection
+            .accept_bi()
+            .await
+            .ok()
+            .map(|(send, recv)| (None, super::dispatch::BiStream { send, recv }));
+    };
+    loop {
+        if !inlets.files_open && !inlets.speed_open {
+            return None;
+        }
+        tokio::select! {
+            _ = connection.closed() => return None,
+            stream = inlets.files.recv(), if inlets.files_open => match stream {
+                Some(stream) => return Some((Some(super::wire::StreamKind::File), stream)),
+                None => inlets.files_open = false,
+            },
+            stream = inlets.speed.recv(), if inlets.speed_open => match stream {
+                Some(stream) => return Some((Some(super::wire::StreamKind::Speed), stream)),
+                None => inlets.speed_open = false,
+            }
+        }
+    }
+}
+
 impl TransferService {
+    pub(crate) fn set_unified_connection(&self, connection: &Connection, unified: bool) {
+        let mut modes = self.unified_connections.lock().unwrap();
+        if unified {
+            modes.insert(connection.stable_id());
+        } else {
+            modes.remove(&connection.stable_id());
+        }
+    }
+    fn is_unified(&self, connection: &Connection) -> bool {
+        self.unified_connections
+            .lock()
+            .unwrap()
+            .contains(&connection.stable_id())
+    }
+    async fn open_file_stream(&self, connection: &Connection) -> Result<(SendStream, RecvStream)> {
+        let stream = super::dispatch::open_bi(
+            connection,
+            super::wire::StreamKind::File,
+            self.is_unified(connection),
+        )
+        .await?;
+        Ok((stream.send, stream.recv))
+    }
+    pub async fn cancel_task(&self, id: TaskId) -> Result<()> {
+        self.recovery.lock().unwrap().cancel(&id);
+        let active = self.active.clone();
+        let queue = self.sender_queue.clone();
+        let task = id.clone();
+        self.store(move |store| {
+            store.cancel(&task).map_err(disk::local_error)?;
+            let active = active.lock().unwrap();
+            if let Some(attempt) = active.get(&task) {
+                attempt.pause.send_replace(true);
+            }
+            let mut queue = queue.lock().unwrap();
+            queue.remove_queued(&task);
+            if !active.contains_key(&task)
+                && let Some(generation) = queue.slot_generation(&task)
+            {
+                queue.finish_if(&task, generation);
+            }
+            Ok(())
+        })
+        .await?;
+        self.wait_previous_attempt(&id).await
+    }
     pub fn new(store: TaskStore, receive_root: PathBuf) -> Self {
         let (changed, _) = watch::channel(0);
         Self {
+            unified_connections: Default::default(),
             store: Arc::new(Mutex::new(store)),
             receive_root: Arc::new(Mutex::new(receive_root)),
             active: Arc::new(Mutex::new(HashMap::new())),
@@ -634,7 +733,10 @@ impl TransferService {
         tokio::time::timeout(
             super::incremental::COMPARE_TIMEOUT + Duration::from_secs(5),
             async {
-                let (mut send, mut recv) = connection.open_bi().await.map_err(disk::local_error)?;
+                let (mut send, mut recv) = self
+                    .open_file_stream(connection)
+                    .await
+                    .map_err(disk::local_error)?;
                 protocol::write(
                     &mut send,
                     &Frame {
@@ -1757,7 +1859,7 @@ impl TransferService {
         let source = record.clone();
         let file = blocking(move || disk::verify_source(&source)).await?;
         let details = record.file_details().unwrap();
-        let (send, recv) = tokio::time::timeout(IDLE_TIMEOUT, connection.open_bi())
+        let (send, recv) = tokio::time::timeout(IDLE_TIMEOUT, self.open_file_stream(connection))
             .await
             .map_err(|_| disk::failure("文件流打开超时"))?
             .map_err(disk::local_error)?;
@@ -1826,7 +1928,7 @@ impl TransferService {
         })
         .await
         .map_err(|_| disk::failure("源文件不可用"))?;
-        let (send, recv) = tokio::time::timeout(IDLE_TIMEOUT, connection.open_bi())
+        let (send, recv) = tokio::time::timeout(IDLE_TIMEOUT, self.open_file_stream(connection))
             .await
             .map_err(|_| disk::failure("目录流打开超时"))?
             .map_err(disk::local_error)?;
@@ -2116,16 +2218,56 @@ impl TransferService {
         authorization: impl Into<super::remote_auth::LiveAuthorization>,
         allowed_forward_targets: watch::Receiver<Vec<super::config::AllowedForwardTarget>>,
     ) -> Result<()> {
-        let authorization = authorization.into();
-        let speed = super::speed::SpeedPeer::new(
+        self.serve_peer_transport(
+            connection,
+            peer,
+            local,
+            authorization.into(),
+            allowed_forward_targets,
+            None,
+        )
+        .await
+    }
+    pub(crate) async fn serve_dispatched(
+        &self,
+        connection: Connection,
+        peer: NodeId,
+        local: NodeId,
+        authorization: super::remote_auth::LiveAuthorization,
+        allowed_forward_targets: watch::Receiver<Vec<super::config::AllowedForwardTarget>>,
+        incoming: FileInlets,
+    ) -> Result<()> {
+        self.serve_peer_transport(
+            connection,
+            peer,
+            local,
+            authorization,
+            allowed_forward_targets,
+            Some(incoming),
+        )
+        .await
+    }
+    async fn serve_peer_transport(
+        &self,
+        connection: Connection,
+        peer: NodeId,
+        local: NodeId,
+        authorization: super::remote_auth::LiveAuthorization,
+        allowed_forward_targets: watch::Receiver<Vec<super::config::AllowedForwardTarget>>,
+        incoming: Option<FileInlets>,
+    ) -> Result<()> {
+        let speed = super::speed::SpeedPeer::new_with_mode(
             connection.clone(),
             local,
             peer,
             self.activity.clone(),
             self.changed.clone(),
+            self.is_unified(&connection),
         );
         self.speed_peers.lock().unwrap().insert(peer, speed.clone());
         struct RemovePeer {
+            modes: Arc<Mutex<HashSet<usize>>>,
+            transport: usize,
             map: Arc<Mutex<HashMap<NodeId, super::speed::SpeedPeer>>>,
             peer: NodeId,
             speed: super::speed::SpeedPeer,
@@ -2133,6 +2275,7 @@ impl TransferService {
         impl Drop for RemovePeer {
             fn drop(&mut self) {
                 self.speed.cancel_all();
+                self.modes.lock().unwrap().remove(&self.transport);
                 let mut map = self.map.lock().unwrap();
                 if map
                     .get(&self.peer)
@@ -2143,6 +2286,8 @@ impl TransferService {
             }
         }
         let _guard = RemovePeer {
+            modes: self.unified_connections.clone(),
+            transport: connection.stable_id(),
             map: self.speed_peers.clone(),
             peer,
             speed: speed.clone(),
@@ -2153,6 +2298,7 @@ impl TransferService {
             Some(speed),
             authorization,
             allowed_forward_targets,
+            incoming,
         )
         .await
     }
@@ -2166,6 +2312,7 @@ impl TransferService {
             None,
             super::remote_auth::RemoteAuthorization::BOTH.into(),
             allowed_forward_targets,
+            None,
         )
         .await
     }
@@ -2176,6 +2323,7 @@ impl TransferService {
         speed: Option<super::speed::SpeedPeer>,
         authorization: super::remote_auth::LiveAuthorization,
         allowed_forward_targets: watch::Receiver<Vec<super::config::AllowedForwardTarget>>,
+        mut incoming: Option<FileInlets>,
     ) -> Result<()> {
         let mut streams = JoinSet::new();
         if let Some(speed) = speed.clone() {
@@ -2186,8 +2334,9 @@ impl TransferService {
         }
         loop {
             tokio::select! {
-                accepted=connection.accept_bi()=> {
-                    let (mut send,mut recv)=match accepted { Ok(streams)=>streams, Err(_)=>break };
+                accepted=next_incoming(&connection, &mut incoming)=> {
+                    let Some((kind, super::dispatch::BiStream {mut send, mut recv})) = accepted else { break };
+                    let resources = incoming.as_ref().map(|inlets| inlets.resources.clone());
                     if !authorization.current().inbound_authorized() || streams.len()>=8 {let _=send.reset(4u32.into());let _=recv.stop(4u32.into());continue;}
                     let service=self.clone();let connection=connection.clone();let speed=speed.clone();let allowed_forward_targets=allowed_forward_targets.clone();
                     let authorization = authorization.clone();
@@ -2195,6 +2344,24 @@ impl TransferService {
                         authorization.guard(true, async {
                         let buffered=tokio::time::timeout(Duration::from_secs(5),service.frame_budget.read(&mut recv,None)).await.map_err(|_|disk::failure("文件流首帧超时"))??;
                         let super::frame_budget::BufferedFrame {frame:mut first,_lease}=buffered;
+                        if let Some(kind) = kind {
+                            let allowed = resources.as_ref().map(|r| r.borrow().for_peer(peer)).unwrap_or_default();
+                            let kind_matches = match kind {
+                                super::wire::StreamKind::File => !matches!(first.message, Message::Speed(_) | Message::TunnelOpen { .. }),
+                                super::wire::StreamKind::Speed => matches!(first.message, Message::Speed(_)),
+                                _ => false,
+                            };
+                            let permitted = !allowed.disabled && match kind {
+                                super::wire::StreamKind::File => allowed.files,
+                                super::wire::StreamKind::Speed => allowed.speed,
+                                _ => false,
+                            };
+                            if !kind_matches || !permitted {
+                                let code = if !kind_matches { super::dispatch::RESET_INVALID } else { super::dispatch::RESET_UNAUTHORIZED };
+                                let _ = send.reset(code.into()); let _ = recv.stop(code.into());
+                                return Err(disk::failure("节点业务类型或资源权限拒绝"));
+                            }
+                        }
                         let incremental = matches!(&first.message, Message::IncrementalOffer { .. });
                         let incremental_automatic = matches!(&first.message, Message::IncrementalOffer { automatic: true, .. });
                         if incremental {
@@ -2325,7 +2492,10 @@ impl TransferService {
         automatic: bool,
     ) -> Result<()> {
         let result = tokio::time::timeout(IDLE_TIMEOUT, async {
-            let (mut send, mut recv) = connection.open_bi().await.map_err(disk::local_error)?;
+            let (mut send, mut recv) = self
+                .open_file_stream(connection)
+                .await
+                .map_err(disk::local_error)?;
             protocol::write(
                 &mut send,
                 &Frame {

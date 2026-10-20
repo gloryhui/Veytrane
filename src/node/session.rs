@@ -697,6 +697,15 @@ enum SessionCommand {
 }
 
 impl SessionCommand {
+    fn required_capability(&self) -> u64 {
+        match self {
+            Self::StartSpeed { .. } => super::protocol::CAP_SPEED_EXECUTION,
+            Self::PreviewDirectory { .. }
+            | Self::ConfirmDirectory { .. }
+            | Self::SendDirectory { .. } => super::protocol::CAP_DIRECTORY_TRANSFER,
+            _ => super::protocol::CAP_FILE_TRANSFER,
+        }
+    }
     fn preview_request(&self) -> Option<super::task_model::TaskId> {
         match self {
             Self::PreviewDirectory { request, .. } => Some(request.clone()),
@@ -1127,6 +1136,26 @@ async fn run_session(
             })),
             wake => wake,
         };
+        if let Wake::Command(Some(command)) = &wake
+            && let Some(peer) = command.business_peer()
+            && mode_for(peer) == super::wire::PeerWireMode::UnifiedV1
+            && !peer_capabilities.get(&peer).is_some_and(|caps| {
+                caps & command.required_capability() == command.required_capability()
+            })
+        {
+            let _ = events
+                .send(SessionEvent::Diagnostic("对端未启用此节点业务能力".into()))
+                .await;
+            if let Some(request) = command.preview_request() {
+                let _ = events
+                    .send(SessionEvent::DirectoryPreviewFailed(request))
+                    .await;
+            }
+            if matches!(command, SessionCommand::StartSpeed { .. }) {
+                let _ = events.send(SessionEvent::SpeedRequestEnded { peer }).await;
+            }
+            continue;
+        }
         // One authorization gate covers outgoing sensitive commands. Local cancellation,
         // settings, and listener startup remain available while a peer is unavailable.
         if let Wake::Command(Some(command)) = &wake
@@ -2792,45 +2821,90 @@ async fn run_session(
                         .await;
                     }
                 }
-                if let Some(service) = config.transfer.clone() {
-                    let transfer_connection = connection.clone();
-                    let transfer_events = events.clone();
-                    let allowed_forward_targets = allowed_forward_targets.subscribe();
-                    peer_tasks.spawn(async move {
+                let unified = mode_for(peer) == super::wire::PeerWireMode::UnifiedV1;
+                let transfer = config.transfer.clone();
+                if let Some(service) = &transfer {
+                    service.set_unified_connection(&connection, unified);
+                }
+                let business_connection = connection.clone();
+                let allowed_targets = allowed_forward_targets.subscribe();
+                let resources = resource_policy.subscribe();
+                let business_events = events.clone();
+                peer_tasks.spawn(async move {
+                    if unified {
+                        let (_dispatcher, incoming) = super::dispatch::Dispatcher::start(
+                            business_connection.clone(),
+                            capabilities,
+                        );
+                        let super::dispatch::Incoming {
+                            files,
+                            services,
+                            speed,
+                        } = incoming;
+                        if let Some(service) = transfer {
+                            let inlets =
+                                super::transfer::FileInlets::new(files, speed, resources.clone());
+                            let (file_result, service_result) = tokio::join!(
+                                service.serve_dispatched(
+                                    business_connection,
+                                    peer,
+                                    local_node,
+                                    live.clone(),
+                                    allowed_targets.clone(),
+                                    inlets
+                                ),
+                                super::services::serve(
+                                    peer,
+                                    live,
+                                    allowed_targets,
+                                    resources,
+                                    services
+                                ),
+                            );
+                            if file_result.is_err() || service_result.is_err() {
+                                let _ = business_events
+                                    .send(SessionEvent::Diagnostic(
+                                        "节点业务会话已结束；任务状态以持久记录为准".into(),
+                                    ))
+                                    .await;
+                            }
+                        } else {
+                            drop(files);
+                            drop(speed);
+                            let _ = super::services::serve(
+                                peer,
+                                live,
+                                allowed_targets,
+                                resources,
+                                services,
+                            )
+                            .await;
+                        }
+                    } else if let Some(service) = transfer {
                         if service
                             .serve_peer_with_speed_and_targets(
-                                transfer_connection,
+                                business_connection,
                                 peer,
                                 local_node,
                                 live,
-                                allowed_forward_targets,
+                                allowed_targets,
                             )
                             .await
                             .is_err()
                         {
-                            let _ = transfer_events
+                            let _ = business_events
                                 .send(SessionEvent::Diagnostic(
                                     "文件会话已中断，任务可手动继续".into(),
                                 ))
                                 .await;
                         }
-                    });
-                } else {
-                    let tunnel_connection = connection.clone();
-                    let allowed_forward_targets = allowed_forward_targets.subscribe();
-                    peer_tasks.spawn(async move {
-                        if let Err(error) = super::tunnel::serve_peer(
-                            tunnel_connection,
-                            peer,
-                            live,
-                            allowed_forward_targets,
-                        )
-                        .await
-                        {
-                            debug!(peer = %peer.short(), %error, "TCP tunnel peer service ended");
-                        }
-                    });
-                }
+                    } else if let Err(error) =
+                        super::tunnel::serve_peer(business_connection, peer, live, allowed_targets)
+                            .await
+                    {
+                        debug!(peer = %peer.short(), %error, "TCP tunnel peer service ended");
+                    }
+                });
                 let closed_inputs = input_tx.clone();
                 peer_tasks.spawn(async move {
                     let reason = connection.closed().await;
@@ -3257,6 +3331,10 @@ async fn run_session(
                         .state(**peer)
                         .is_some_and(PeerLifecycle::outbound_authorized)
                         && connection.close_reason().is_none()
+                        && (mode_for(**peer) != super::wire::PeerWireMode::UnifiedV1
+                            || peer_capabilities
+                                .get(*peer)
+                                .is_some_and(|caps| caps & super::protocol::CAP_FILE_TRANSFER != 0))
                 })
                 .map(|(peer, (_, connection))| (*peer, connection.clone()))
                 .collect();

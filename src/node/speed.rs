@@ -62,6 +62,7 @@ impl SpeedSnapshot {
 #[derive(Clone)]
 pub(crate) struct SpeedPeer(Arc<Peer>);
 struct Peer {
+    unified: bool,
     connection: Connection,
     local: NodeId,
     remote: NodeId,
@@ -128,14 +129,16 @@ impl Drop for DataRecv {
 }
 
 impl SpeedPeer {
-    pub fn new(
+    pub fn new_with_mode(
         connection: Connection,
         local: NodeId,
         remote: NodeId,
         activity: Activity,
         changed: watch::Sender<u64>,
+        unified: bool,
     ) -> Self {
         Self(Arc::new(Peer {
+            unified,
             connection,
             local,
             remote,
@@ -358,11 +361,17 @@ impl SpeedPeer {
             message: Message::Speed(request.clone()),
         }
         .encode()?;
-        let (mut send, mut recv) =
-            tokio::time::timeout(CONTROL_TIMEOUT, self.0.connection.open_bi())
-                .await
-                .map_err(|_| failure("测速控制流打开超时"))?
-                .map_err(local_error)?;
+        let super::dispatch::BiStream { mut send, mut recv } = tokio::time::timeout(
+            CONTROL_TIMEOUT,
+            super::dispatch::open_bi(
+                &self.0.connection,
+                super::wire::StreamKind::Speed,
+                self.0.unified,
+            ),
+        )
+        .await
+        .map_err(|_| failure("测速控制流打开超时"))?
+        .map_err(local_error)?;
         let prepared = if self.0.local < self.0.remote {
             let prepared = self.prepare(self.0.local, id, direction, seconds, None)?;
             write(

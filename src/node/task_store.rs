@@ -314,6 +314,34 @@ impl TaskStore {
         Ok(())
     }
 
+    pub(crate) fn cancel(&mut self, id: &TaskId) -> Result<(), TaskStoreError> {
+        self.ensure_healthy()?;
+        let mut candidate = self.tasks.clone();
+        let task = candidate
+            .iter_mut()
+            .find(|task| task.task_id() == id)
+            .ok_or(TaskStoreError::TaskNotFound)?;
+        if task
+            .diagnostic()
+            .is_some_and(|d| d.code() == super::task_model::TaskErrorCode::UserCancelled)
+        {
+            return Ok(());
+        }
+        let previous = task.state();
+        task.cancel(system_time_unix_ms()?)?;
+        let now = task.updated_at_unix_ms();
+        self.commit_tasks(candidate)?;
+        self.events.record(
+            id.clone(),
+            now,
+            TaskEventKind::StateChanged {
+                from: previous,
+                to: TaskState::Failed,
+            },
+        );
+        Ok(())
+    }
+
     pub(crate) fn prepare_publication(&mut self, id: &TaskId) -> Result<(), TaskStoreError> {
         self.ensure_healthy()?;
         let mut candidate = self.tasks.clone();

@@ -389,6 +389,9 @@ impl NodeControl {
             .as_ref()
             .ok_or_else(|| Error::Protocol("文件服务未启用".into()))
     }
+    pub async fn cancel_task(&self, task: TaskId) -> Result<()> {
+        self.file_service()?.cancel_task(task).await
+    }
     pub fn set_auto_resume(&self, enabled: bool) -> Result<()> {
         self.file_service()?.set_auto_resume(enabled);
         Ok(())

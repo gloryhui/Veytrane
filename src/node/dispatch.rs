@@ -13,6 +13,7 @@ pub const MAX_PENDING_HEADERS: usize = 64;
 pub const RESET_BUSY: u32 = 0x101;
 pub const RESET_UNSUPPORTED: u32 = 0x102;
 pub const RESET_INVALID: u32 = 0x103;
+pub const RESET_UNAUTHORIZED: u32 = 0x105;
 
 pub struct BiStream {
     pub send: quinn::SendStream,

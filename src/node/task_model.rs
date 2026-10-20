@@ -846,6 +846,34 @@ impl TaskRecord {
         Ok(())
     }
 
+    /// A durable local cancellation never rolls a published receipt back.
+    pub(crate) fn cancel(&mut self, now: i64) -> Result<(), TaskModelError> {
+        if self.state == TaskState::Completed
+            || self
+                .file_details
+                .as_ref()
+                .is_some_and(|file| file.publish_prepared || file.receipt_committed)
+            || self
+                .directory_details
+                .as_ref()
+                .is_some_and(|dir| dir.publish_prepared || dir.receipt_committed)
+        {
+            return Err(TaskModelError::InvalidTransition {
+                from: self.state,
+                to: TaskState::Failed,
+            });
+        }
+        let mut updated = self.clone();
+        updated.state = TaskState::Failed;
+        updated.diagnostic = Some(TaskDiagnostic::new(TaskErrorCode::UserCancelled, false));
+        updated.updated_at_unix_ms = now
+            .max(updated.created_at_unix_ms)
+            .max(updated.updated_at_unix_ms);
+        updated.validate()?;
+        *self = updated;
+        Ok(())
+    }
+
     pub(crate) fn transition_to(
         &mut self,
         next: TaskState,
