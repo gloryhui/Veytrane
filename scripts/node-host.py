@@ -133,8 +133,13 @@ def service_write(state, service):
                    'Register-ScheduledTask -TaskName $s.name -Action $a -Trigger $t -Principal $p -Settings $o -Force|Out-Null', settings)
     elif platform.system() == 'Darwin':
         service.parent.mkdir(parents=True, exist_ok=True)
-        contents = {'Label': 'io.github.gloryhui.p2p-agent', 'ProgramArguments': [agent, '--data-dir', state['data_dir']],
-                    'RunAtLoad': True, 'KeepAlive': {'SuccessfulExit': False}, 'ThrottleInterval': 10}
+        logs = Path.home() / 'Library/Logs/p2p-file-node'
+        logs.mkdir(parents=True, exist_ok=True, mode=0o700)
+        contents = {'Label': 'io.github.gloryhui.p2p-agent', 'ProgramArguments': [agent, '--data-dir', state['data_dir'], '--managed'],
+                    'RunAtLoad': True, 'KeepAlive': {'SuccessfulExit': False}, 'ThrottleInterval': 10,
+                    'ExitTimeOut': 30, 'EnvironmentVariables': {'RUST_LOG': 'warn'},
+                    'StandardOutPath': str(logs / 'agent.stdout.log'),
+                    'StandardErrorPath': str(logs / 'agent.stderr.log')}
         with service.open('wb') as stream:
             plistlib.dump(contents, stream)
         service.chmod(0o600)

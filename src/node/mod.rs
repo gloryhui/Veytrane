@@ -54,6 +54,8 @@ pub mod agent_config;
 pub mod ipc;
 
 mod agent_forward;
+#[cfg(any(target_os = "macos", test))]
+mod agent_recovery;
 mod agent_state;
 
 pub mod management_cli;

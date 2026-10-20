@@ -457,6 +457,12 @@ impl Agent {
 
 /// The caller initializes node.json explicitly before running this host.
 pub async fn run(paths: AgentPaths) -> io::Result<()> {
+    run_with_recovery(paths, false).await
+}
+pub async fn run_managed(paths: AgentPaths) -> io::Result<()> {
+    run_with_recovery(paths, true).await
+}
+async fn run_with_recovery(paths: AgentPaths, managed: bool) -> io::Result<()> {
     let _directory_lock =
         super::instance_lock::InstanceLock::acquire(&paths.lock()).map_err(io::Error::other)?;
     if paths.root.join("migration.pending.json").try_exists()? {
@@ -547,10 +553,13 @@ pub async fn run(paths: AgentPaths) -> io::Result<()> {
     tokio::pin!(shutdown);
     let reload = reload_signal();
     tokio::pin!(reload);
+    let recovery = host_recovery(agent.control.clone(), managed);
+    tokio::pin!(recovery);
     let outcome = loop {
         tokio::select! {
             _=stopping.changed()=>break Ok(()),
             signal=&mut shutdown=>break signal,
+            error=&mut recovery=>break Err(error),
             signal=&mut reload=>{
                 if let Err(error)=signal {break Err(error);}
                 reload.set(reload_signal());
@@ -600,6 +609,20 @@ pub async fn run(paths: AgentPaths) -> io::Result<()> {
     drain.abort();
     let _ = drain.await;
     outcome
+}
+async fn host_recovery(control: NodeControl, managed: bool) -> io::Error {
+    if !managed {
+        return std::future::pending().await;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        super::agent_recovery::wait(control).await
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = control;
+        std::future::pending().await
+    }
 }
 async fn shutdown_signal() -> io::Result<()> {
     #[cfg(unix)]

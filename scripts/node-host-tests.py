@@ -19,6 +19,22 @@ spec.loader.exec_module(host)
 
 
 class Hosting(unittest.TestCase):
+    def test_mac_login_host_enables_managed_recovery_and_keeps_intentional_stop(self):
+        import plistlib
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            service = root / 'LaunchAgent.plist'
+            state = {'bin_dir': str(root / 'bin'), 'data_dir': str(root / 'data')}
+            with patch.object(host.platform, 'system', return_value='Darwin'), patch.object(host.Path, 'home', return_value=root):
+                host.service_write(state, service)
+            value = plistlib.loads(service.read_bytes())
+            self.assertTrue(value['RunAtLoad'])
+            self.assertEqual(value['KeepAlive'], {'SuccessfulExit': False})
+            self.assertIn('--managed', value['ProgramArguments'])
+            self.assertEqual(value['ExitTimeOut'], 30)
+            self.assertTrue(Path(value['StandardErrorPath']).parent.is_dir())
+            self.assertFalse((root / 'data').exists())
+
     def test_incompatible_management_api_is_rejected_before_creating_version_directory(self):
         with tempfile.TemporaryDirectory() as root:
             root = Path(root)

@@ -30,6 +30,10 @@ Ubuntu无桌面且无用户登录会话时，管理员可按`p2p-file-agent.syst
 
 ## 升级与失败恢复
 
+macOS 登录宿主使用 `p2p-agent --managed`，保留 `RunAtLoad`、异常退出自动重启及 30 秒优雅退出等待。Agent 每 5 秒观察本机接口；变化连续确认两次，或后台停顿/休眠间隔达到 30 秒，便先按原流程停止业务、保存任务并释放锁，再以失败状态退出，由 launchd 重建网络候选。网络核心持续退出也触发该恢复；单纯信令失联仍由核心退避重连，不因此中断健康 Direct 流。身份、授权和 JSON 不回滚、不重建。
+
+`--managed` 只适用于有外部宿主负责重启的后台实例；手工前台运行默认不启用该恢复退出。用户显式 Stop 或停止节点以保存需重启的配置仍正常退出，不会被该策略自动启动。Mac Agent 日志位于 `~/Library/Logs/p2p-file-node/agent.stderr.log`。同一进程重启后按已保存的启用/自动启动规则恢复；未写入 JSON 的临时停止状态属于该进程生命周期。
+
 `python node-host.py upgrade --bin-dir <新版本目录>`先验证两个二进制SHA/版本/target/API一致，再请求旧Agent停机并证明目录、身份、任务锁释放；不强杀、不强行接管。保留旧版本目录与`previous-install.json`，新启动核对NodeId、revision不倒退和build SHA。失败保持数据，禁止自动回退旧授权或覆盖新任务。
 
 失败恢复先停新Agent并确认锁释放，检查当前schema/revision和授权变更；仅在旧版本能读取当前根且不会丢失撤销/任务字段时，人工按`previous-install.json`恢复旧启动路径。否则保持停机，用同schema修复版本恢复。备份恢复不是自动数据回滚。uninstall只卸载启动项，保留全部身份、配置、任务、业务文件和版本目录。
