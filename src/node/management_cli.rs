@@ -24,6 +24,8 @@ pub struct Args {
 #[derive(Subcommand)]
 pub enum Action {
     Init,
+    /// Prove directory, identity and task ownership are all released.
+    OwnershipStatus,
     MigratePreview {
         #[arg(long)]
         config_file: PathBuf,
@@ -226,6 +228,26 @@ pub async fn run(args: Args) -> io::Result<Response> {
     };
     let paths = AgentPaths::new(&root)?;
     let command = match args.command {
+        Action::OwnershipStatus => {
+            let _directory = super::instance_lock::InstanceLock::acquire(&paths.lock())
+                .map_err(io::Error::other)?;
+            let identity = if paths.identity().try_exists()? {
+                Some(crate::identity::Identity::load(&paths.identity()).map_err(io::Error::other)?)
+            } else {
+                None
+            };
+            let _identity = identity
+                .as_ref()
+                .map(|identity| AgentPaths::identity_lock(identity.node_id()))
+                .transpose()?;
+            let _tasks =
+                super::instance_lock::InstanceLock::acquire(&paths.root.join("tasks.lock"))
+                    .map_err(io::Error::other)?;
+            return Ok(Response::ok(
+                "ownership_status",
+                json!({"running":false,"node_id":identity.map(|id|id.node_id().to_hex())}),
+            ));
+        }
         Action::MigratePreview {
             config_file,
             source_data_dir,

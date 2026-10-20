@@ -103,7 +103,7 @@ CARGO_BIN=$(command -v cargo)
 
 cd "$REPO_ROOT"
 "$PYTHON_BIN" scripts/package-desktop-tests.py
-"$CARGO_BIN" build --locked --release --features gui --bin p2p-desktop --target "$TARGET"
+"$CARGO_BIN" build --locked --release --features gui --bin p2p-desktop --bin p2p-agent --bin p2p-node --target "$TARGET"
 "$PYTHON_BIN" scripts/package-desktop.py \
     --binary "target/$TARGET/release/p2p-desktop" \
     --target "$TARGET" \

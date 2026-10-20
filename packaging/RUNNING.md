@@ -1,3 +1,5 @@
+> 节点迁移实施版：默认桌面已改为附着独立Agent，安装包须同时包含p2p-agent与p2p-node。新的初始化、旧身份导入、后台启动及升级步骤以[node宿主说明](node/README.md)为准。下文原内嵌桌面操作适用于显式`--legacy`，测试和平台验收后置，不能当成新入口已验收。
+
 # P2P File 桌面候选包
 
 这是 GPUI MVP 的候选产物。版本、完整源码 commit、目标、实际二进制/归档大小、SHA256、签名状态在 `build-info.json` / `candidate.json`。`SHA256SUMS` 校验解包后的文件；旁置 `.sha256` 校验归档。不要把 PR 的 CI 成功当作最低系统、物理设备或双 NAT 验收。最终状态以 [Issue #24](https://github.com/gloryhui/p2p_file/issues/24) 为准；未完成 mandatory 外部验证之前不创建正式 Release。

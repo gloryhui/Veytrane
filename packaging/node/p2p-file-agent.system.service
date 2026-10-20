@@ -1,0 +1,21 @@
+[Unit]
+Description=P2P File Agent for a dedicated restricted account
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=p2pfile
+Group=p2pfile
+Environment=HOME=/var/lib/p2pfile
+ExecStart=/opt/p2p-file/p2p-agent --data-dir /var/lib/p2pfile/node
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

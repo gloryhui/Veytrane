@@ -61,3 +61,5 @@ pub mod management_cli;
 pub mod agent_web;
 
 pub mod migration;
+
+pub mod build_info;

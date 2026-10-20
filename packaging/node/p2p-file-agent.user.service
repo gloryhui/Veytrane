@@ -1,0 +1,14 @@
+[Unit]
+Description=P2P File user Agent (replace absolute paths before install)
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/ABSOLUTE/BIN/p2p-agent --data-dir /ABSOLUTE/USER/DATA
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

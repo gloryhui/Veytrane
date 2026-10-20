@@ -76,10 +76,10 @@ def native_host(target):
             raise ValueError('Rosetta cannot supply native Mac packaging/validation evidence')
 
 
-def dependency_bundle(destination):
+def dependency_bundle(destination, features='gui'):
     # Conservatively retain every resolved package, including build/optional and
     # other-target packages. Do not mislabel this inventory as a linked SBOM.
-    metadata = json.loads(run(['cargo', 'metadata', '--locked', '--features', 'gui', '--format-version', '1']))
+    metadata = json.loads(run(['cargo', 'metadata', '--locked', '--features', features, '--format-version', '1']))
     lock = tomllib.loads((REPO / 'Cargo.lock').read_text(encoding='utf-8'))
     checksums = {(p['name'], p['version']): p.get('checksum') for p in lock['package']}
     records = []
@@ -266,6 +266,14 @@ def main():
     expected_state = 'dirty' if dirty else 'clean'
     if info['build_sha'] != head or info['target'] != args.target or info['source_state'] != expected_state:
         parser.error('binary metadata differs from the actual head/target/source state; rebuild it')
+    helper_sources = {}
+    for name in ('p2p-agent', 'p2p-node'):
+        source = binary.with_name(name + ('.exe' if platform.system() == 'Windows' else ''))
+        architecture(source, args.target)
+        metadata = json.loads(run([str(source), '--build-info']))
+        if any(metadata[key] != info[key] for key in ('build_sha', 'target', 'source_state', 'version')) or metadata.get('api_version') != 1:
+            parser.error(f'{name} metadata differs from desktop; build all three from the same source')
+        helper_sources[name] = (source, metadata)
     version = info['version']
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?', version):
         parser.error('invalid package version')
@@ -294,6 +302,16 @@ def main():
     shutil.copy2(binary, executable)
     if platform.system() != 'Windows':
         executable.chmod(0o755)
+    helpers = {}
+    for name, (source, metadata) in helper_sources.items():
+        destination = executable.with_name(source.name)
+        shutil.copy2(source, destination)
+        if platform.system() != 'Windows':
+            destination.chmod(0o755)
+        if platform.system() == 'Darwin':
+            subprocess.run(['codesign', '--force', '--sign', '-', str(destination)], check=True)
+        helpers[name] = dict(path=destination.relative_to(package).as_posix(), bytes=destination.stat().st_size,
+                             sha256=digest(destination), metadata=metadata)
     if platform.system() == 'Linux':
         shutil.copyfile(REPO / 'assets/icons/app-icon.png', package / 'p2p-file.png')
         (package / 'p2p-file.desktop').write_text(
@@ -314,6 +332,20 @@ def main():
         if inspection['authenticode'] != 'NotSigned':
             raise ValueError('unexpected signature status; candidate signing metadata must be reviewed')
         inspection['dynamic_dependencies'] = pe_imports(executable)
+    inspection['helpers'] = {}
+    for name, helper in helpers.items():
+        path = package / helper['path']
+        if platform.system() == 'Linux':
+            dependencies = run(['ldd', str(path)])
+            if 'not found' in dependencies:
+                raise ValueError('unresolved helper dependency: ' + name)
+            inspection['helpers'][name] = {'dynamic_dependencies': dependencies}
+        elif platform.system() == 'Darwin':
+            commands = run(['otool', '-l', str(path)])
+            inspection['helpers'][name] = {'dynamic_dependencies': run(['otool', '-L', str(path)]),
+                                           'deployment_minimum_versions': macos_minimum(commands)}
+        else:
+            inspection['helpers'][name] = {'dynamic_dependencies': pe_imports(path)}
     resources = contents / 'Resources' if platform.system() == 'Darwin' else package
     legal_files = [
         ('LICENSE', 'LICENSE'),
@@ -323,6 +355,11 @@ def main():
         legal_files.append(('packaging/RUNNING.md', 'RUNNING.md'))
     for source, name in legal_files:
         shutil.copyfile(REPO / source, resources / name)
+    shutil.copytree(REPO / 'packaging/node', resources / 'node')
+    shutil.copyfile(REPO / 'scripts/node-host.py', resources / 'node-host.py')
+    if resources != package and not args.app_only:
+        shutil.copytree(REPO / 'packaging/node', package / 'node')
+        shutil.copyfile(REPO / 'scripts/node-host.py', package / 'node-host.py')
     if args.app_only:
         dependencies = dependency_licenses(resources)
     else:
@@ -344,8 +381,8 @@ def main():
                           'signing': signing}, ensure_ascii=False))
         return
     (package / 'native-inspection.json').write_text(json.dumps(inspection, indent=2) + '\n', encoding='utf-8')
-    data = dict(schema='p2p-desktop-package/v1', **info, minimum_os=TARGETS[args.target][1],
-                candidate=not dirty, signing=signing, license_material=resources.relative_to(package).as_posix(), created_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    data = dict(schema='p2p-desktop-package/v2', **info, minimum_os=TARGETS[args.target][1],
+                candidate=not dirty, signing=signing, helpers=helpers, license_material=resources.relative_to(package).as_posix(), created_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 executable=executable.relative_to(package).as_posix(), executable_bytes=executable.stat().st_size,
                 executable_sha256=digest(executable), dependency_packages=dependencies,
                 metadata_process_seconds=round(probe_seconds, 6),

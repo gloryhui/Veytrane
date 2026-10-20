@@ -61,6 +61,15 @@ def verify(candidate, require_candidate=True):
         binary = package / relative(info['executable'])
         if binary.stat().st_size != info['executable_bytes'] or sha(binary) != info['executable_sha256']:
             raise ValueError('executable checksum/size mismatch')
+        if info.get('schema') == 'p2p-desktop-package/v2':
+            if set(info.get('helpers', {})) != {'p2p-agent', 'p2p-node'}:
+                raise ValueError('Agent and management CLI are required')
+            for name, helper in info['helpers'].items():
+                file = package / relative(helper['path'])
+                if not file.is_file() or file.stat().st_size != helper['bytes'] or sha(file) != helper['sha256']:
+                    raise ValueError('helper checksum/size mismatch: ' + name)
+                if any(helper['metadata'][key] != info[key] for key in ('build_sha', 'target', 'version', 'source_state')):
+                    raise ValueError('helper source metadata mismatch: ' + name)
         expected = set()
         for line in (package / 'SHA256SUMS').read_text(encoding='utf-8').splitlines():
             checksum, name = line.split('  ', 1)

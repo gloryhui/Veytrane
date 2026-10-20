@@ -1,3 +1,4 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 use clap::Parser;
 use p2p_file::node::{agent, agent_paths::AgentPaths, management_cli};
 use std::path::PathBuf;
@@ -8,6 +9,8 @@ struct Args {
     data_dir: Option<PathBuf>,
     #[arg(long, conflicts_with = "initialize")]
     init: bool,
+    #[arg(long)]
+    build_info: bool,
     /// Explicit first-run lifecycle action: initialize if missing, then run.
     #[arg(long)]
     initialize: bool,
@@ -18,6 +21,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
     let args = Args::parse();
+    if args.build_info {
+        println!("{}", p2p_file::node::build_info::value("p2p-agent"));
+        return Ok(());
+    }
     let root = match args.data_dir {
         Some(root) => root,
         None => AgentPaths::default_root()?,

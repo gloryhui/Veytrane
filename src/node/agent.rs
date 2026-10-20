@@ -54,7 +54,7 @@ impl Agent {
         }
         match command {
             Command::Status => Ok(
-                json!({"diagnostics":self.diagnostics.lock().await.clone(),"restart_pending":self.restart_pending.load(std::sync::atomic::Ordering::Acquire),"budgets":{"peers":16,"pending_peers":8,"tcp_streams":256,"tcp_per_rule":32,"management_connections":32,"service_controls_per_peer":8},"data_dir":self.paths.root,"epoch":self.epoch,"revision":self.config.lock().await.revision,"node":self.control.snapshot().map_err(|e|e.to_string())?,"last_error":*self.last_error.lock().await,"forwards":self.forwards.lock().await.snapshot()}),
+                json!({"build":super::build_info::value("p2p-agent"),"diagnostics":self.diagnostics.lock().await.clone(),"restart_pending":self.restart_pending.load(std::sync::atomic::Ordering::Acquire),"budgets":{"peers":16,"pending_peers":8,"tcp_streams":256,"tcp_per_rule":32,"management_connections":32,"service_controls_per_peer":8},"data_dir":self.paths.root,"epoch":self.epoch,"revision":self.config.lock().await.revision,"node":self.control.snapshot().map_err(|e|e.to_string())?,"last_error":*self.last_error.lock().await,"forwards":self.forwards.lock().await.snapshot()}),
             ),
             Command::Config => {
                 let record = self.config.lock().await;

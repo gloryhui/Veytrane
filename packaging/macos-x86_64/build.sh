@@ -98,7 +98,7 @@ export MACOSX_DEPLOYMENT_TARGET=13.0
 
 cd "$REPO_ROOT"
 "$PYTHON_BIN" scripts/package-desktop-tests.py
-cargo build --locked --release --features gui --bin p2p-desktop --target "$TARGET"
+cargo build --locked --release --features gui --bin p2p-desktop --bin p2p-agent --bin p2p-node --target "$TARGET"
 
 if (( APP_ONLY )); then
     echo "APP-ONLY: 本机轻量运行包，不是完整审计候选。"
