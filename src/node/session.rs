@@ -57,6 +57,13 @@ fn is_current_signal_generation(current: u64, result_generation: u64) -> bool {
 
 #[derive(Clone, Debug)]
 pub struct NodeSessionConfig {
+    pub wire_mode: super::wire::PeerWireMode,
+    pub peer_modes: HashMap<NodeId, super::wire::PeerWireMode>,
+    pub resources: super::authorization::ResourcePolicy,
+    pub trust_sources: HashMap<NodeId, super::authorization::TrustSource>,
+    pub enable_files: bool,
+    pub enable_speed: bool,
+    pub enable_tcp: bool,
     pub signal_server: String,
     pub signal_tls: Option<crate::discovery::signal_tls::SignalTlsClient>,
     pub remote_auth: Option<RemoteVerifier>,
@@ -71,8 +78,21 @@ pub struct NodeSessionConfig {
 }
 
 impl NodeSessionConfig {
+    pub fn unified(signal_server: impl Into<String>) -> Self {
+        Self {
+            wire_mode: super::wire::PeerWireMode::UnifiedV1,
+            ..Self::new(signal_server)
+        }
+    }
     pub fn new(signal_server: impl Into<String>) -> Self {
         Self {
+            wire_mode: super::wire::PeerWireMode::LegacyDesktopV1,
+            peer_modes: HashMap::new(),
+            resources: Default::default(),
+            trust_sources: HashMap::new(),
+            enable_files: true,
+            enable_speed: true,
+            enable_tcp: true,
             signal_server: signal_server.into(),
             signal_tls: None,
             remote_auth: None,
@@ -207,6 +227,7 @@ impl SessionEvents {
 #[derive(Clone)]
 pub struct NodeSessionHandle {
     pub(crate) control: super::control::ControlState,
+    resources: watch::Sender<super::authorization::ResourcePolicy>,
     commands: mpsc::Sender<SessionCommand>,
     allowed_forward_targets: watch::Sender<Vec<super::config::AllowedForwardTarget>>,
     lifetime: Arc<SessionLifetime>,
@@ -236,6 +257,29 @@ impl Drop for SessionLifetime {
 }
 
 impl NodeSessionHandle {
+    pub async fn disconnect_peer(&self, peer: NodeId) -> std::result::Result<(), String> {
+        let (done, result) = oneshot::channel();
+        self.commands
+            .send(SessionCommand::DisconnectPeer { peer, done })
+            .await
+            .map_err(|_| "节点已停止".to_owned())?;
+        result.await.map_err(|_| "节点已停止".to_owned())?
+    }
+    pub async fn apply_resource_policy(
+        &self,
+        policy: super::authorization::ResourcePolicy,
+    ) -> std::result::Result<(), String> {
+        policy.validate().map_err(|error| error.to_string())?;
+        let (done, result) = oneshot::channel();
+        self.commands
+            .send(SessionCommand::ResourcePolicy { policy, done })
+            .await
+            .map_err(|_| "节点已停止".to_owned())?;
+        result.await.map_err(|_| "节点已停止".to_owned())
+    }
+    pub fn resource_policy(&self) -> super::authorization::ResourcePolicy {
+        self.resources.borrow().clone()
+    }
     #[cfg(test)]
     pub fn connect_peer(&self, peer: NodeId) -> std::result::Result<(), String> {
         self.connect_peer_with_password(peer, test_password())
@@ -556,6 +600,14 @@ pub async fn change_trusted_device(
     }
 }
 enum SessionCommand {
+    DisconnectPeer {
+        peer: NodeId,
+        done: oneshot::Sender<std::result::Result<(), String>>,
+    },
+    ResourcePolicy {
+        policy: super::authorization::ResourcePolicy,
+        done: oneshot::Sender<()>,
+    },
     RetryCandidates {
         peer: NodeId,
         candidates: Vec<Candidate>,
@@ -749,10 +801,23 @@ pub fn spawn(
     identity: Identity,
     config: NodeSessionConfig,
 ) -> std::io::Result<(NodeSessionHandle, mpsc::Receiver<SessionEvent>)> {
+    config
+        .resources
+        .validate()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    if config.peer_modes.len() > 128 || config.trust_sources.len() > 128 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "节点策略设备数量超限",
+        ));
+    }
     super::trusted_devices::validate(&config.trusted_devices)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let control = super::control::ControlState::new(identity.node_id(), config.transfer.clone());
+    control.set_trust_sources(&config.trust_sources);
     let runtime_control = control.clone();
+    let (resources, _) = watch::channel(config.resources.clone());
+    let runtime_resources = resources.clone();
     let (command_tx, command_rx) = mpsc::channel(COMMAND_CAPACITY);
     let session_command_tx = command_tx.clone();
     let (event_tx, event_rx) = mpsc::channel(EVENT_CAPACITY);
@@ -778,7 +843,10 @@ pub fn spawn(
                             config,
                             session_command_tx,
                             command_rx,
-                            runtime_allowed_targets,
+                            SessionPolicies {
+                                targets: runtime_allowed_targets,
+                                resources: runtime_resources,
+                            },
                             stopped,
                             SessionEvents::new(event_tx.clone(), event_shutdown, runtime_control),
                         )
@@ -802,6 +870,7 @@ pub fn spawn(
     Ok((
         NodeSessionHandle {
             control,
+            resources,
             commands: command_tx,
             allowed_forward_targets,
             lifetime: Arc::new(SessionLifetime {
@@ -814,15 +883,24 @@ pub fn spawn(
     ))
 }
 
+struct SessionPolicies {
+    targets: watch::Sender<Vec<super::config::AllowedForwardTarget>>,
+    resources: watch::Sender<super::authorization::ResourcePolicy>,
+}
+
 async fn run_session(
     identity: Identity,
     config: NodeSessionConfig,
     command_tx: mpsc::Sender<SessionCommand>,
     mut commands: mpsc::Receiver<SessionCommand>,
-    allowed_forward_targets: watch::Sender<Vec<super::config::AllowedForwardTarget>>,
+    policies: SessionPolicies,
     mut shutdown: watch::Receiver<bool>,
     events: SessionEvents,
 ) {
+    let SessionPolicies {
+        targets: allowed_forward_targets,
+        resources: resource_policy,
+    } = policies;
     let _ = events
         .send(SessionEvent::SignalSecurity {
             tls: config.signal_tls.is_some(),
@@ -855,6 +933,19 @@ async fn run_session(
         }
     };
 
+    let mode_for = |peer: NodeId| {
+        config
+            .peer_modes
+            .get(&peer)
+            .copied()
+            .unwrap_or(config.wire_mode)
+    };
+    let local_capabilities = super::wire::capabilities(
+        config.transfer.is_some() && config.enable_files,
+        config.transfer.is_some() && config.enable_speed,
+        config.enable_tcp,
+    );
+    let mut manually_disconnected = HashSet::new();
     let mut remote_verifier = config.remote_auth.clone();
     let auth_context = AuthContext::default();
     let mut trusted_devices = config.trusted_devices.clone();
@@ -1084,7 +1175,86 @@ async fn run_session(
             Wake::Command(Some(SessionCommand::Inspect(reply))) => {
                 let _ = reply.send(connections.clone());
             }
+            Wake::Command(Some(SessionCommand::DisconnectPeer { peer, done })) => {
+                if manually_disconnected.len() >= 128 && !manually_disconnected.contains(&peer) {
+                    let _ = done.send(Err("显式断开记录已达上限；请复用现有节点或重启宿主".into()));
+                    continue;
+                }
+                manually_disconnected.insert(peer);
+                credentials.remove(&peer);
+                credential_retries.remove(&peer);
+                deferred_candidates.remove(&peer);
+                peer_candidates.remove(&peer);
+                reconnect_probes.remove(&peer);
+                pending_inbound.retain(|(id, _), _| *id != peer);
+                queued_lookups.retain(|(id, _)| *id != peer);
+                if let Some((_, attempt)) = peer_attempts.remove(&peer) {
+                    attempt.abort();
+                }
+                if let Some((_, _, rights)) = authorizations.remove(&peer) {
+                    rights.send_replace(RemoteAuthorization::default());
+                }
+                if let Some((_, connection)) = connections.remove(&peer) {
+                    connection.close(3u32.into(), b"explicit peer disconnect");
+                }
+                peer_capabilities.remove(&peer);
+                if let Some(update) = peer_connection_updates.get(&peer) {
+                    update.send_replace(None);
+                }
+                for (id, running) in &running_tunnels {
+                    if running.rule.peer_node_id == peer.to_hex() {
+                        waiting_tunnels.remove(id);
+                        restart_after_tunnel_stop.remove(id);
+                        running.shutdown.send_replace(true);
+                    }
+                }
+                let result = if let Some(service) = &config.transfer {
+                    service.cancel_peer_recovery(peer);
+                    service
+                        .revoke_authorization(peer, RemoteAuthorization::default())
+                        .await
+                        .map_err(|e| e.to_string())
+                } else {
+                    Ok(())
+                };
+                if let Some(generation) = peers.generation(peer) {
+                    peers.transition(peer, generation, PeerLifecycle::Disconnected);
+                    emit_peer_state(&events, peer, generation, PeerLifecycle::Disconnected).await;
+                }
+                let _ = done.send(result);
+            }
+            Wake::Command(Some(SessionCommand::ResourcePolicy { policy, done })) => {
+                // Publish before processing any later queued open or handshake callback.
+                resource_policy.send_replace(policy);
+                let disabled = connections
+                    .keys()
+                    .chain(peer_attempts.keys())
+                    .copied()
+                    .filter(|peer| resource_policy.borrow().for_peer(*peer).disabled)
+                    .collect::<HashSet<_>>();
+                for peer in disabled {
+                    credentials.remove(&peer);
+                    credential_retries.remove(&peer);
+                    if let Some((_, attempt)) = peer_attempts.remove(&peer) {
+                        attempt.abort();
+                    }
+                    if let Some((_, _, rights)) = authorizations.get(&peer) {
+                        rights.send_replace(RemoteAuthorization::default());
+                    }
+                    if let Some((_, connection)) = connections.get(&peer) {
+                        connection.close(3u32.into(), b"peer disabled");
+                    }
+                    if let Some(service) = &config.transfer {
+                        service.cancel_peer_recovery(peer);
+                    }
+                }
+                let _ = done.send(());
+            }
             Wake::Command(Some(SessionCommand::ChangeTrustedDevice { change, done })) => {
+                let verified_trust = match &change {
+                    TrustedDeviceChange::Trust { peer, .. } => Some(*peer),
+                    _ => None,
+                };
                 let candidate: std::result::Result<
                     Vec<super::trusted_devices::TrustedDevice>,
                     String,
@@ -1144,6 +1314,37 @@ async fn run_session(
                     Ok(devices)
                 })();
                 if let Ok(devices) = &candidate {
+                    let revoked = trusted_devices
+                        .iter()
+                        .filter_map(|old| NodeId::from_hex(&old.node_id).ok())
+                        .filter(|peer| !super::trusted_devices::contains(devices, *peer))
+                        .collect::<Vec<_>>();
+                    if let Some(peer) = verified_trust {
+                        events.control.record_trust_source(
+                            peer,
+                            super::authorization::TrustSource::PasswordVerified,
+                        );
+                    }
+                    for peer in revoked {
+                        if mode_for(peer) == super::wire::PeerWireMode::UnifiedV1 {
+                            // Strong revocation invalidates password and trust grants alike.
+                            credentials.remove(&peer);
+                            credential_retries.remove(&peer);
+                            if let Some((_, attempt)) = peer_attempts.remove(&peer) {
+                                attempt.abort();
+                            }
+                            if let Some((_, _, rights)) = authorizations.get(&peer) {
+                                rights.send_replace(RemoteAuthorization::default());
+                            }
+                            if let Some((_, connection)) = connections.get(&peer) {
+                                connection.close(3u32.into(), b"device trust revoked");
+                            }
+                            if let Some(service) = &config.transfer {
+                                service.cancel_peer_recovery(peer);
+                            }
+                        }
+                    }
+                    events.control.retain_trust_sources(devices);
                     trusted_devices.clone_from(devices);
                     // Publish revocation synchronously after durable success. No handshake callback can restore it.
                     for (peer, (_, _, rights)) in &authorizations {
@@ -1564,6 +1765,7 @@ async fn run_session(
                 });
             }
             Wake::Command(Some(SessionCommand::ConnectAuthenticated { peer, password })) => {
+                manually_disconnected.remove(&peer);
                 if credentials.len() >= super::network_state::MAX_PEERS
                     && !credentials.contains_key(&peer)
                 {
@@ -1670,6 +1872,7 @@ async fn run_session(
                     .await;
             }
             Wake::Command(Some(SessionCommand::ConnectTrusted(peer))) => {
+                manually_disconnected.remove(&peer);
                 let had_password = credentials.remove(&peer).is_some();
                 if peers
                     .state(peer)
@@ -1683,6 +1886,11 @@ async fn run_session(
                 let _ = command_tx.try_send(SessionCommand::ConnectPeer(peer));
             }
             Wake::Command(Some(SessionCommand::ConnectPeer(peer))) => {
+                if manually_disconnected.contains(&peer)
+                    || resource_policy.borrow().for_peer(peer).disabled
+                {
+                    continue;
+                }
                 if peer == local_node {
                     let _ = events
                         .send(SessionEvent::Diagnostic("不能连接本机 Node ID".into()))
@@ -2003,6 +2211,11 @@ async fn run_session(
                     candidates,
                     token,
                 } => {
+                    if manually_disconnected.contains(&node_id)
+                        || resource_policy.borrow().for_peer(node_id).disabled
+                    {
+                        continue;
+                    }
                     if peers
                         .state(node_id)
                         .is_some_and(|state| state.is_active() && !state.is_connected())
@@ -2146,6 +2359,10 @@ async fn run_session(
                         &mut peer_tasks,
                         auth_context.clone(),
                         remote_verifier.clone(),
+                        AttemptOptions {
+                            mode: mode_for(node_id),
+                            capabilities: local_capabilities,
+                        },
                         credentials.get(&node_id).cloned().or_else(|| {
                             #[cfg(test)]
                             {
@@ -2359,6 +2576,12 @@ async fn run_session(
                 connection,
             })) => {
                 pending_inbound.remove(&(peer, generation));
+                if manually_disconnected.contains(&peer)
+                    || resource_policy.borrow().for_peer(peer).disabled
+                {
+                    connection.close(3u32.into(), b"peer disabled or explicitly disconnected");
+                    continue;
+                }
                 if !transport_can_publish(&peers, peer, generation, &connection) {
                     continue;
                 }
@@ -2818,6 +3041,10 @@ async fn run_session(
                     &mut peer_tasks,
                     auth_context.clone(),
                     remote_verifier.clone(),
+                    AttemptOptions {
+                        mode: mode_for(peer),
+                        capabilities: local_capabilities,
+                    },
                     credentials.get(&peer).cloned().or_else(|| {
                         #[cfg(test)]
                         {
@@ -3461,6 +3688,12 @@ fn canonical_candidates(candidates: &[Candidate]) -> Vec<Candidate> {
     result
 }
 
+#[derive(Clone, Copy)]
+struct AttemptOptions {
+    mode: super::wire::PeerWireMode,
+    capabilities: u64,
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn start_peer_attempt(
     peer: NodeId,
@@ -3477,6 +3710,7 @@ async fn start_peer_attempt(
     tasks: &mut JoinSet<()>,
     auth: AuthContext,
     verifier: Option<RemoteVerifier>,
+    options: AttemptOptions,
     password: Option<SecretPassword>,
 ) -> Option<(u64, tokio::task::AbortHandle)> {
     if peer == local_node {
@@ -3596,6 +3830,7 @@ async fn start_peer_attempt(
             input_sender.clone(),
             auth,
             verifier,
+            options,
             password,
         )
         .await;
@@ -3626,6 +3861,7 @@ async fn run_peer_attempt(
     inputs: mpsc::Sender<SessionInput>,
     auth: AuthContext,
     verifier: Option<RemoteVerifier>,
+    options: AttemptOptions,
     password: Option<SecretPassword>,
 ) -> std::result::Result<(), String> {
     let _ = inputs
@@ -3656,10 +3892,23 @@ async fn run_peer_attempt(
             state: PeerLifecycle::Negotiating,
         })
         .await;
-    let capabilities =
-        super::protocol::negotiate(connection, should_initiate_quic(local_node, peer))
+    let capabilities = match options.mode {
+        super::wire::PeerWireMode::UnifiedV1 => {
+            super::wire::negotiate(
+                connection,
+                should_initiate_quic(local_node, peer),
+                options.capabilities,
+            )
             .await
-            .map_err(|error| error.to_string())?;
+        }
+        super::wire::PeerWireMode::LegacyDesktopV1 => {
+            super::protocol::negotiate(connection, should_initiate_quic(local_node, peer)).await
+        }
+        super::wire::PeerWireMode::LegacyCliV3 => Err(Error::Protocol(
+            "此节点尚未启用旧 CLI v3 适配；请升级对端或使用明确受支持的旧命令".into(),
+        )),
+    }
+    .map_err(|error| error.to_string())?;
 
     let _ = inputs
         .send(SessionInput::PeerProgress {
@@ -6142,6 +6391,7 @@ mod tests {
                 include_loopback: true,
                 ..DesktopNetworkConfig::default()
             },
+            ..NodeSessionConfig::new(signal_server.to_string())
         }
     }
 

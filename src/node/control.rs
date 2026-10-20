@@ -27,6 +27,7 @@ pub struct PeerSnapshot {
     pub inbound_trusted: bool,
     pub outbound_password: bool,
     pub outbound_trusted: bool,
+    pub inbound_trust_source: Option<super::authorization::TrustSource>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -70,10 +71,36 @@ pub struct SequencedEvent {
 pub(crate) struct ControlState {
     snapshot: Arc<Mutex<NodeSnapshot>>,
     events: broadcast::Sender<SequencedEvent>,
+    trust_sources: Arc<Mutex<BTreeMap<String, super::authorization::TrustSource>>>,
     pub(crate) transfer: Option<super::transfer::TransferService>,
 }
 
 impl ControlState {
+    pub(crate) fn set_trust_sources(
+        &self,
+        sources: &std::collections::HashMap<NodeId, super::authorization::TrustSource>,
+    ) {
+        if let Ok(mut current) = self.trust_sources.lock() {
+            *current = sources
+                .iter()
+                .map(|(id, source)| (id.to_hex(), *source))
+                .collect();
+        }
+    }
+    pub(crate) fn record_trust_source(
+        &self,
+        peer: NodeId,
+        source: super::authorization::TrustSource,
+    ) {
+        if let Ok(mut current) = self.trust_sources.lock() {
+            current.insert(peer.to_hex(), source);
+        }
+    }
+    pub(crate) fn retain_trust_sources(&self, devices: &[super::trusted_devices::TrustedDevice]) {
+        if let Ok(mut sources) = self.trust_sources.lock() {
+            sources.retain(|id, _| devices.iter().any(|device| &device.node_id == id));
+        }
+    }
     pub(crate) fn new(
         identity: NodeId,
         transfer: Option<super::transfer::TransferService>,
@@ -86,6 +113,7 @@ impl ControlState {
                 ..Default::default()
             })),
             events,
+            trust_sources: Default::default(),
             transfer,
         }
     }
@@ -162,6 +190,15 @@ impl ControlState {
                 if let P::Connected(auth) = lifecycle {
                     peer.inbound_password = auth.inbound.password;
                     peer.inbound_trusted = auth.inbound.trusted_device;
+                    if peer.inbound_trusted {
+                        peer.inbound_trust_source = Some(
+                            self.trust_sources
+                                .lock()
+                                .ok()
+                                .and_then(|sources| sources.get(&id).copied())
+                                .unwrap_or_default(),
+                        );
+                    }
                     peer.outbound_password = auth.outbound.password;
                     peer.outbound_trusted = auth.outbound.trusted_device;
                 }

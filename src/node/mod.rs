@@ -38,6 +38,7 @@ pub(crate) use snapshot as ui_model;
 pub mod diagnostics;
 pub(crate) mod session;
 
+pub mod authorization;
 pub mod control;
 pub mod dispatch;
 pub mod wire;
