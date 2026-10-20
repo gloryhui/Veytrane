@@ -1,0 +1,221 @@
+{
+  "schema": 1,
+  "date": "2026-10-20",
+  "implementation_sha": "69e3c9216e20bf0b3480235eb5be218327f79009",
+  "fixture_sha": "7c6ac84e970949e0890e6ecf77c190479b24a3e6",
+  "historical_bug_sha": "eb4b9d9a0b8eb6994faa2c645cb90e841b711b30",
+  "logs": [
+    {
+      "path": "target/node-regression-default-final.log",
+      "sha256": "54fbf628021d00c679bddff379e85db7d87b3bc9e2cf5635a73cd57ec742b082",
+      "test_summaries": [
+        "test result: ok. 642 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 43.36s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.52s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s"
+      ]
+    },
+    {
+      "path": "target/node-gui-frozen-final.log",
+      "sha256": "e45fa05d3c4b238545a5fe4123d2b8cc1ff442ccad194184ebd2ac0b4866d797",
+      "test_summaries": [
+        "test result: ok. 664 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 77.74s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.89s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.25s"
+      ]
+    },
+    {
+      "path": "target/node-regression-legacy.log",
+      "sha256": "c60a65120c41327d8e013145396e683995f5ae26bfe897bdf6dca9977070a90a",
+      "test_summaries": [
+        "test result: ok. 364 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.48s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.39s"
+      ]
+    },
+    {
+      "path": "target/node-wsl-fixture-fixed-final.log",
+      "sha256": "6a88cccca7d156111143756604d5385b993bec16ee46f4466b0d3231dc16a02f",
+      "test_summaries": [
+        "test result: ok. 657 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 51.55s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.81s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.34s"
+      ]
+    },
+    {
+      "path": "target/node-wsl-frozen-final.log",
+      "sha256": "2199679c4ece21805d0ca721e6da8ded54ca1eec09efc1d616d6d03373e4d591",
+      "test_summaries": [
+        "test result: FAILED. 656 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 61.16s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+        "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+        "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.45s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s",
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.91s",
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.97s"
+      ]
+    },
+    {
+      "path": "target/node-windows-idle-fixture-final.log",
+      "sha256": "14b7eb2c7325532924cb29d9c6ef21875a50710826227a19f648f6058fac75f7",
+      "test_summaries": [
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 641 filtered out; finished in 3.40s"
+      ]
+    },
+    {
+      "path": "target/node-agent-process-concurrent-final.log",
+      "sha256": "0bfb43bd0a1e07b28cdd011ea96236ba5fcfaa0793378284d827fb4125958fbe",
+      "test_summaries": [
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.00s"
+      ]
+    },
+    {
+      "path": "target/node-wsl-agent-concurrent-final.log",
+      "sha256": "ff13c018dac9da053e3bb696beb4c34eec26f0a2809eedb0b74224680946b182",
+      "test_summaries": [
+        "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.22s"
+      ]
+    },
+    {
+      "path": "target/node-cli-e2e-wsl-final.log",
+      "sha256": "7c1dae370f26553124ed38f23a57bedb315d0d021d54af53df71273c2ed72e96",
+      "test_summaries": []
+    },
+    {
+      "path": "target/node-host-upgrade-final.log",
+      "sha256": "eadd7e48fc03652d91dbbaecd9400f3d2e28935cc678e022713966e63ec6b77d",
+      "test_summaries": []
+    },
+    {
+      "path": "target/node-clippy-default-final.log",
+      "sha256": "fde44a3fb89bac6ef6fb68314b84bd246e01f79e7d50e7ee568343bf3f3bd7ac",
+      "test_summaries": []
+    },
+    {
+      "path": "target/node-clippy-gui-final.log",
+      "sha256": "7205c337e11592540e9e7a056b2a7429bdad57b5a2314ba16211e50004bf0305",
+      "test_summaries": []
+    },
+    {
+      "path": "target/node-clippy-legacy-final.log",
+      "sha256": "195951be4630c82a2d10b917d4ac2a52de923a167fd36a146f21d0a8e53de78d",
+      "test_summaries": []
+    },
+    {
+      "path": "target/node-clippy-fixture-final.log",
+      "sha256": "38b0b7760bc37ad86c0abd67665628add909020d5646a24408697e5666d577ce",
+      "test_summaries": []
+    },
+    {
+      "path": "target/node-clean-candidate-build.log",
+      "sha256": "061de44ebb483f7c25e67100c9889571592a9e94dc615c79515ecafe845501e5",
+      "test_summaries": []
+    },
+    {
+      "path": "target/node-package-preflight.log",
+      "sha256": "c756cfc848a859eff634fe12a35437540a8faefe018b2b6b01b8f3f9fbc4b4a5",
+      "test_summaries": []
+    },
+    {
+      "path": "target/node-package-verify.log",
+      "sha256": "be4efb3db0f8546f7d49c0da2f693a0419522e717c120ecc09c5d4512fd97d1b",
+      "test_summaries": []
+    },
+    {
+      "path": "target/node-frozen-uid.log",
+      "sha256": "0c6b78cc298cfa4d2555bd5e8ed603fb15f00716b4a6690ffef47708b647f6b9",
+      "test_summaries": []
+    }
+  ],
+  "process_results": {
+    "node-bug01-baseline": {
+      "bug": "BUG-01",
+      "mode": "confirm-bug",
+      "result": "PASS",
+      "direct_samples_after_signal_stop": 0,
+      "observed_failure": "ConnectionAbortedError",
+      "signal_restored": false
+    },
+    "node-bug01-relay-baseline": {
+      "bug": "BUG-01",
+      "mode": "confirm-bug",
+      "path": "relay",
+      "result": "PASS",
+      "samples_after_signal_stop": 0,
+      "observed_failure": "ConnectionAbortedError",
+      "signal_restored": false,
+      "new_session_after_restore": false
+    },
+    "node-frozen-bug01-direct": {
+      "bug": "BUG-01",
+      "mode": "verify-fix",
+      "path": "direct",
+      "result": "PASS",
+      "samples_after_signal_stop": 40,
+      "observed_failure": null,
+      "signal_restored": true,
+      "new_session_after_restore": true
+    },
+    "node-frozen-bug01-relay": {
+      "bug": "BUG-01",
+      "mode": "verify-fix",
+      "path": "relay",
+      "result": "PASS",
+      "samples_after_signal_stop": 40,
+      "observed_failure": null,
+      "signal_restored": true,
+      "new_session_after_restore": true
+    },
+    "node-bug02-wsl-baseline": {
+      "bug": "BUG-02",
+      "mode": "confirm-bug",
+      "trigger": "sighup",
+      "result": "PASS",
+      "failed_candidate_listeners": [
+        "b"
+      ],
+      "sighup_applicable": true
+    },
+    "node-frozen-bug02-sighup": {
+      "bug": "BUG-02",
+      "mode": "verify-fix",
+      "trigger": "sighup",
+      "result": "PASS",
+      "failed_candidate_listeners": [
+        "a",
+        "b"
+      ],
+      "sighup_applicable": true
+    },
+    "node-frozen-bug02-web": {
+      "bug": "BUG-02",
+      "mode": "verify-fix",
+      "trigger": "web",
+      "result": "PASS",
+      "failed_candidate_listeners": [
+        "a",
+        "b"
+      ],
+      "sighup_applicable": false
+    }
+  }
+}
