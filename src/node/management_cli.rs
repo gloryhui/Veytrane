@@ -24,6 +24,10 @@ pub struct Args {
 #[derive(Subcommand)]
 pub enum Action {
     Init,
+    Web {
+        #[arg(long, default_value = "127.0.0.1:8787")]
+        listen: std::net::SocketAddr,
+    },
     Status,
     Config,
     Tasks,
@@ -180,6 +184,10 @@ pub async fn run(args: Args) -> io::Result<Response> {
     };
     let paths = AgentPaths::new(&root)?;
     let command = match args.command {
+        Action::Web { listen } => {
+            super::agent_web::run(paths, listen).await?;
+            return Ok(Response::ok("web", json!({"stopped":true})));
+        }
         Action::Init => return Ok(Response::ok("init", initialize(&paths)?)),
         Action::OfflineApply { file, revision } => {
             return Ok(Response::ok(

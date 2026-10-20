@@ -57,3 +57,5 @@ mod agent_forward;
 mod agent_state;
 
 pub mod management_cli;
+
+pub mod agent_web;

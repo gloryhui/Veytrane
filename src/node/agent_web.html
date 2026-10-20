@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>P2P 节点管理</title>
+<style>
+body{font:15px system-ui;max-width:1200px;margin:28px auto;padding:0 18px;background:#f3f6fa;color:#182b43}section{background:white;padding:20px;margin:16px 0;border-radius:12px}h1{font-size:25px}h2{font-size:18px}input{padding:8px;border:1px solid #abb9c8;border-radius:5px;max-width:100%;box-sizing:border-box}button{padding:8px 12px;margin:4px;border:0;border-radius:5px;background:#244f9d;color:white;cursor:pointer}button:disabled{opacity:.5}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px;border-bottom:1px solid #dae0e7}td input:not([type=checkbox]){width:100%;min-width:90px}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:330px;overflow:auto}#message{white-space:pre-wrap;color:#983711}label{display:inline-flex;gap:8px;align-items:center;margin:5px}.scroll{overflow:auto}.hint{color:#546779;font-size:13px}
+</style>
+<h1>P2P 节点管理</h1><p>连接同一后台节点，管理授权服务、本机转发与文件任务。</p>
+<section><label>管理 token <input id="token" type="password" autocomplete="off"></label><button id="load">读取配置（放弃草稿）</button><button id="status">刷新状态</button><button id="retry" hidden>重试上次请求</button><p id="message" role="status"></p><pre id="state"></pre></section>
+<section><h2>连接设备</h2><label>设备 ID <input id="peer" size="36"></label><label>远程密码 <input id="password" type="password" autocomplete="off"></label><button id="connect">连接</button><button id="disconnect">断开</button><button id="services">查询授权服务</button><pre id="directory"></pre></section>
+<section id="editor" hidden><h2>配置草稿 · revision <span id="revision"></span></h2><p class="hint">保存冲突或失败会保留草稿。信令等需要重启的设置请用 CLI 停止节点后修改。</p>
+<h2>本机提供的服务</h2><div class="scroll" id="serviceTable"></div><button id="addService">新增服务</button>
+<h2>本机端口转发</h2><p class="hint">先连接远端设备并查询服务，再填写服务 ID；监听只能为本机 loopback 地址。</p><div class="scroll" id="forwardTable"></div><button id="addForward">新增转发</button>
+<h2>文件与测速授权</h2><div class="scroll" id="resourceTable"></div><button id="addResource">新增设备权限</button>
+<button id="save">保存草稿</button></section>
+<section><h2>文件任务</h2><label>本机绝对路径 <input id="path" size="60"></label><button id="send">发送给上述设备</button><button id="tasks">刷新任务</button><div id="taskList"></div></section>
+<script>
+'use strict';
+let draft=null,revision=null,busy=false,retryRequest=null;
+const $=id=>document.getElementById(id),say=text=>$('message').textContent=text;
+const id=()=>crypto.randomUUID().replaceAll('-','');
+async function request(command,retry=null){
+ const req=retry||{api_version:1,request_id:id(),timeout_ms:30000,command};
+ const response=await fetch('/api/v1/request',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+$('token').value},body:JSON.stringify(req)});
+ let value;try{value=await response.json()}catch{throw new Error('网关响应异常；请查询状态确认变更结果')}
+ if(value.error){if(value.error.code==='outcome_unknown'){retryRequest=req;$('retry').hidden=false}throw new Error(value.error.code+'：'+value.error.message)}
+ if(!response.ok)throw new Error('请求失败：'+response.status);
+ if(retryRequest?.request_id===req.request_id){retryRequest=null;$('retry').hidden=true}
+ return value.result;
+}
+async function action(fn){if(busy)return;busy=true;document.querySelectorAll('button,input').forEach(e=>e.disabled=true);try{say('处理中…');await fn();say('操作完成')}catch(e){say(e.message)}finally{busy=false;document.querySelectorAll('button,input').forEach(e=>e.disabled=false)}}
+function table(target,rows,columns,remove,extra){
+ const t=document.createElement('table'),head=document.createElement('tr');for(const c of columns){const th=document.createElement('th');th.textContent=c[0];head.append(th)}const th=document.createElement('th');th.textContent='操作';head.append(th);t.append(head);
+ rows.forEach((row,n)=>{const tr=document.createElement('tr');for(const [label,key,type] of columns){const td=document.createElement('td'),input=document.createElement('input');input.setAttribute('aria-label',label);input.type=type==='bool'?'checkbox':'text';if(type==='bool')input.checked=!!row[key];else input.value=type==='list'?(row[key]||[]).join(','):row[key]||'';input.addEventListener('input',()=>row[key]=type==='bool'?input.checked:type==='list'?input.value.split(',').map(v=>v.trim()).filter(Boolean):input.value);td.append(input);tr.append(td)}const td=document.createElement('td'),b=document.createElement('button');b.textContent='删除';b.onclick=()=>{remove(row,n);render()};td.append(b);if(extra)extra(row,td);tr.append(td);t.append(tr)});$(target).replaceChildren(t);
+}
+function render(){if(!draft)return;$('editor').hidden=false;$('revision').textContent=revision;
+ table('serviceTable',draft.services,[['服务ID','id'],['名称','name'],['本机目标','target'],['允许设备ID（逗号分隔）','allowed_peers','list'],['启用','enabled','bool']],(_,n)=>draft.services.splice(n,1));
+ table('forwardTable',draft.forwards,[['规则ID','id'],['名称','name'],['远端设备ID','peer_node_id'],['本机监听','listen'],['服务ID','service','text'],['启用','enabled','bool'],['自动启动','auto_start','bool']],(r,n)=>{draft.forwards.splice(n,1);delete draft.service_ids[r.id]},(r,td)=>{for(const [label,method]of[['启动','start_forward'],['停止','stop_forward']]){const b=document.createElement('button');b.textContent=label;b.onclick=()=>action(()=>request({method,rule:r.id}));td.append(b)}});
+ table('resourceTable',draft.resources.peers,[['设备ID','node_id'],['文件','files','bool'],['测速','speed','bool'],['禁用设备','disabled','bool']],(_,n)=>draft.resources.peers.splice(n,1));
+}
+$('load').onclick=()=>action(async()=>{const value=await request({method:'config'});draft=structuredClone(value.settings);revision=value.revision;draft.forwards.forEach(r=>r.service=draft.service_ids[r.id]||'');render()});
+$('status').onclick=()=>action(async()=>{$('state').textContent=JSON.stringify(await request({method:'status'}),null,2)});
+$('retry').onclick=()=>action(async()=>{const result=await request(null,retryRequest);$('state').textContent=JSON.stringify(result,null,2);if(result.revision!==undefined){revision=result.revision;$('revision').textContent=revision}});
+$('save').onclick=()=>action(async()=>{if(retryRequest)throw new Error('请先重试或查询上次未确认的变更');const settings=structuredClone(draft);settings.service_ids={};for(const r of settings.forwards){if(r.service.trim())settings.service_ids[r.id]=r.service.trim();delete r.service}const result=await request({method:'apply_config',expected_revision:revision,settings});revision=result.revision;draft=structuredClone(settings);draft.forwards.forEach(r=>r.service=draft.service_ids[r.id]||'');render();if(result.durability_warning)throw new Error(result.durability_warning)});
+$('addService').onclick=()=>{draft.services.push({id:id(),name:'新服务',target:'127.0.0.1:8080',allowed_peers:[],enabled:true});render()};
+$('addForward').onclick=()=>{draft.forwards.push({id:id(),name:'新转发',peer_node_id:$('peer').value.trim(),listen:'127.0.0.1:18080',target:'127.0.0.1:1',service:'',enabled:true,auto_start:true});render()};
+$('addResource').onclick=()=>{draft.resources.peers.push({node_id:$('peer').value.trim(),files:false,speed:false,disabled:false});render()};
+$('connect').onclick=()=>action(async()=>{const password=$('password').value;$('password').value='';await request({method:'connect',peer:$('peer').value.trim(),password:password||null})});
+$('disconnect').onclick=()=>action(()=>request({method:'disconnect',peer:$('peer').value.trim()}));
+$('services').onclick=()=>action(async()=>{$('directory').textContent=JSON.stringify(await request({method:'services',peer:$('peer').value.trim()}),null,2)});
+$('send').onclick=()=>action(()=>request({method:'send',peer:$('peer').value.trim(),paths:[$('path').value]}));
+async function tasks(){const value=await request({method:'tasks'});$('taskList').replaceChildren();for(const task of value.tasks){const row=document.createElement('p');row.textContent=task.name+' · '+task.state+' · '+task.confirmed+'/'+task.total+' ';for(const [label,method]of[['暂停','pause'],['继续','resume'],['取消','cancel']]){const b=document.createElement('button');b.textContent=label;b.onclick=()=>action(async()=>{await request({method,task:task.id,...(method==='resume'?{peer:task.peer}:{})});await tasks()});row.append(b)}$('taskList').append(row)}if(value.truncated){const note=document.createElement('p');note.textContent='任务超过当前页上限，请使用CLI查看。';$('taskList').append(note)}}
+$('tasks').onclick=()=>action(tasks);
+</script></html>

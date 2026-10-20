@@ -424,6 +424,16 @@ async fn apply_client(
 }
 
 fn authorize(state: &AdminState, headers: &HeaderMap) -> std::result::Result<(), ApiError> {
+    authorize_token(headers, &state.inner.token)
+}
+#[cfg(feature = "node")]
+pub(crate) fn authorize_management(
+    headers: &HeaderMap,
+    token: &str,
+) -> std::result::Result<(), Box<Response>> {
+    authorize_token(headers, token).map_err(|error| Box::new(error.into_response()))
+}
+fn authorize_token(headers: &HeaderMap, expected: &str) -> std::result::Result<(), ApiError> {
     let host = headers
         .get(header::HOST)
         .and_then(|value| value.to_str().ok())
@@ -445,7 +455,7 @@ fn authorize(state: &AdminState, headers: &HeaderMap) -> std::result::Result<(),
         .and_then(|value| value.strip_prefix("Bearer "))
         .ok_or_else(ApiError::unauthorized)?
         .trim();
-    if !constant_time_eq(token.as_bytes(), state.inner.token.as_bytes()) {
+    if !constant_time_eq(token.as_bytes(), expected.as_bytes()) {
         return Err(ApiError::unauthorized());
     }
     Ok(())
