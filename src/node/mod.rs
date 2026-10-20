@@ -55,3 +55,5 @@ pub mod ipc;
 
 mod agent_forward;
 mod agent_state;
+
+pub mod management_cli;

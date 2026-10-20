@@ -89,6 +89,11 @@ name = "p2p-agent"
 path = "src/bin/p2p-agent.rs"
 required-features = ["node"]
 
+[[bin]]
+name = "p2p-node"
+path = "src/bin/p2p-node.rs"
+required-features = ["node"]
+
 [target."cfg(unix)".dependencies]
 rustix = { version = "=1.1.5", features = ["fs", "process"], optional = true }
 

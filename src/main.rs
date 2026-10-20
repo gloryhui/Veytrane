@@ -53,6 +53,24 @@ async fn run(cli: Cli) -> Result<()> {
         command,
     } = cli;
 
+    let _identity_lease = if matches!(
+        &command,
+        Command::Discover { .. }
+            | Command::Recv { .. }
+            | Command::Send { .. }
+            | Command::Serve { .. }
+            | Command::Tunnel { .. }
+            | Command::Forward { .. }
+            | Command::Push { .. }
+            | Command::Speedtest { .. }
+    ) {
+        Some(p2p_file::identity::acquire_identity_lease(
+            load_identity(&key_file)?.node_id(),
+        )?)
+    } else {
+        None
+    };
+
     match command {
         Command::Id => cmd_id(&key_file),
         Command::Stun { server, timeout } => cmd_stun(&server, timeout).await,

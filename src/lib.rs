@@ -17,6 +17,7 @@ pub mod cli;
 pub mod discovery;
 pub mod error;
 pub mod identity;
+pub mod instance_lock;
 pub mod nat;
 pub mod net;
 pub mod protocol;

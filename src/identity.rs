@@ -355,6 +355,19 @@ pub fn signature_from_bytes(bytes: &[u8]) -> Result<Signature> {
     Signature::from_slice(bytes).map_err(|err| Error::Identity(format!("签名解析失败: {err}")))
 }
 
+/// All local networking entry points hold this lease for their full lifetime.
+/// It is keyed by public identity, independent of the key/data directory.
+pub fn acquire_identity_lease(id: NodeId) -> Result<crate::instance_lock::InstanceLock> {
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+        .map(PathBuf::from)
+        .ok_or_else(|| Error::Identity("没有当前用户主目录，无法取得身份锁".into()))?;
+    let root = home.join(".p2p-file").join("identity-locks");
+    #[cfg(feature = "node")]
+    crate::node::private_access::ensure_directory(&root)?;
+    crate::instance_lock::InstanceLock::acquire(&root.join(format!("{id}.lock")))
+        .map_err(|e| Error::Identity(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

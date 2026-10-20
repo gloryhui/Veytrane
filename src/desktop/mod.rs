@@ -116,6 +116,7 @@ actions!(
 
 struct DesktopStartup {
     instance_lock: InstanceLock,
+    identity_lock: Option<InstanceLock>,
     task_store: Option<TaskStore>,
     task_store_status: String,
     identity_id: Option<String>,
@@ -162,6 +163,12 @@ impl DesktopStartup {
                 ),
                 Err(error) => (None, None, format!("本机身份不可用：{error}")),
             };
+
+        let identity_lock = identity
+            .as_ref()
+            .map(|id| crate::identity::acquire_identity_lease(id.node_id()))
+            .transpose()
+            .map_err(|e| e.to_string())?;
 
         let config_file = paths.config_file();
         let defaults = || SettingsDraft::defaults(paths.downloads_dir.clone());
@@ -218,6 +225,7 @@ impl DesktopStartup {
         };
         Ok(Self {
             instance_lock,
+            identity_lock,
             task_store,
             task_store_status,
             identity_id,
@@ -1020,6 +1028,7 @@ struct DesktopShell {
     can_save_settings: bool,
     is_saving_settings: bool,
     _instance_lock: InstanceLock,
+    _identity_lock: Option<InstanceLock>,
     transfer_service: Option<transfer::TransferService>,
     network_session: Option<crate::node::control::NodeControl>,
     network_status: SharedString,
@@ -6066,6 +6075,7 @@ pub fn run(background_start: bool) {
         let bounds = Bounds::centered(None, size(px(1180.), px(780.)), cx);
         let DesktopStartup {
             instance_lock,
+            identity_lock,
             task_store,
             task_store_status,
             identity_id,
@@ -6302,6 +6312,7 @@ pub fn run(background_start: bool) {
                         can_save_settings,
                         is_saving_settings: false,
                         _instance_lock: instance_lock,
+                        _identity_lock: identity_lock,
                         transfer_service,
                         network_session: None,
                         network_status: initial_network_status.into(),

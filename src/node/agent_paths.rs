@@ -9,6 +9,13 @@ pub struct AgentPaths {
     pub endpoint: String,
 }
 impl AgentPaths {
+    pub fn default_root() -> io::Result<PathBuf> {
+        Ok(dirs::data_local_dir()
+            .ok_or_else(|| io::Error::other("没有用户数据目录"))?
+            .join("p2p-file")
+            .join("node"))
+    }
+
     pub fn new(root: &Path) -> io::Result<Self> {
         super::private_access::ensure_directory(root)?;
         let root = root.canonicalize()?;
@@ -47,11 +54,6 @@ impl AgentPaths {
     pub fn identity_lock(
         id: crate::identity::NodeId,
     ) -> io::Result<super::instance_lock::InstanceLock> {
-        let base = dirs::data_local_dir()
-            .ok_or_else(|| io::Error::other("没有用户数据目录"))?
-            .join("p2p-file-identity-locks");
-        super::private_access::ensure_directory(&base)?;
-        super::instance_lock::InstanceLock::acquire(&base.join(format!("{id}.lock")))
-            .map_err(io::Error::other)
+        crate::identity::acquire_identity_lease(id).map_err(io::Error::other)
     }
 }
