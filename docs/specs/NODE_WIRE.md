@@ -28,6 +28,8 @@ NodeErrorCode 顺序固定：0 UnsupportedVersion；1 UnsupportedCapability；2 
 
 单一 dispatch 所有者读取连接的 accept_bi，按业务类型投递到有界队列；文件/TCP/测速处理器不得并发抢读同一连接的入站队列。文件原有首帧 5 秒、全局帧预算 64 MiB、每任务 8 MiB、分片 1 MiB 和原并发上限保持。控制队列/公平预算在 T23 冻结；本阶段有界队列容量 32，超过明确 Busy，不能无限堆积。未知流类型拒绝。UNI 数据由测速唯一所有者管理，其他业务不开放 UNI 类型。
 
+入站首字节最多同时等待 64 条，各 5 秒；首部读取并发进行，单条慢流不阻塞其他类型。尚无法读取请求号时用固定 QUIC reset/stop 码拒绝：0x101 Busy、0x102 UnsupportedCapability、0x103 InvalidRequest。已取得控制请求号后使用 NodeFrame Error 响应。Dispatcher 随连接业务所有者析构取消首部任务和队列。
+
 服务查询必须已授权入站业务，并只返回当前 peer 被授权的 enabled 条目。OpenTcp 使用稳定 service_id，开流时在同一策略快照中重新检查方向、资源、启用状态与当前目标，再进行受控连接。缓存目录不能成为授权。旧 SocketAddr 业务只在显式旧模式按精确白名单处理。
 
 ## 旧端矩阵及路由

@@ -39,3 +39,5 @@ pub mod diagnostics;
 pub(crate) mod session;
 
 pub mod control;
+pub mod dispatch;
+pub mod wire;
