@@ -1963,8 +1963,13 @@ mod tests {
             server_identity,
             ServeConfig {
                 allowed_peers: vec![client_identity.node_id()],
-                re_punch_after: Duration::from_millis(150),
-                connection_idle_timeout: Duration::from_millis(50),
+                // Real QUIC/TLS and identity signatures must finish before the
+                // initial unconnected grace expires, including on a loaded CI
+                // runner. This case checks eventual authenticated idle cleanup,
+                // not a 150ms handshake SLA. Exact grace arithmetic is covered
+                // by the paused-clock test below.
+                re_punch_after: Duration::from_secs(3),
+                connection_idle_timeout: Duration::from_millis(250),
                 ..ServeConfig::new()
             },
         ));
@@ -1972,7 +1977,7 @@ mod tests {
             .await
             .expect("认证应成功");
 
-        tokio::time::timeout(Duration::from_secs(2), serve_task)
+        tokio::time::timeout(Duration::from_secs(8), serve_task)
             .await
             .expect("认证后无业务流不能永久阻止 re-punch")
             .expect("serve task 不应 panic")

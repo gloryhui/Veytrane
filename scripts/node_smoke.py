@@ -43,8 +43,14 @@ def execution_binary(source):
     Retain stable copies separately for baseline and current builds instead.
     Never replace a running copy: Windows reports a sharing error in that case.
     """
-    directory = Path(__file__).resolve().parents[1] / 'target' / 'node-smoke-bin' / source.parent.name
-    directory.mkdir(parents=True, exist_ok=True)
+    if os.name == 'nt':
+        base = Path(__file__).resolve().parents[1] / 'target' / 'node-smoke-bin'
+    else:
+        # WSL's mounted Windows workspace may allow writes but reject copystat
+        # for an unprivileged Unix UID. Keep Unix executables on its own FS.
+        base = Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache')) / 'p2p-file-node-smoke-bin'
+    directory = base / source.parent.name
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     destination = directory / source.name
     def digest(path):
         with path.open('rb') as stream:
@@ -62,9 +68,9 @@ class Fixture:
         source_binary = Path(binary).resolve()
         self.output = Path(output).resolve()
         self.output.mkdir(parents=True, exist_ok=True)
+        self.binary = str(execution_binary(source_binary))
         self.temporary = tempfile.TemporaryDirectory(prefix='p2p-node-smoke-')
         self.root = Path(self.temporary.name)
-        self.binary = str(execution_binary(source_binary))
         self.processes = []
         self.handles = []
         self.token = 'isolated-test-token-' + 'a' * 48
