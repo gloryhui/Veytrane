@@ -150,13 +150,13 @@ impl ForwardManager {
                         _=stopped.changed()=>break,
                         changed=current.changed()=>{if changed.is_err(){break;}},
                         accepted=listener.accept()=>{
-                            let (tcp,_)=match accepted{Ok(value)=>value,Err(e)=>{*errors.lock().unwrap()=Some(e.to_string());break;}};
+                            let (tcp,_)=match accepted{Ok(value)=>value,Err(e)=>{*errors.lock().unwrap()=Some(e.to_string().chars().take(256).collect());break;}};
                             let Ok(permit)=slots.clone().try_acquire_owned()else{*errors.lock().unwrap()=Some("单规则TCP并发已满".into());continue;};
                             let route=current.borrow().clone();let errors=errors.clone();
                             if !owner.spawn(async move {
                                 let _permit=permit;
                                 let result=open(tcp,route).await;
-                                if let Err(e)=result{*errors.lock().unwrap()=Some(e.to_string());}
+                                if let Err(e)=result{*errors.lock().unwrap()=Some(e.to_string().chars().take(256).collect());}
                             }){*error.lock().unwrap()=Some("节点TCP并发已满或正在退出".into());}
                         }
                     }

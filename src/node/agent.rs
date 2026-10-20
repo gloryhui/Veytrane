@@ -36,6 +36,7 @@ pub struct Agent {
     cache: Mutex<HashMap<String, Cached>>,
     pub(crate) mutations: Mutex<()>,
     workers: Mutex<JoinSet<()>>,
+    mutation_slots: Arc<Semaphore>,
     previews: Mutex<VecDeque<(Instant, super::incremental::Preview)>>,
     diagnostics: Mutex<VecDeque<String>>,
     pub(crate) restart_pending: std::sync::atomic::AtomicBool,
@@ -73,13 +74,13 @@ impl Agent {
             }
             Command::Tasks { offset } => {
                 let snapshot = self.control.task_snapshot().map_err(|e| e.to_string())?;
-                let tasks=snapshot.as_ref().map(|s| s.tasks.iter().skip(offset).take(128).map(|t|json!({"id":t.id,"peer":t.peer.to_hex(),"name":t.name,"state":t.state,"direction":t.direction,"total":t.total,"confirmed":t.confirmed,"rate":t.rate,"retryable":t.retryable})).collect::<Vec<_>>()).unwrap_or_default();
+                let tasks=snapshot.as_ref().map(|s| s.tasks.iter().skip(offset).take(128).map(|t|json!({"id":t.id,"peer":t.peer.to_hex(),"name":t.name.chars().take(256).collect::<String>(),"name_truncated":t.name.chars().count()>256,"state":t.state,"direction":t.direction,"total":t.total,"confirmed":t.confirmed,"rate":t.rate,"retryable":t.retryable})).collect::<Vec<_>>()).unwrap_or_default();
                 let mut previews = self.previews.lock().await;
                 previews.retain(|(created, _)| created.elapsed() < Duration::from_secs(300));
                 let total = snapshot.as_ref().map_or(0, |s| s.tasks.len());
                 let speeds=snapshot.as_ref().map(|s|s.speeds.iter().map(|(peer,s)|json!({"peer":peer.to_hex(),"id":s.test_id,"direction":s.direction,"state":format!("{:?}",s.status),"bytes":s.bytes,"bytes_per_second":s.bytes_per_second,"elapsed_ms":s.elapsed.as_millis(),"rtt_ms":s.rtt.as_millis()})).collect::<Vec<_>>()).unwrap_or_default();
                 Ok(
-                    json!({"tasks":tasks,"offset":offset,"next_offset":if offset.saturating_add(128)<total{Some(offset.saturating_add(128))}else{None},"total":total,"truncated":offset.saturating_add(128)<total,"directory_previews":previews.iter().map(|(_,preview)|{let mut value=serde_json::to_value(preview).expect("preview DTO");value["peer"]=json!(preview.peer.to_hex());value}).collect::<Vec<_>>(),"speeds":speeds}),
+                    json!({"tasks":tasks,"offset":offset,"next_offset":if offset.saturating_add(128)<total{Some(offset.saturating_add(128))}else{None},"total":total,"truncated":offset.saturating_add(128)<total,"directory_previews":previews.iter().map(|(_,preview)|{let mut value=serde_json::to_value(preview).expect("preview DTO");value["peer"]=json!(preview.peer.to_hex());value.as_object_mut().unwrap().remove("source");value["name"]=json!(preview.source.file_name().unwrap_or_default().to_string_lossy().chars().take(128).collect::<String>());value}).collect::<Vec<_>>(),"speeds":speeds}),
                 )
             }
             Command::Events { epoch, after } => {
@@ -356,6 +357,13 @@ impl Agent {
                     "幂等请求缓存已满，请稍后重试",
                 );
             }
+            let Ok(permit) = self.mutation_slots.clone().try_acquire_owned() else {
+                return Response::error(
+                    &request.request_id,
+                    "busy",
+                    "在途管理变更已满，请稍后重试",
+                );
+            };
             let (response, receiver) = watch::channel(None);
             cache.insert(
                 request.request_id.clone(),
@@ -371,11 +379,12 @@ impl Agent {
             let mut workers = self.workers.lock().await;
             while workers.try_join_next().is_some() {}
             workers.spawn(async move {
+                let _permit = permit;
                 let _serial = owner.mutations.lock().await;
                 let result = match owner.execute(command, &id, &digest).await {
                     Ok(v) => Response::ok(&id, v),
                     Err(e) => {
-                        *owner.last_error.lock().await = Some(e.clone());
+                        *owner.last_error.lock().await = Some(e.chars().take(4096).collect());
                         Response::error(&id, error_code(&e), e)
                     }
                 };
@@ -455,6 +464,7 @@ pub async fn run(paths: AgentPaths) -> io::Result<()> {
         cache: Mutex::new(HashMap::new()),
         mutations: Mutex::new(()),
         workers: Mutex::new(JoinSet::new()),
+        mutation_slots: Arc::new(Semaphore::new(32)),
         previews: Mutex::new(VecDeque::new()),
         diagnostics: Mutex::new(VecDeque::new()),
         restart_pending: std::sync::atomic::AtomicBool::new(false),
@@ -479,7 +489,7 @@ pub async fn run(paths: AgentPaths) -> io::Result<()> {
                 raw=raw.recv()=>{match raw {
                     Some(control::SessionEvent::DirectoryPreview(preview))=>{let mut previews=collector.previews.lock().await;previews.retain(|(_,p)|p.id!=preview.id);if previews.len()==32{previews.pop_front();}previews.push_back((Instant::now(),preview));},
                     Some(control::SessionEvent::DirectoryPreviewFailed(id))=>collector.previews.lock().await.retain(|(_,p)|p.id!=id),
-                    Some(control::SessionEvent::Diagnostic(message))=>{let mut lines=collector.diagnostics.lock().await;if lines.len()==32{lines.pop_front();}lines.push_back(message.chars().take(8192).collect());},
+                    Some(control::SessionEvent::Diagnostic(message))=>{let mut lines=collector.diagnostics.lock().await;if lines.len()==32{lines.pop_front();}lines.push_back(message.chars().take(512).collect());},
                     Some(_)=>{},None=>break,
                 }},
                 event=events.recv()=>{match event {

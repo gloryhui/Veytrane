@@ -162,7 +162,7 @@ impl Response {
             result: None,
             error: Some(ApiError {
                 code: code.into(),
-                message: message.to_string(),
+                message: message.to_string().chars().take(4096).collect(),
             }),
         }
     }
