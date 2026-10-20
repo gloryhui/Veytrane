@@ -411,13 +411,30 @@ async fn three_agent_processes_unified_files_directory_four_forwards_and_revocat
         })
         .await;
     }
-    cli_ok(&mac.root, &["connect", &home_id]);
+    // The restored workbench accepts the same nine-digit device IDs as before.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let home_short = loop {
+        let status = home.ok(Api::Status).await;
+        if let Some(short) = status["node"]["short_id"].as_str() {
+            break short.to_owned();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "short ID not registered: {status}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    cli_ok(&mac.root, &["connect", &home_short]);
     win.ok(Api::Connect {
         peer: home_id.clone(),
         password: None,
     })
     .await;
     wait_peer(&mac, &home_id).await;
+    assert_eq!(
+        mac.ok(Api::Status).await["node"]["short_peers"][&home_short],
+        home_id
+    );
     wait_peer(&win, &home_id).await;
     let services = mac
         .ok(Api::Services {
@@ -526,6 +543,78 @@ async fn three_agent_processes_unified_files_directory_four_forwards_and_revocat
         b"directory payload"
     );
     assert!(home.root.join("receive/directory-fixture/empty").is_dir());
+    // Live receive-directory changes affect new tasks, preserve old files, and
+    // fail before persistence when the selected destination is not a directory.
+    let previous = home.config().await;
+    let mut invalid_root = previous.clone();
+    invalid_root["settings"]["receive_root"] = json!(home.root.join("receive/payload.bin"));
+    assert!(home.apply(&invalid_root).await.error.is_some());
+    assert_eq!(home.config().await, previous);
+    let new_root = home.root.join("new-receive");
+    fs::create_dir(&new_root).unwrap();
+    let mut changed_root = previous.clone();
+    changed_root["settings"]["receive_root"] = json!(new_root);
+    assert!(home.apply(&changed_root).await.error.is_none());
+    let second = mac.root.join("new-location.txt");
+    fs::write(&second, b"new destination").unwrap();
+    mac.ok(Api::Send {
+        peer: home_id.clone(),
+        paths: vec![second],
+    })
+    .await;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let received = loop {
+        let tasks = home.ok(Api::Tasks { offset: 0 }).await;
+        if let Some(task) = tasks["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "new-location.txt" && t["state"] == "completed")
+        {
+            assert_eq!(task["can_delete_file"], true);
+            assert_eq!(task["can_pause"], false);
+            break task["id"].clone();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "new receive root not applied: {tasks}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    assert_eq!(
+        fs::read(new_root.join("new-location.txt")).unwrap(),
+        b"new destination"
+    );
+    assert_eq!(
+        fs::read(home.root.join("receive/payload.bin")).unwrap(),
+        bytes
+    );
+    let location = home
+        .ok(Api::TaskLocation {
+            task: serde_json::from_value(received.clone()).unwrap(),
+        })
+        .await;
+    assert!(Path::new(location["path"].as_str().unwrap()).starts_with(&new_root));
+    home.ok(Api::DeleteReceivedFile {
+        task: serde_json::from_value(received).unwrap(),
+    })
+    .await;
+    assert!(!new_root.join("new-location.txt").exists());
+    let tasks = mac.ok(Api::Tasks { offset: 0 }).await;
+    let completed = tasks["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "payload.bin" && t["state"] == "completed")
+        .unwrap();
+    mac.ok(Api::RemoveHistory {
+        tasks: vec![serde_json::from_value(completed["id"].clone()).unwrap()],
+    })
+    .await;
+    assert!(
+        source.is_file(),
+        "clearing history must preserve the source file"
+    );
     let mut limits = mac.config().await;
     limits["settings"]["file_limits"]["upload_kib"] = json!(64);
     assert!(mac.apply(&limits).await.error.is_none());

@@ -11,6 +11,8 @@ datagram**。Relay 看不到业务明文，QUIC / Ed25519 身份认证仍然是�
 
 ## 统一节点实施分支
 
+当前整体架构可直接打开[交互式 HTML 说明](docs/architecture-current.html)，包含进程拓扑、界面与托盘、核心模块、业务流程、协议安全和状态存储（2026-10-20 工作区快照）。
+
 当前默认入口为无GUI的`p2p-agent`、共享IPC的`p2p-node`/Web和原生客户端。Agent统一持有身份、连接、文件任务与本机转发；Mac/Windows可分别从老家授权目录选择服务、设置本机端口，并继续传文件。
 
 ```sh
@@ -19,7 +21,9 @@ target/release/p2p-node init
 target/release/p2p-agent
 ```
 
-已有旧身份请先按[宿主/迁移说明](packaging/node/README.md)预览导入；`init`不会覆盖现有配置，默认目录发现旧桌面身份时会拒绝另建身份。桌面包须包含同SHA的Agent和CLI；默认窗口只附着后台，关闭窗口后节点继续。原CLI v3和显式`p2p-desktop --legacy`暂留，新旧协议兼容范围见[发布矩阵草案](docs/specs/NODE_RELEASE_DECISION.md)。
+桌面默认保留文件传输工作台：连接设备、接收目录、任务列表、目录预览和测速均通过 IPC 操作独立 Agent。设置、节点管理、连接诊断、测速、任务详情及目录预览均在独立窗口打开，主界面保持显示；重复打开会激活已有窗口，关闭后可重新打开。节点管理、资源授权与端口转发从“设置 → 打开节点管理”进入，所有窗口共享同一个 IPC 状态与后台。启动桌面时先附着现有 Agent；已有节点配置但后台未运行时自动启动，不创建第二套业务会话。
+
+已有旧身份可在首次启动界面点击“预览迁移原版身份和设置”，查看身份和任务数量后确认导入；也可按[宿主/迁移说明](packaging/node/README.md)操作。`init`不会覆盖现有配置，默认目录发现旧桌面身份时会拒绝另建身份。桌面包须包含同SHA的Agent和CLI。主窗口标题栏“×”会隐藏到系统托盘，传输和后台节点继续；点击托盘图标恢复原窗口，二级窗口仍单独关闭。只有托盘菜单“退出 P2P File”会停止 Agent、确认状态已保存并退出。托盘不可用时保留任务栏入口；不会隐藏成无法恢复的进程。原CLI v3和显式`p2p-desktop --legacy`暂留作兼容入口，默认工作台不使用它；新旧协议兼容范围见[发布矩阵草案](docs/specs/NODE_RELEASE_DECISION.md)。
 
 本轮按用户要求完成代码与静态检查，测试/回归/真实设备验收后置；三个缺陷未据此关闭。进度见[任务台账](docs/task-reports/IMPLEMENTATION_STATUS.md)，四设备准备见[验收计划](docs/FOUR_DEVICE_ACCEPTANCE.md)。
 
@@ -182,11 +186,11 @@ $BIN push --signal $SIGNAL --peer $HOME_ID ./大文件.mkv
 信令服务器需升级并持久保存 `--short-id-db` 数据库；CLI 长 NodeId 流程继续可用。
 协议、迁移与安全边界见 [远程访问认证](docs/REMOTE_AUTH.md)。
 
-设置页可启用「关闭窗口后后台运行」与「登录系统时启动」（默认关闭）。macOS 菜单栏
-图标实时显示核心状态，点击展开设备、信令、传输、测速与隧道状态面板；Windows/Linux
-提供托盘入口。后台保留同一会话，未完成文件重启后仍需手动继续。平台差异和登录项
-说明见 [后台运行](docs/DESKTOP_BACKGROUND.md)。设置页还可开启默认关闭的
-[断网自动恢复](docs/DESKTOP_AUTO_RESUME.md)，仅恢复本次进程中的网络中断任务。
+默认 Agent 桌面点击主窗口“×”会隐藏至托盘，传输、测速和后台节点保持运行；点击
+托盘图标可恢复原窗口。二级窗口单独关闭。托盘菜单“退出 P2P File”才会停止后台、
+等待状态保存和所有权释放后退出。托盘不可用时，关闭按钮只最小化到任务栏。
+旧内嵌桌面的可选后台开关和登录项说明见 [后台运行](docs/DESKTOP_BACKGROUND.md)。
+设置页的 [断网自动恢复](docs/DESKTOP_AUTO_RESUME.md) 继续由 Agent 执行。
 
 - [桌面接收空间预检查与共享预算](docs/DESKTOP_RECEIVE_SPACE.md)
 - [桌面拖拽文件与目录发送](docs/DESKTOP_DROP_SEND.md)

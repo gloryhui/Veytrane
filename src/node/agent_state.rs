@@ -88,6 +88,7 @@ impl Agent {
             "auto_resume",
             "receive_safety_mib",
             "file_limits",
+            "receive_root",
         ] {
             before.as_object_mut().unwrap().remove(key);
             after.as_object_mut().unwrap().remove(key);

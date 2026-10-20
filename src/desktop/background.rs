@@ -323,7 +323,7 @@ pub(super) fn request_quit(cx: &mut App) {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn hide_window(window: &mut Window) -> Result<(), String> {
+pub(super) fn hide_window(window: &mut Window) -> Result<(), String> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     let handle = HasWindowHandle::window_handle(window)
         .map_err(|e| e.to_string())?
@@ -354,7 +354,7 @@ fn hide_window(window: &mut Window) -> Result<(), String> {
     }
 }
 
-fn show_window(window: &mut Window) {
+pub(super) fn show_window(window: &mut Window) {
     #[cfg(target_os = "linux")]
     if gpui::guess_compositor() == "X11" {
         let _ = map_x11_main(true);
@@ -377,7 +377,7 @@ fn show_window(window: &mut Window) {
 }
 
 #[cfg(target_os = "linux")]
-fn hide_window(window: &mut Window) -> Result<(), String> {
+pub(super) fn hide_window(window: &mut Window) -> Result<(), String> {
     if gpui::guess_compositor() == "X11" {
         map_x11_main(false)
     } else {

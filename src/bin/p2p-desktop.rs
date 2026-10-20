@@ -1,8 +1,8 @@
-//! Native management by default; historical embedded desktop is explicit.
+//! File-transfer workbench backed by Agent IPC; embedded desktop is explicit.
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 use clap::Parser;
 #[derive(Parser)]
-#[command(about = "P2P File desktop · 原生节点管理", disable_version_flag = true)]
+#[command(about = "P2P File desktop · 文件传输", disable_version_flag = true)]
 struct Args {
     #[arg(long)]
     background: bool,

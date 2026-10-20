@@ -83,6 +83,15 @@ pub enum Command {
     Cancel {
         task: TaskId,
     },
+    RemoveHistory {
+        tasks: Vec<TaskId>,
+    },
+    DeleteReceivedFile {
+        task: TaskId,
+    },
+    TaskLocation {
+        task: TaskId,
+    },
     ConfirmDirectory {
         peer: String,
         request: TaskId,
@@ -134,6 +143,7 @@ impl Command {
                 | Self::Tasks { .. }
                 | Self::Events { .. }
                 | Self::Services { .. }
+                | Self::TaskLocation { .. }
         )
     }
 }

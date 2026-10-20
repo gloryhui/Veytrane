@@ -39,6 +39,8 @@ pub struct NodeSnapshot {
     pub peers: BTreeMap<String, PeerSnapshot>,
     pub tunnels: BTreeMap<String, String>,
     pub short_id: Option<String>,
+    #[serde(default)]
+    pub short_peers: BTreeMap<String, String>,
     pub truncated: bool,
 }
 
@@ -235,6 +237,19 @@ impl ControlState {
                     node_id: state.node_id.clone(),
                     short_id: state.short_id.clone(),
                 }
+            }
+            SessionEvent::ShortIdResolved { short_id, peer } => {
+                let key = short_id.to_string();
+                if let Some(peer) = peer {
+                    if state.short_peers.len() < super::network_state::MAX_PEERS
+                        || state.short_peers.contains_key(&key)
+                    {
+                        state.short_peers.insert(key, peer.to_hex());
+                    }
+                } else {
+                    state.short_peers.remove(&key);
+                }
+                NodeEvent::Changed
             }
             _ => NodeEvent::Changed,
         };

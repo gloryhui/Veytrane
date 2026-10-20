@@ -1245,6 +1245,9 @@ impl TransferService {
             .send_modify(|version| *version = version.wrapping_add(1));
         Ok(())
     }
+    pub(crate) fn receive_root_path(&self) -> PathBuf {
+        self.receive_root.lock().unwrap().clone()
+    }
     pub fn set_receive_root(&self, root: PathBuf) {
         self.recovery.lock().unwrap().clear();
         self.changed.send_modify(|v| *v = v.wrapping_add(1));

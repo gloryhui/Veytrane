@@ -1368,6 +1368,14 @@ async fn run_session(
                         continue;
                     }
                 }
+                if let Some(service) = &config.transfer
+                    && service.receive_root_path() != record.settings.receive_root
+                    && let Err(error) =
+                        super::config::validate_receive_directory(&record.settings.receive_root)
+                {
+                    let _ = done.send(Err(error.to_string()));
+                    continue;
+                }
                 let outcome = match crate::storage::atomic::write_json(&path, &record) {
                     Ok(outcome) => outcome,
                     Err(error) => {
@@ -1437,6 +1445,9 @@ async fn run_session(
                 }
                 if let Some(service) = &config.transfer {
                     // Values have already been validated before persistence.
+                    if service.receive_root_path() != record.settings.receive_root {
+                        service.set_receive_root(record.settings.receive_root.clone());
+                    }
                     service.set_auto_resume(record.settings.auto_resume);
                     let _ = service.set_send_limit(record.settings.send_concurrency);
                     let _ = service.set_file_limits(record.settings.file_limits);

@@ -74,13 +74,14 @@ impl Agent {
             }
             Command::Tasks { offset } => {
                 let snapshot = self.control.task_snapshot().map_err(|e| e.to_string())?;
-                let tasks=snapshot.as_ref().map(|s| s.tasks.iter().skip(offset).take(128).map(|t|json!({"id":t.id,"peer":t.peer.to_hex(),"name":t.name.chars().take(256).collect::<String>(),"name_truncated":t.name.chars().count()>256,"state":t.state,"direction":t.direction,"total":t.total,"confirmed":t.confirmed,"rate":t.rate,"retryable":t.retryable})).collect::<Vec<_>>()).unwrap_or_default();
+                let tasks=snapshot.as_ref().map(|s| s.tasks.iter().skip(offset).take(128).map(|t|json!({"id":t.id,"group":t.group,"peer":t.peer.to_hex(),"name":t.name.chars().take(256).collect::<String>(),"name_truncated":t.name.chars().count()>256,"state":t.state,"direction":t.direction,"total":t.total,"confirmed":t.confirmed,"rate":t.rate,"diagnostic":t.diagnostic,"retryable":t.retryable,"can_pause":t.can_pause(),"can_continue":t.can_continue(),"can_delete_file":t.can_delete_file()})).collect::<Vec<_>>()).unwrap_or_default();
                 let mut previews = self.previews.lock().await;
                 previews.retain(|(created, _)| created.elapsed() < Duration::from_secs(300));
                 let total = snapshot.as_ref().map_or(0, |s| s.tasks.len());
                 let speeds=snapshot.as_ref().map(|s|s.speeds.iter().map(|(peer,s)|json!({"peer":peer.to_hex(),"id":s.test_id,"direction":s.direction,"state":format!("{:?}",s.status),"bytes":s.bytes,"bytes_per_second":s.bytes_per_second,"elapsed_ms":s.elapsed.as_millis(),"rtt_ms":s.rtt.as_millis()})).collect::<Vec<_>>()).unwrap_or_default();
+                let queue = snapshot.as_ref().map(|s| json!({"pending":s.queue.pending,"active_files":s.queue.active_files,"limit":s.queue.limit,"converging":s.queue.converging}));
                 Ok(
-                    json!({"tasks":tasks,"offset":offset,"next_offset":if offset.saturating_add(128)<total{Some(offset.saturating_add(128))}else{None},"total":total,"truncated":offset.saturating_add(128)<total,"directory_previews":previews.iter().map(|(_,preview)|{let mut value=serde_json::to_value(preview).expect("preview DTO");value["peer"]=json!(preview.peer.to_hex());value.as_object_mut().unwrap().remove("source");value["name"]=json!(preview.source.file_name().unwrap_or_default().to_string_lossy().chars().take(128).collect::<String>());value}).collect::<Vec<_>>(),"speeds":speeds}),
+                    json!({"tasks":tasks,"queue":queue,"offset":offset,"next_offset":if offset.saturating_add(128)<total{Some(offset.saturating_add(128))}else{None},"total":total,"truncated":offset.saturating_add(128)<total,"directory_previews":previews.iter().map(|(_,preview)|{let mut value=serde_json::to_value(preview).expect("preview DTO");value["peer"]=json!(preview.peer.to_hex());value.as_object_mut().unwrap().remove("source");value["name"]=json!(preview.source.file_name().unwrap_or_default().to_string_lossy().chars().take(128).collect::<String>());value}).collect::<Vec<_>>(),"speeds":speeds}),
                 )
             }
             Command::Events { epoch, after } => {
@@ -117,13 +118,20 @@ impl Agent {
                     .await?
             )),
             Command::Connect { peer, password } => {
+                let password = password
+                    .map(super::remote_auth::SecretPassword::new)
+                    .transpose()
+                    .map_err(|e| e.to_string())?;
+                if let Ok(short) = crate::discovery::short_id::ShortId::normalize(&peer) {
+                    match password {
+                        Some(password) => self.control.connect_short_id(short, password)?,
+                        None => self.control.connect_short_id_trusted(short)?,
+                    }
+                    return Ok(json!({"accepted":true}));
+                }
                 let peer = NodeId::from_hex(&peer).map_err(|e| e.to_string())?;
                 if let Some(password) = password {
-                    self.control.connect_peer_with_password(
-                        peer,
-                        super::remote_auth::SecretPassword::new(password)
-                            .map_err(|e| e.to_string())?,
-                    )?;
+                    self.control.connect_peer_with_password(peer, password)?;
                 } else {
                     self.control.connect_peer_trusted(peer)?;
                 }
@@ -166,6 +174,29 @@ impl Agent {
                     .await
                     .map_err(|e| e.to_string())?;
                 Ok(json!({"cancelled":true}))
+            }
+            Command::RemoveHistory { tasks } => {
+                if tasks.is_empty() || tasks.len() > 128 {
+                    return Err("每次只能清理1..128个已完成任务".into());
+                }
+                let removed = self
+                    .control
+                    .remove_completed_history(tasks.into_iter().collect())
+                    .map_err(|e| e.to_string())?;
+                Ok(json!({"removed":removed}))
+            }
+            Command::DeleteReceivedFile { task } => {
+                self.control
+                    .delete_completed_receive_file(&task)
+                    .map_err(|e| e.to_string())?;
+                Ok(json!({"deleted":true}))
+            }
+            Command::TaskLocation { task } => {
+                let path = self
+                    .control
+                    .reveal_task(&super::task_details::Selection::Task(task))
+                    .map_err(|e| e.to_string())?;
+                Ok(json!({"path":path}))
             }
             Command::ConfirmDirectory { peer, request } => {
                 self.control.confirm_directory(

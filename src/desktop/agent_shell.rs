@@ -8,6 +8,9 @@ use crate::node::{
 };
 use serde_json::{Value, json};
 use std::sync::mpsc::{self, Receiver, SyncSender};
+mod tray_host;
+mod windows;
+mod workbench;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
@@ -18,6 +21,7 @@ enum Kind {
     Action,
     Apply,
     Restart,
+    Location,
 }
 struct Job {
     request: Request,
@@ -44,7 +48,22 @@ impl ClientWorker {
                 else {
                     return;
                 };
-                let client = AgentClient::new(paths);
+                let client = AgentClient::new(paths.clone());
+                // Attach first. Only start an existing node when its IPC is absent;
+                // creating/importing an identity remains an explicit first-run action.
+                if runtime.block_on(client.execute(Command::Status)).is_err()
+                    && paths.config().is_file()
+                    && let Ok(exit) = start_agent(&paths, false)
+                {
+                    for _ in 0..50 {
+                        if runtime.block_on(client.execute(Command::Status)).is_ok()
+                            || exit.try_recv().is_ok()
+                        {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                }
                 let perform = |job: Job| {
                     let result = runtime
                         .block_on(client.request(job.request.clone()))
@@ -63,9 +82,13 @@ impl ClientWorker {
                         return;
                     }
                 }
+                let mut offset = 0;
                 loop {
                     match jobs.recv_timeout(Duration::from_secs(2)) {
                         Ok(job) => {
+                            if let Command::Tasks { offset: page } = &job.request.command {
+                                offset = *page;
+                            }
                             if !perform(job) {
                                 break;
                             }
@@ -74,7 +97,7 @@ impl ClientWorker {
                         Err(mpsc::RecvTimeoutError::Timeout) => {
                             for (command, kind) in [
                                 (Command::Status, Kind::Status),
-                                (Command::Tasks { offset: 0 }, Kind::Tasks),
+                                (Command::Tasks { offset }, Kind::Tasks),
                             ] {
                                 if !perform(Job {
                                     request: Request::new(command),
@@ -91,6 +114,11 @@ impl ClientWorker {
     }
 }
 struct AgentShell {
+    ui: workbench::Workbench,
+    windows: HashMap<workbench::Page, gpui::AnyWindowHandle>,
+    attached: bool,
+    exiting: bool,
+    focus: FocusHandle,
     paths: AgentPaths,
     worker: ClientWorker,
     peer: Entity<TextField>,
@@ -101,6 +129,10 @@ struct AgentShell {
     name: Entity<TextField>,
     target: Entity<TextField>,
     signal: Entity<TextField>,
+    management_peer: Entity<TextField>,
+    management_password: Entity<TextField>,
+    management_local_password: Entity<TextField>,
+    management_signal: Entity<TextField>,
     state: Value,
     tasks: Vec<Value>,
     previews: Vec<Value>,
@@ -118,16 +150,26 @@ struct AgentShell {
 impl AgentShell {
     fn new(paths: AgentPaths, worker: ClientWorker, cx: &mut Context<Self>) -> Self {
         let view = Self {
+            ui: workbench::Workbench::new(cx),
+            windows: HashMap::new(),
+            attached: false,
+            exiting: false,
+            focus: cx.focus_handle(),
             paths,
             worker,
-            peer: cx.new(|cx| TextField::new(cx, "远端设备完整ID")),
-            password: cx.new(|cx| TextField::new_password(cx, "远端访问密码")),
+            peer: cx.new(|cx| TextField::new(cx, "输入 9 位对方 ID 或完整设备 ID")),
+            password: cx
+                .new(|cx| TextField::new_password(cx, "对方访问密码；对端已信任本机时可留空")),
             local_password: cx.new(|cx| TextField::new_password(cx, "本机访问密码")),
             service: cx.new(|cx| TextField::new(cx, "远端服务ID")),
             port: cx.new(|cx| TextField::new(cx, "本机端口，如18080")),
             name: cx.new(|cx| TextField::new(cx, "服务或转发名称")),
             target: cx.new(|cx| TextField::new(cx, "本机服务目标，如127.0.0.1:8080")),
             signal: cx.new(|cx| TextField::new(cx, "信令地址，如signal.example:9000")),
+            management_peer: cx.new(|cx| TextField::new(cx, "远端设备完整 ID")),
+            management_password: cx.new(|cx| TextField::new_password(cx, "远端访问密码")),
+            management_local_password: cx.new(|cx| TextField::new_password(cx, "本机访问密码")),
+            management_signal: cx.new(|cx| TextField::new(cx, "信令地址，如signal.example:9000")),
             state: Value::Null,
             tasks: vec![],
             previews: vec![],
@@ -173,6 +215,16 @@ impl AgentShell {
         if self.busy {
             return;
         }
+        if self.exiting && !command.is_query() {
+            self.message = "正在停止后台并退出，请稍候。".into();
+            cx.notify();
+            return;
+        }
+        if !command.is_query() && !self.attached {
+            self.message = "后台节点未连接，请先启动或附着节点。".into();
+            cx.notify();
+            return;
+        }
         if self.pending.is_some() && !command.is_query() {
             self.message = "请先重试上次结果未知的请求，或刷新确认状态。".into();
             cx.notify();
@@ -204,7 +256,11 @@ impl AgentShell {
         let response = match update.result {
             Ok(response) => response,
             Err(error) => {
-                self.connection_note = format!("后台节点不可用：{error}").into();
+                if kind == Kind::Status {
+                    self.attached = false;
+                    self.state = Value::Null;
+                    self.connection_note = format!("后台节点未连接：{error}").into();
+                }
                 if !update.job.request.command.is_query() {
                     self.pending = Some((update.job.request, kind));
                     self.message = "请求结果未知；请重试同一请求或查询状态。".into();
@@ -230,6 +286,7 @@ impl AgentShell {
         let value = response.result.unwrap_or(Value::Null);
         match kind {
             Kind::Status => {
+                self.attached = true;
                 self.state = value;
                 self.connection_note = if self.state["core_running"].as_bool() == Some(false) {
                     "后台核心已停止，请查看诊断并重新启动"
@@ -237,28 +294,47 @@ impl AgentShell {
                     "已附着同一后台节点"
                 }
                 .into();
-                if self.draft.is_none() && !self.busy {
+                if !self.dirty
+                    && !self.busy
+                    && (self.draft.is_none()
+                        || self.state["revision"].as_u64() != Some(self.revision))
+                {
                     self.send(Command::Config, Kind::Config, cx);
                 }
             }
             Kind::Tasks => {
+                let previous: HashSet<_> = self
+                    .previews
+                    .iter()
+                    .filter_map(|p| p["id"].as_str().map(str::to_owned))
+                    .collect();
+                self.ui.task_page = value.clone();
                 self.tasks = value["tasks"].as_array().cloned().unwrap_or_default();
                 self.previews = value["directory_previews"]
                     .as_array()
                     .cloned()
                     .unwrap_or_default();
+                if self
+                    .previews
+                    .iter()
+                    .any(|p| p["id"].as_str().is_some_and(|id| !previous.contains(id)))
+                {
+                    self.open_panel(workbench::Page::DirectoryPreview, cx);
+                }
             }
             Kind::Config => {
                 self.revision = value["revision"].as_u64().unwrap_or(0);
                 self.draft = Some(value["settings"].clone());
                 self.dirty = false;
+                self.ui.load_settings(&value["settings"], cx);
                 if let Some(signal) = value["settings"]["signal_server"].as_str() {
-                    let text = signal.to_owned();
-                    self.signal.update(cx, |field, cx| {
-                        field.content = text.into();
-                        field.selected_range = field.content.len()..field.content.len();
-                        cx.notify();
-                    });
+                    for input in [&self.signal, &self.management_signal] {
+                        input.update(cx, |field, cx| {
+                            field.content = signal.to_owned().into();
+                            field.selected_range = field.content.len()..field.content.len();
+                            cx.notify();
+                        });
+                    }
                 }
             }
             Kind::Services => {
@@ -267,6 +343,7 @@ impl AgentShell {
             Kind::Apply | Kind::Restart => {
                 self.revision = value["revision"].as_u64().unwrap_or(self.revision);
                 self.dirty = false;
+                self.draft = None;
                 self.pending = None;
                 self.message = if kind == Kind::Restart {
                     "配置已提交，节点正在停止；请点击启动节点重新上线。"
@@ -277,10 +354,22 @@ impl AgentShell {
             }
             Kind::Action => {
                 if let Some(revision) = value["revision"].as_u64() {
+                    if self.dirty {
+                        self.pending = None;
+                        self.message =
+                            "后台配置已更新；未保存草稿已保留，请重新读取配置后再编辑提交。".into();
+                        return;
+                    }
                     self.revision = revision;
+                    self.draft = None;
                 }
                 self.pending = None;
                 self.message = "节点已确认命令；任务结果请查看列表。".into();
+            }
+            Kind::Location => {
+                if let Some(path) = value["path"].as_str() {
+                    cx.reveal_path(std::path::Path::new(path));
+                }
             }
         }
     }
@@ -288,7 +377,7 @@ impl AgentShell {
         if self.busy {
             return;
         }
-        let peer = Self::text(&self.peer, cx);
+        let peer = Self::text(&self.management_peer, cx);
         let service = Self::text(&self.service, cx);
         let port = Self::text(&self.port, cx).parse::<u16>();
         if NodeId::from_hex(&peer).is_err()
@@ -313,7 +402,7 @@ impl AgentShell {
         if self.busy {
             return;
         }
-        let peer = Self::text(&self.peer, cx);
+        let peer = Self::text(&self.management_peer, cx);
         if NodeId::from_hex(&peer).is_err() {
             self.message = "请填写完整设备ID".into();
             cx.notify();
@@ -340,7 +429,7 @@ impl AgentShell {
         if self.busy {
             return;
         }
-        let peer = Self::text(&self.peer, cx);
+        let peer = Self::text(&self.management_peer, cx);
         let Ok(node) = NodeId::from_hex(&peer) else {
             self.message = "请填写完整设备ID".into();
             cx.notify();
@@ -373,7 +462,7 @@ impl AgentShell {
         if self.busy {
             return;
         }
-        let peer = Self::text(&self.peer, cx);
+        let peer = Self::text(&self.management_peer, cx);
         let service = Self::text(&self.service, cx);
         let target = Self::text(&self.target, cx);
         if NodeId::from_hex(&peer).is_err()
@@ -395,7 +484,7 @@ impl AgentShell {
             return;
         };
         let command = if restart {
-            settings["signal_server"] = json!(Self::text(&self.signal, cx));
+            settings["signal_server"] = json!(Self::text(&self.management_signal, cx));
             Command::ConfigureRestart {
                 expected_revision: self.revision,
                 settings,
@@ -416,7 +505,7 @@ impl AgentShell {
         if self.busy {
             return;
         }
-        let peer = Self::text(&self.peer, cx);
+        let peer = Self::text(&self.management_peer, cx);
         if NodeId::from_hex(&peer).is_err() {
             self.message = "请先填写接收设备完整ID。".into();
             cx.notify();
@@ -463,10 +552,20 @@ fn field(label: &'static str, input: &Entity<TextField>) -> gpui::Div {
     )
 }
 impl Render for AgentShell {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.render_home(window, cx)
+    }
+}
+impl AgentShell {
+    fn render_management(&mut self, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         let enabled = !self.busy;
         let mut root = div()
             .id("agent-page")
+            .key_context("AgentWorkbench")
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|s, _: &ToggleSettings, _, cx| {
+                s.open_panel(workbench::Page::Settings, cx);
+            }))
             .size_full()
             .overflow_y_scroll()
             .flex()
@@ -476,6 +575,14 @@ impl Render for AgentShell {
             .bg(rgb(ui_theme::PAGE_BG))
             .text_color(rgb(ui_theme::TEXT))
             .child(div().text_2xl().child("P2P File · 节点管理"))
+            .child(
+                ui_components::secondary_button("返回主界面", true).on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(|s, _, window, cx| {
+                        s.return_to_main(window, cx);
+                    }),
+                ),
+            )
             .child(self.connection_note.clone())
             .child(div().text_sm().child(format!(
                 "本机：{} · 信令：{} · 有效 revision {} · 草稿 revision {}{}",
@@ -497,7 +604,7 @@ impl Render for AgentShell {
                     .child(
                         ui_components::primary_button("初始化并启动节点", enabled).on_click(
                             cx.listener(|shell, _, _, cx| {
-                                if shell.busy {
+                                if shell.busy || shell.exiting {
                                     return;
                                 }
                                 match start_agent(&shell.paths, true) {
@@ -536,7 +643,7 @@ impl Render for AgentShell {
             .child(
                 ui_components::card()
                     .child("信令设置（明确停止并重新启动后生效）")
-                    .child(field("信令地址", &self.signal))
+                    .child(field("信令地址", &self.management_signal))
                     .child(
                         ui_components::primary_button(
                             "保存信令并停止节点",
@@ -552,8 +659,8 @@ impl Render for AgentShell {
                         div()
                             .flex()
                             .gap_3()
-                            .child(field("远端设备 ID", &self.peer))
-                            .child(field("远端密码", &self.password)),
+                            .child(field("远端设备 ID", &self.management_peer))
+                            .child(field("远端密码", &self.management_password)),
                     )
                     .child(
                         div()
@@ -561,9 +668,9 @@ impl Render for AgentShell {
                             .gap_2()
                             .child(ui_components::primary_button("连接设备", enabled).on_click(
                                 cx.listener(|s, _, _, cx| {
-                                    let peer = Self::text(&s.peer, cx);
-                                    let password = Self::text(&s.password, cx);
-                                    s.password.update(cx, |field, cx| {
+                                    let peer = Self::text(&s.management_peer, cx);
+                                    let password = Self::text(&s.management_password, cx);
+                                    s.management_password.update(cx, |field, cx| {
                                         field.content = "".into();
                                         field.selected_range = 0..0;
                                         cx.notify();
@@ -586,7 +693,7 @@ impl Render for AgentShell {
                                 cx.listener(|s, _, _, cx| {
                                     s.send(
                                         Command::Disconnect {
-                                            peer: Self::text(&s.peer, cx),
+                                            peer: Self::text(&s.management_peer, cx),
                                         },
                                         Kind::Action,
                                         cx,
@@ -598,7 +705,7 @@ impl Render for AgentShell {
                                     cx.listener(|s, _, _, cx| {
                                         s.send(
                                             Command::Services {
-                                                peer: Self::text(&s.peer, cx),
+                                                peer: Self::text(&s.management_peer, cx),
                                             },
                                             Kind::Services,
                                             cx,
@@ -607,12 +714,12 @@ impl Render for AgentShell {
                                 ),
                             ),
                     )
-                    .child(field("设置本机访问密码", &self.local_password))
+                    .child(field("设置本机访问密码", &self.management_local_password))
                     .child(
                         ui_components::primary_button("保存密码并撤销现有授权", enabled).on_click(
                             cx.listener(|s, _, _, cx| {
-                                let password = Self::text(&s.local_password, cx);
-                                s.local_password.update(cx, |f, cx| {
+                                let password = Self::text(&s.management_local_password, cx);
+                                s.management_local_password.update(cx, |f, cx| {
                                     f.content = "".into();
                                     f.selected_range = 0..0;
                                     cx.notify();
@@ -951,7 +1058,9 @@ pub fn run(root: PathBuf, background: bool) {
             return;
         }
     };
-    Application::new().run(move |cx: &mut App| {
+    let application = Application::new();
+    application.on_reopen(tray_host::show_main);
+    application.run(move |cx: &mut App| {
         cx.bind_keys([
             KeyBinding::new("backspace", Backspace, None),
             KeyBinding::new("delete", Delete, None),
@@ -965,22 +1074,42 @@ pub fn run(root: PathBuf, background: bool) {
             KeyBinding::new("secondary-x", Cut, None),
             KeyBinding::new("home", Home, None),
             KeyBinding::new("end", End, None),
+            KeyBinding::new("secondary-enter", ConnectPeer, Some("AgentWorkbench")),
+            KeyBinding::new("secondary-o", ChooseFiles, Some("AgentWorkbench")),
+            KeyBinding::new("secondary-shift-o", ChooseFolder, Some("AgentWorkbench")),
+            KeyBinding::new("secondary-,", ToggleSettings, Some("AgentWorkbench")),
+            KeyBinding::new("tab", NextField, Some("AgentWorkbench")),
+            KeyBinding::new("shift-tab", PreviousField, Some("AgentWorkbench")),
         ]);
-        let bounds = Bounds::centered(None, size(px(1180.), px(900.)), cx);
-        if let Err(e) = cx.open_window(
+        let bounds = Bounds::centered(None, size(px(1180.), px(780.)), cx);
+        match cx.open_window(
             WindowOptions {
                 titlebar: Some(gpui::TitlebarOptions {
-                    title: Some("P2P File · 节点管理".into()),
+                    title: Some("P2P File".into()),
                     ..Default::default()
                 }),
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 window_min_size: Some(size(px(760.), px(560.))),
                 ..Default::default()
             },
-            |_, cx| cx.new(|cx| AgentShell::new(paths, worker, cx)),
+            |window, cx| {
+                let shell = cx.new(|cx| AgentShell::new(paths, worker, cx));
+                window.focus(&shell.read(cx).focus);
+                shell
+            },
         ) {
-            eprintln!("打开窗口失败：{e}");
-            cx.quit();
+            Ok(handle) => {
+                let _ = handle.update(cx, |shell, _, _| {
+                    shell.windows.insert(workbench::Page::Home, handle.into());
+                });
+                if let Ok(shell) = handle.entity(cx) {
+                    tray_host::install(shell, handle.into(), cx);
+                }
+            }
+            Err(e) => {
+                eprintln!("打开窗口失败：{e}");
+                cx.quit();
+            }
         }
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
