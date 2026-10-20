@@ -14,6 +14,12 @@ pub(crate) struct WriteOutcome {
 
 pub(crate) fn write_json<T: Serialize>(path: &Path, value: &T) -> io::Result<WriteOutcome> {
     let bytes = serde_json::to_vec_pretty(value).map_err(io::Error::other)?;
+    let mut bytes = bytes;
+    bytes.push(b'\n');
+    write_bytes(path, &bytes)
+}
+
+pub(crate) fn write_bytes(path: &Path, bytes: &[u8]) -> io::Result<WriteOutcome> {
     match std::fs::symlink_metadata(path) {
         Ok(metadata)
             if !metadata.is_file()
@@ -40,8 +46,7 @@ pub(crate) fn write_json<T: Serialize>(path: &Path, value: &T) -> io::Result<Wri
     }
     let mut file = options.open(&temporary)?;
     let result = (|| {
-        file.write_all(&bytes)?;
-        file.write_all(b"\n")?;
+        file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
         replace(&temporary, path)

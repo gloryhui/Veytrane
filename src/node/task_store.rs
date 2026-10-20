@@ -697,6 +697,16 @@ fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
     Ok(())
 }
 
+pub(crate) fn inspect_bytes(bytes: &[u8]) -> Result<Vec<TaskRecord>, TaskStoreError> {
+    if bytes.len() as u64 > MAX_STORE_BYTES {
+        return Err(TaskStoreError::Corrupt);
+    }
+    let snapshot: StoreSnapshot =
+        serde_json::from_slice(bytes).map_err(|_| TaskStoreError::Corrupt)?;
+    validate_snapshot(&snapshot)?;
+    Ok(snapshot.tasks)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::task_model::{ManifestIdentity, PeerId, TaskDirection, TaskErrorCode};

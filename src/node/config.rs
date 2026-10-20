@@ -531,7 +531,13 @@ impl DesktopConfig {
         }
 
         let bytes = fs::read(path)?;
-        let version = serde_json::from_slice::<serde_json::Value>(&bytes)
+        Self::decode(&bytes).map(Some)
+    }
+    pub(crate) fn decode(bytes: &[u8]) -> Result<Self, ConfigError> {
+        if bytes.len() > 1024 * 1024 {
+            return Err(ConfigError::Corrupt("配置超过1MiB".into()));
+        }
+        let version = serde_json::from_slice::<serde_json::Value>(bytes)
             .map_err(|error| ConfigError::Corrupt(error.to_string()))?
             .get("schema_version")
             .and_then(serde_json::Value::as_u64)
@@ -539,7 +545,7 @@ impl DesktopConfig {
             .ok_or_else(|| ConfigError::Corrupt("缺少有效的 schema_version".into()))?;
         let config = match version {
             LEGACY_CONFIG_SCHEMA_VERSION => {
-                let legacy: LegacyDesktopConfig = serde_json::from_slice(&bytes)
+                let legacy: LegacyDesktopConfig = serde_json::from_slice(bytes)
                     .map_err(|error| ConfigError::Corrupt(error.to_string()))?;
                 if legacy.schema_version != LEGACY_CONFIG_SCHEMA_VERSION {
                     return Err(ConfigError::Corrupt("旧配置版本字段不一致".into()));
@@ -565,7 +571,7 @@ impl DesktopConfig {
                 }
             }
             2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | CONFIG_SCHEMA_VERSION => {
-                let mut config = serde_json::from_slice::<Self>(&bytes)
+                let mut config = serde_json::from_slice::<Self>(bytes)
                     .map_err(|error| ConfigError::Corrupt(error.to_string()))?;
                 if version < 4 && (config.signal.is_none() || config.receive_directory.is_none()) {
                     return Err(ConfigError::Corrupt("旧配置缺少信令或接收目录".into()));
@@ -617,7 +623,7 @@ impl DesktopConfig {
         config
             .validate()
             .map_err(|error| ConfigError::Corrupt(error.to_string()))?;
-        Ok(Some(config))
+        Ok(config)
     }
 
     fn validate(&self) -> Result<(), ConfigError> {

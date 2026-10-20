@@ -59,3 +59,5 @@ mod agent_state;
 pub mod management_cli;
 
 pub mod agent_web;
+
+pub mod migration;

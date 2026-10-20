@@ -24,6 +24,24 @@ pub struct Args {
 #[derive(Subcommand)]
 pub enum Action {
     Init,
+    MigratePreview {
+        #[arg(long)]
+        config_file: PathBuf,
+        #[arg(long)]
+        source_data_dir: PathBuf,
+    },
+    MigrateDesktop {
+        #[arg(long)]
+        config_file: PathBuf,
+        #[arg(long)]
+        source_data_dir: PathBuf,
+        #[arg(long)]
+        expected_preview: String,
+    },
+    MigrateResume {
+        #[arg(long)]
+        expected_preview: String,
+    },
     Web {
         #[arg(long, default_value = "127.0.0.1:8787")]
         listen: std::net::SocketAddr,
@@ -146,6 +164,7 @@ pub fn initialize(paths: &AgentPaths) -> io::Result<Value> {
     if paths.config().try_exists()? {
         return Err(io::Error::other("节点配置已存在"));
     }
+    super::migration::guard_initialization(paths)?;
     let identity =
         crate::identity::Identity::load_or_create(&paths.identity()).map_err(io::Error::other)?;
     let _identity = AgentPaths::identity_lock(identity.node_id())?;
@@ -207,6 +226,36 @@ pub async fn run(args: Args) -> io::Result<Response> {
     };
     let paths = AgentPaths::new(&root)?;
     let command = match args.command {
+        Action::MigratePreview {
+            config_file,
+            source_data_dir,
+        } => {
+            return Ok(Response::ok(
+                "migrate_preview",
+                super::migration::preview(&paths, &config_file, &source_data_dir)?,
+            ));
+        }
+        Action::MigrateDesktop {
+            config_file,
+            source_data_dir,
+            expected_preview,
+        } => {
+            return Ok(Response::ok(
+                "migrate_desktop",
+                super::migration::import(
+                    &paths,
+                    &config_file,
+                    &source_data_dir,
+                    &expected_preview,
+                )?,
+            ));
+        }
+        Action::MigrateResume { expected_preview } => {
+            return Ok(Response::ok(
+                "migrate_resume",
+                super::migration::resume(&paths, &expected_preview)?,
+            ));
+        }
         Action::Web { listen } => {
             super::agent_web::run(paths, listen).await?;
             return Ok(Response::ok("web", json!({"stopped":true})));
