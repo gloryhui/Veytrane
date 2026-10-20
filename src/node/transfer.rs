@@ -176,6 +176,20 @@ async fn blocking<T: Send + 'static>(
         .map_err(|_| disk::failure("文件后台任务中断"))?
 }
 
+pub(crate) struct TransportModeGuard {
+    service: TransferService,
+    transport: usize,
+}
+impl Drop for TransportModeGuard {
+    fn drop(&mut self) {
+        self.service
+            .unified_connections
+            .lock()
+            .unwrap()
+            .remove(&self.transport);
+    }
+}
+
 pub(crate) struct FileInlets {
     pub files: tokio::sync::mpsc::Receiver<super::dispatch::BiStream>,
     pub speed: tokio::sync::mpsc::Receiver<super::dispatch::BiStream>,
@@ -228,12 +242,20 @@ async fn next_incoming(
 }
 
 impl TransferService {
-    pub(crate) fn set_unified_connection(&self, connection: &Connection, unified: bool) {
+    pub(crate) fn set_unified_connection(
+        &self,
+        connection: &Connection,
+        unified: bool,
+    ) -> TransportModeGuard {
         let mut modes = self.unified_connections.lock().unwrap();
         if unified {
             modes.insert(connection.stable_id());
         } else {
             modes.remove(&connection.stable_id());
+        }
+        TransportModeGuard {
+            service: self.clone(),
+            transport: connection.stable_id(),
         }
     }
     fn is_unified(&self, connection: &Connection) -> bool {

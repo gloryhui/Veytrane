@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -907,15 +907,133 @@ pub async fn bridge_tcp(tcp: TcpStream, send: SendStream, recv: RecvStream) -> R
     splice(tcp, send, recv).await
 }
 
-/// Run one local listener over an already authenticated peer session.
-/// The accepted TCP connections and their QUIC streams are owned by this task.
-/// Local connections are rejected promptly while the authenticated peer is unavailable.
+/// Structured owner of accepted TCP flows, independent from individual listeners.
+pub struct ForwardStreamOwner {
+    closed: AtomicBool,
+    tasks: Mutex<JoinSet<()>>,
+    slots: Arc<Semaphore>,
+    limit: usize,
+}
+impl ForwardStreamOwner {
+    pub fn new(limit: usize) -> Self {
+        Self {
+            closed: AtomicBool::new(false),
+            tasks: Mutex::new(JoinSet::new()),
+            slots: Arc::new(Semaphore::new(limit)),
+            limit,
+        }
+    }
+    pub fn active(&self) -> usize {
+        self.limit.saturating_sub(self.slots.available_permits())
+    }
+    fn spawn(&self, task: impl Future<Output = ()> + Send + 'static) -> bool {
+        if self.closed.load(Ordering::Acquire) {
+            return false;
+        }
+        let Ok(permit) = self.slots.clone().try_acquire_owned() else {
+            return false;
+        };
+        let mut tasks = self.tasks.lock().unwrap();
+        if self.closed.load(Ordering::Acquire) {
+            return false;
+        }
+        while tasks.try_join_next().is_some() {}
+        tasks.spawn(async move {
+            let _permit = permit;
+            task.await;
+        });
+        true
+    }
+    pub async fn shutdown(&self) {
+        self.closed.store(true, Ordering::Release);
+        let mut tasks = {
+            let mut owned = self.tasks.lock().unwrap();
+            std::mem::take(&mut *owned)
+        };
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
+    }
+}
+
+#[derive(Clone)]
+enum ForwardErrors {
+    Bounded(mpsc::Sender<String>),
+    Legacy(mpsc::UnboundedSender<String>),
+}
+impl ForwardErrors {
+    fn report(&self, error: String) {
+        match self {
+            Self::Bounded(sender) => {
+                let _ = sender.try_send(error);
+            }
+            Self::Legacy(sender) => {
+                let _ = sender.send(error);
+            }
+        }
+    }
+}
+
+/// Compatibility helper: stopping the listener also stops its accepted flows.
 pub async fn forward_on_authenticated_session<F, Fut>(
     listener: TcpListener,
     target: SocketAddr,
     connections: watch::Receiver<Option<Connection>>,
-    mut shutdown: watch::Receiver<bool>,
+    shutdown: watch::Receiver<bool>,
     errors: mpsc::UnboundedSender<String>,
+    open_stream: F,
+) -> Result<()>
+where
+    F: Fn(TcpStream, Connection, SocketAddr) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<()>> + Send + 'static,
+{
+    let owner = Arc::new(ForwardStreamOwner::new(DEFAULT_MAX_TUNNEL_STREAMS));
+    let result = forward_listener(
+        listener,
+        target,
+        connections,
+        shutdown,
+        ForwardErrors::Legacy(errors),
+        owner.clone(),
+        open_stream,
+    )
+    .await;
+    owner.shutdown().await;
+    result
+}
+
+/// Node lifetime owns accepted flows. Rule deletion only stops new acceptance.
+pub async fn forward_with_owner<F, Fut>(
+    listener: TcpListener,
+    target: SocketAddr,
+    connections: watch::Receiver<Option<Connection>>,
+    shutdown: watch::Receiver<bool>,
+    errors: mpsc::Sender<String>,
+    owner: Arc<ForwardStreamOwner>,
+    open_stream: F,
+) -> Result<()>
+where
+    F: Fn(TcpStream, Connection, SocketAddr) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<()>> + Send + 'static,
+{
+    forward_listener(
+        listener,
+        target,
+        connections,
+        shutdown,
+        ForwardErrors::Bounded(errors),
+        owner,
+        open_stream,
+    )
+    .await
+}
+
+async fn forward_listener<F, Fut>(
+    listener: TcpListener,
+    target: SocketAddr,
+    connections: watch::Receiver<Option<Connection>>,
+    mut shutdown: watch::Receiver<bool>,
+    errors: ForwardErrors,
+    owner: Arc<ForwardStreamOwner>,
     open_stream: F,
 ) -> Result<()>
 where
@@ -924,33 +1042,22 @@ where
 {
     let actual = listener.local_addr()?;
     let streams = Arc::new(Semaphore::new(DEFAULT_MAX_TUNNEL_STREAMS));
-    let mut tasks = JoinSet::new();
     let open_stream = Arc::new(open_stream);
-
     loop {
         let accepted = tokio::select! {
             biased;
             changed = shutdown.changed() => {
-                if changed.is_err() || *shutdown.borrow() {
-                    break;
-                }
+                if changed.is_err() || *shutdown.borrow() { break }
                 continue;
             }
             accepted = listener.accept() => accepted,
-            result = tasks.join_next(), if !tasks.is_empty() => {
-                if let Some(Err(error)) = result {
-                    debug!(%error, "桌面转发连接 task 结束");
-                }
-                continue;
-            }
         };
         let (tcp, from) = accepted
             .map_err(|err| Error::Transport(format!("接受本地连接 {actual} 失败: {err}")))?;
         let permit = match streams.clone().try_acquire_owned() {
             Ok(permit) => permit,
             Err(_) => {
-                let _ = errors.send(format!("本机转发 {actual} 的并发连接已达上限"));
-                drop(tcp);
+                errors.report(format!("本机转发 {actual} 的并发连接已达上限"));
                 continue;
             }
         };
@@ -959,27 +1066,22 @@ where
             .clone()
             .filter(|connection| connection.close_reason().is_none());
         let Some(connection) = connection else {
-            let _ = errors.send("对端尚未建立认证连接，本地 TCP 已关闭；连接就绪后请重试".into());
-            drop(tcp);
+            errors.report("对端尚未建立认证连接，本地 TCP 已关闭；连接就绪后请重试".into());
             continue;
         };
-        let errors = errors.clone();
-        let open_stream = Arc::clone(&open_stream);
-        tasks.spawn(async move {
+        let task_errors = errors.clone();
+        let open_stream = open_stream.clone();
+        if !owner.spawn(async move {
             let _permit = permit;
             if let Err(error) = open_stream(tcp, connection, target).await {
-                let _ = errors.send(error.to_string());
-                debug!(%from, %target, error = %error, "本机转发连接失败");
+                task_errors.report(error.to_string());
+                debug!(%from, %target, %error, "本机转发连接失败");
             }
-        });
-    }
-
-    tasks.abort_all();
-    while let Some(result) = tasks.join_next().await {
-        if let Err(error) = result {
-            debug!(%error, "桌面转发连接 task 已取消");
+        }) {
+            errors.report("节点 TCP 业务流并发已达上限".into());
         }
     }
+    // listener drops here; accepted work remains in the node's structured owner.
     Ok(())
 }
 

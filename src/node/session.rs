@@ -980,6 +980,7 @@ async fn run_session(
         services: config.service_ids.clone(),
     };
     let service_queries = Arc::new(Semaphore::new(16));
+    let forward_streams = Arc::new(crate::tunnel::ForwardStreamOwner::new(256));
     let mode_for = |peer: NodeId| {
         config
             .peer_modes
@@ -1111,6 +1112,7 @@ async fn run_session(
             &command_tx,
             &events,
             &tunnel_policy,
+            &forward_streams,
         )
         .await;
     }
@@ -1552,6 +1554,7 @@ async fn run_session(
                             &command_tx,
                             &events,
                             &tunnel_policy,
+                            &forward_streams,
                         )
                         .await;
                     }
@@ -2196,6 +2199,7 @@ async fn run_session(
                     &command_tx,
                     &events,
                     &tunnel_policy,
+                    &forward_streams,
                 )
                 .await;
             }
@@ -2293,6 +2297,7 @@ async fn run_session(
                         &command_tx,
                         &events,
                         &tunnel_policy,
+                        &forward_streams,
                     )
                     .await;
                 }
@@ -2899,20 +2904,22 @@ async fn run_session(
                             &command_tx,
                             &events,
                             &tunnel_policy,
+                            &forward_streams,
                         )
                         .await;
                     }
                 }
                 let unified = mode_for(peer) == super::wire::PeerWireMode::UnifiedV1;
                 let transfer = config.transfer.clone();
-                if let Some(service) = &transfer {
-                    service.set_unified_connection(&connection, unified);
-                }
+                let wire_binding = transfer
+                    .as_ref()
+                    .map(|service| service.set_unified_connection(&connection, unified));
                 let business_connection = connection.clone();
                 let allowed_targets = allowed_forward_targets.subscribe();
                 let resources = resource_policy.subscribe();
                 let business_events = events.clone();
                 peer_tasks.spawn(async move {
+                    let _wire_binding = wire_binding;
                     if unified {
                         let (_dispatcher, incoming) = super::dispatch::Dispatcher::start(
                             business_connection.clone(),
@@ -3397,6 +3404,7 @@ async fn run_session(
                         &command_tx,
                         &events,
                         &tunnel_policy,
+                        &forward_streams,
                     )
                     .await;
                 }
@@ -3466,6 +3474,7 @@ async fn run_session(
         connection.close(0u32.into(), b"desktop session shutdown");
     }
     network.close();
+    forward_streams.shutdown().await;
     session_tasks.abort_all();
     peer_tasks.abort_all();
     while peer_tasks.join_next().await.is_some() {}
@@ -3548,6 +3557,7 @@ async fn start_tunnel_rule(
     command_tx: &mpsc::Sender<SessionCommand>,
     events: &SessionEvents,
     policy: &TunnelWirePolicy,
+    stream_owner: &Arc<crate::tunnel::ForwardStreamOwner>,
 ) {
     if running_tunnels.contains_key(&rule.id) {
         return;
@@ -3670,17 +3680,19 @@ async fn start_tunnel_rule(
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let connection_updates = connection_updates.subscribe();
     let mut state_updates = connection_updates.clone();
-    let (errors_tx, mut errors_rx) = mpsc::unbounded_channel();
+    let (errors_tx, mut errors_rx) = mpsc::channel(32);
     let task_events = events.clone();
     let task_rule_id = rule_id.clone();
     let target = rule.target;
+    let stream_owner = stream_owner.clone();
     tunnel_tasks.spawn(async move {
-        let forward = crate::tunnel::forward_on_authenticated_session(
+        let forward = crate::tunnel::forward_with_owner(
             listener,
             target,
             connection_updates,
             shutdown_rx,
             errors_tx,
+            stream_owner,
             move |tcp, connection, target| {
                 let service_id = service_id.clone();
                 async move {
