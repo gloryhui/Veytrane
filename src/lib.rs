@@ -27,6 +27,9 @@ pub mod transfer;
 pub mod transport;
 pub mod tunnel;
 
+#[cfg(feature = "node")]
+pub mod node;
+
 #[cfg(feature = "gui")]
 pub mod desktop;
 

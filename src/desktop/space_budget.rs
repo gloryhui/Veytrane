@@ -11,21 +11,10 @@ use std::{
     },
 };
 
-pub(super) const DEFAULT_SAFETY_MIB: u16 = 64;
-const MAX_SAFETY_MIB: u16 = 4096;
+pub(super) use crate::node::receive_policy::{DEFAULT_SAFETY_MIB, validate_safety_mib};
 pub(super) const TASK_OVERHEAD: u64 = 64 * 1024;
 const MAX_RESERVATIONS: usize = 64;
 
-pub(super) fn default_safety_mib() -> u16 {
-    DEFAULT_SAFETY_MIB
-}
-pub(super) fn validate_safety_mib(value: u16) -> std::result::Result<(), &'static str> {
-    if value > MAX_SAFETY_MIB {
-        Err("接收安全余量必须为 0..4096 MiB")
-    } else {
-        Ok(())
-    }
-}
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(super) struct Filesystem {
     volume: u64,

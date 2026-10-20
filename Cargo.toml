@@ -11,8 +11,8 @@ categories = ["network-programming"]
 license = "MIT"
 
 [features]
-default = []
-gui = [
+default = ["node"]
+node = [
     "dep:argon2",
     "dep:hmac",
     "dep:sha2",
@@ -22,6 +22,9 @@ gui = [
     "dep:cap-fs-ext",
     "dep:unicode-normalization",
     "dep:rustix",
+]
+gui = [
+    "node",
     "dep:gpui",
     "dep:unicode-segmentation",
     "dep:raw-window-handle",

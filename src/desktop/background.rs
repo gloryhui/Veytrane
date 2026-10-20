@@ -1,15 +1,6 @@
 //! Window lifetime, real status projection, and the menu-bar panel.
 use super::*;
-use serde::{Deserialize, Serialize};
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct BackgroundOptions {
-    #[serde(default)]
-    pub close_to_tray: bool,
-    #[serde(default)]
-    pub launch_at_login: bool,
-}
+pub(crate) use crate::node::preferences::BackgroundOptions;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) enum CoreState {
