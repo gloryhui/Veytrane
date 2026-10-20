@@ -59,6 +59,7 @@ fn is_current_signal_generation(current: u64, result_generation: u64) -> bool {
 pub struct NodeSessionConfig {
     pub wire_mode: super::wire::PeerWireMode,
     pub peer_modes: HashMap<NodeId, super::wire::PeerWireMode>,
+    pub service_ids: HashMap<String, String>,
     pub resources: super::authorization::ResourcePolicy,
     pub trust_sources: HashMap<NodeId, super::authorization::TrustSource>,
     pub enable_files: bool,
@@ -88,6 +89,7 @@ impl NodeSessionConfig {
         Self {
             wire_mode: super::wire::PeerWireMode::LegacyDesktopV1,
             peer_modes: HashMap::new(),
+            service_ids: HashMap::new(),
             resources: Default::default(),
             trust_sources: HashMap::new(),
             enable_files: true,
@@ -257,6 +259,21 @@ impl Drop for SessionLifetime {
 }
 
 impl NodeSessionHandle {
+    pub async fn list_services(
+        &self,
+        peer: NodeId,
+    ) -> std::result::Result<Vec<super::wire::ServiceDescriptor>, String> {
+        let (done, result) = oneshot::channel();
+        tokio::time::timeout(Duration::from_secs(15), async {
+            self.commands
+                .send(SessionCommand::ListServices { peer, done })
+                .await
+                .map_err(|_| "节点已停止".to_owned())?;
+            result.await.map_err(|_| "节点已停止".to_owned())?
+        })
+        .await
+        .map_err(|_| "服务目录查询超时".to_owned())?
+    }
     pub async fn disconnect_peer(&self, peer: NodeId) -> std::result::Result<(), String> {
         let (done, result) = oneshot::channel();
         self.commands
@@ -600,6 +617,10 @@ pub async fn change_trusted_device(
     }
 }
 enum SessionCommand {
+    ListServices {
+        peer: NodeId,
+        done: oneshot::Sender<std::result::Result<Vec<super::wire::ServiceDescriptor>, String>>,
+    },
     DisconnectPeer {
         peer: NodeId,
         done: oneshot::Sender<std::result::Result<(), String>>,
@@ -810,6 +831,17 @@ pub fn spawn(
     identity: Identity,
     config: NodeSessionConfig,
 ) -> std::io::Result<(NodeSessionHandle, mpsc::Receiver<SessionEvent>)> {
+    if config.service_ids.len() > 512 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "本机服务映射数量超限",
+        ));
+    }
+    for (rule, service) in &config.service_ids {
+        super::wire::validate_service_id(rule)
+            .and_then(|()| super::wire::validate_service_id(service))
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    }
     config
         .resources
         .validate()
@@ -942,6 +974,12 @@ async fn run_session(
         }
     };
 
+    let tunnel_policy = TunnelWirePolicy {
+        mode: config.wire_mode,
+        peers: config.peer_modes.clone(),
+        services: config.service_ids.clone(),
+    };
+    let service_queries = Arc::new(Semaphore::new(16));
     let mode_for = |peer: NodeId| {
         config
             .peer_modes
@@ -1072,6 +1110,7 @@ async fn run_session(
             &mut tunnel_tasks,
             &command_tx,
             &events,
+            &tunnel_policy,
         )
         .await;
     }
@@ -1203,6 +1242,45 @@ async fn run_session(
             #[cfg(test)]
             Wake::Command(Some(SessionCommand::Inspect(reply))) => {
                 let _ = reply.send(connections.clone());
+            }
+            Wake::Command(Some(SessionCommand::ListServices { peer, done })) => {
+                if mode_for(peer) != super::wire::PeerWireMode::UnifiedV1
+                    || !peer_capabilities
+                        .get(&peer)
+                        .is_some_and(|caps| caps & super::wire::CAP_SERVICE_DIRECTORY != 0)
+                {
+                    let _ = done.send(Err("对端未协商统一服务目录能力".into()));
+                    continue;
+                }
+                let valid = peers
+                    .state(peer)
+                    .is_some_and(PeerLifecycle::outbound_authorized)
+                    && !resource_policy.borrow().for_peer(peer).disabled;
+                let connection = connections
+                    .get(&peer)
+                    .filter(|(_, connection)| valid && connection.close_reason().is_none())
+                    .map(|(_, c)| c.clone());
+                let Some(connection) = connection else {
+                    let _ = done.send(Err("对端当前没有有效出站授权".into()));
+                    continue;
+                };
+                let Some((_, _, rights)) = authorizations.get(&peer) else {
+                    let _ = done.send(Err("会话授权不可用".into()));
+                    continue;
+                };
+                let Ok(permit) = service_queries.clone().try_acquire_owned() else {
+                    let _ = done.send(Err("目录查询达到并发上限".into()));
+                    continue;
+                };
+                let live = rights.live();
+                peer_tasks.spawn(async move {
+                    let _permit = permit;
+                    let result = live
+                        .guard(false, super::services::list(&connection))
+                        .await
+                        .map_err(|error| error.to_string());
+                    let _ = done.send(result);
+                });
             }
             Wake::Command(Some(SessionCommand::DisconnectPeer { peer, done })) => {
                 if manually_disconnected.len() >= 128 && !manually_disconnected.contains(&peer) {
@@ -1473,6 +1551,7 @@ async fn run_session(
                             &mut tunnel_tasks,
                             &command_tx,
                             &events,
+                            &tunnel_policy,
                         )
                         .await;
                     }
@@ -2116,6 +2195,7 @@ async fn run_session(
                     &mut tunnel_tasks,
                     &command_tx,
                     &events,
+                    &tunnel_policy,
                 )
                 .await;
             }
@@ -2212,6 +2292,7 @@ async fn run_session(
                         &mut tunnel_tasks,
                         &command_tx,
                         &events,
+                        &tunnel_policy,
                     )
                     .await;
                 }
@@ -2817,6 +2898,7 @@ async fn run_session(
                             &mut tunnel_tasks,
                             &command_tx,
                             &events,
+                            &tunnel_policy,
                         )
                         .await;
                     }
@@ -3314,6 +3396,7 @@ async fn run_session(
                         &mut tunnel_tasks,
                         &command_tx,
                         &events,
+                        &tunnel_policy,
                     )
                     .await;
                 }
@@ -3438,6 +3521,17 @@ fn fail_peer_tunnels(
     }
 }
 
+struct TunnelWirePolicy {
+    mode: super::wire::PeerWireMode,
+    peers: HashMap<NodeId, super::wire::PeerWireMode>,
+    services: HashMap<String, String>,
+}
+impl TunnelWirePolicy {
+    fn mode_for(&self, peer: NodeId) -> super::wire::PeerWireMode {
+        self.peers.get(&peer).copied().unwrap_or(self.mode)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn start_tunnel_rule(
     rule: super::config::TunnelRule,
@@ -3453,6 +3547,7 @@ async fn start_tunnel_rule(
     tunnel_tasks: &mut JoinSet<TunnelTaskResult>,
     command_tx: &mpsc::Sender<SessionCommand>,
     events: &SessionEvents,
+    policy: &TunnelWirePolicy,
 ) {
     if running_tunnels.contains_key(&rule.id) {
         return;
@@ -3485,6 +3580,22 @@ async fn start_tunnel_rule(
                 .await;
             return;
         }
+    };
+    let service_id = if policy.mode_for(peer) == super::wire::PeerWireMode::UnifiedV1 {
+        let Some(service) = policy.services.get(&rule_id) else {
+            let _ = events
+                .send(SessionEvent::TunnelState {
+                    rule_id,
+                    state: TunnelRuntimeState::Error(
+                        "统一节点转发必须显式指定远端 service_id".into(),
+                    ),
+                })
+                .await;
+            return;
+        };
+        Some(service.clone())
+    } else {
+        None
     };
     if !rule.enabled {
         let _ = events
@@ -3570,8 +3681,16 @@ async fn start_tunnel_rule(
             connection_updates,
             shutdown_rx,
             errors_tx,
-            |tcp, connection, target| async move {
-                super::tunnel::open_tunnel(tcp, &connection, target).await
+            move |tcp, connection, target| {
+                let service_id = service_id.clone();
+                async move {
+                    if let Some(service_id) = service_id {
+                        let stream = super::services::open_tcp(&connection, &service_id).await?;
+                        crate::tunnel::bridge_tcp(tcp, stream.send, stream.recv).await
+                    } else {
+                        super::tunnel::open_tunnel(tcp, &connection, target).await
+                    }
+                }
             },
         );
         tokio::pin!(forward);
