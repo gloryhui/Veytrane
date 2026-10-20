@@ -23,7 +23,7 @@ pub async fn run(paths: AgentPaths, listen: SocketAddr) -> io::Result<()> {
     }
     let token_path = paths.root.join("admin.token");
     if let Ok(metadata) = std::fs::symlink_metadata(&token_path) {
-        if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > 4096 {
+        if !crate::storage::atomic::regular_file(&metadata) || metadata.len() > 4096 {
             return Err(io::Error::other("token必须是私有普通文件"));
         }
         #[cfg(unix)]

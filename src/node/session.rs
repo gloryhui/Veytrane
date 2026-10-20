@@ -1333,7 +1333,7 @@ async fn run_session(
             })) => {
                 // Bind preparation belongs to Agent. This actor is the single
                 // authorization publisher and persists before exposing grants.
-                if let Err(error) = record.settings.validate() {
+                if let Err(error) = record.validate() {
                     let _ = done.send(Err(error.to_string()));
                     continue;
                 }

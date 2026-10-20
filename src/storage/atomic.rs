@@ -72,6 +72,10 @@ fn sync_directory(_path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+pub(crate) fn regular_file(metadata: &std::fs::Metadata) -> bool {
+    metadata.is_file() && !metadata.file_type().is_symlink() && !is_reparse(metadata)
+}
+
 #[cfg(not(windows))]
 fn is_reparse(_metadata: &std::fs::Metadata) -> bool {
     false

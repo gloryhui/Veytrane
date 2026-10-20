@@ -218,6 +218,7 @@ pub fn offline_apply(paths: &AgentPaths, file: &Path, expected: u64) -> io::Resu
         .checked_add(1)
         .ok_or_else(|| io::Error::other("revision已耗尽"))?;
     record.last_request = None;
+    record.validate().map_err(io::Error::other)?;
     let outcome = crate::storage::atomic::write_json(&paths.config(), &record)?;
     Ok(json!({"revision":record.revision,"durability_warning":outcome.durability_warning}))
 }

@@ -579,9 +579,7 @@ async fn reload_signal() -> io::Result<()> {
 fn read_candidate(path: &std::path::Path) -> io::Result<Request> {
     use std::io::Read;
     let metadata = std::fs::symlink_metadata(path)?;
-    if !metadata.is_file()
-        || metadata.file_type().is_symlink()
-        || metadata.len() > ipc::FRAME_LIMIT as u64
+    if !crate::storage::atomic::regular_file(&metadata) || metadata.len() > ipc::FRAME_LIMIT as u64
     {
         return Err(io::Error::other("候选必须是最大1MiB的普通文件"));
     }

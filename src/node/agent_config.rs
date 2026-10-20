@@ -64,7 +64,7 @@ impl NodeSettings {
         }
     }
     pub fn validate(&self) -> Result<()> {
-        if !self.receive_root.is_absolute() {
+        if !self.receive_root.is_absolute() || self.receive_root.as_os_str().len() > 4096 {
             return Err(Error::Protocol("接收根必须是绝对路径".into()));
         }
         if self.signal_server.len() > 512 || self.signal_server.chars().any(char::is_control) {
@@ -205,17 +205,46 @@ pub struct ConfigRecord {
 impl ConfigRecord {
     pub fn load(path: &Path) -> Result<Self> {
         let metadata = std::fs::symlink_metadata(path)?;
-        if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > 1024 * 1024
-        {
+        if !crate::storage::atomic::regular_file(&metadata) || metadata.len() > 1024 * 1024 {
             return Err(Error::Protocol("节点配置不是有界普通文件".into()));
         }
-        let value: Self = serde_json::from_slice(&std::fs::read(path)?)
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)?
+            .take(1024 * 1024 + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > 1024 * 1024 {
+            return Err(Error::Protocol("节点配置超过1MiB".into()));
+        }
+        let value: Self = serde_json::from_slice(&bytes)
             .map_err(|e| Error::Protocol(format!("节点配置损坏：{e}")))?;
         if value.schema_version != 1 {
             return Err(Error::Protocol("不支持的节点配置schema".into()));
         }
-        value.settings.validate()?;
+        value.validate()?;
         Ok(value)
+    }
+    pub(crate) fn validate(&self) -> Result<()> {
+        if self.schema_version != 1
+            || serde_json::to_vec_pretty(self)
+                .map_err(|e| Error::Protocol(e.to_string()))?
+                .len()
+                >= 1024 * 1024
+        {
+            return Err(Error::Protocol("节点根schema或大小无效".into()));
+        }
+        if let Some((id, hash)) = &self.last_request
+            && (id.is_empty()
+                || id.len() > 64
+                || !id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                || hash.len() != 64
+                || !hash.bytes().all(|b| b.is_ascii_hexdigit()))
+        {
+            return Err(Error::Protocol("持久幂等记录无效".into()));
+        }
+        self.settings.validate()
     }
     pub fn initialize(path: &Path, receive_root: PathBuf) -> Result<Self> {
         if path.try_exists()? {
@@ -227,7 +256,7 @@ impl ConfigRecord {
             last_request: None,
             settings: NodeSettings::initial(receive_root),
         };
-        record.settings.validate()?;
+        record.validate()?;
         let outcome = crate::storage::atomic::write_json(path, &record)?;
         if let Some(warning) = outcome.durability_warning {
             tracing::warn!(%warning);
