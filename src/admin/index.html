@@ -148,6 +148,8 @@
   let token = sessionStorage.getItem(TOKEN_KEY) || "";
   let state = null;
   let config = null;
+  let draft = null;
+  let busy = false;
 
   class ApiError extends Error {
     constructor(message, details) {
@@ -198,6 +200,13 @@
     setStatus((error && error.message ? error.message : String(error)) + details, "error");
   }
 
+  function setBusy(value) {
+    busy = value;
+    for (const input of $("app").querySelectorAll("input, button")) {
+      input.disabled = value;
+    }
+  }
+
   function rowHtml(rule, index) {
     const commonStart = `<td class="narrow"><input type="checkbox" data-field="enabled" ${rule.enabled ? "checked" : ""}></td>
       <td><input data-field="id" value="${escapeHtml(rule.id)}"></td>
@@ -229,7 +238,7 @@
       $("thead").innerHTML = "<tr><th>启用</th><th>ID</th><th>名称</th><th>本机监听</th><th>目标 IP:端口</th><th>对端 NodeId</th><th>自动启动</th><th></th></tr>";
     }
 
-    const list = isService() ? (config.forward_targets || []) : (config.rules || []);
+    const list = isService() ? (draft.forward_targets || []) : (draft.rules || []);
     if (!list.length) {
       $("tbody").innerHTML = `<tr><td colspan="${isService() ? 6 : 8}" class="status">还没有规则，点击“新增规则”。</td></tr>`;
     } else {
@@ -243,9 +252,10 @@
     if (state.last_error) setStatus(state.last_error, "error");
   }
 
-  function value(row, field) {
+  function value(row, field, normalize) {
     const input = row.querySelector(`[data-field="${field}"]`);
-    return input ? input.value.trim() : "";
+    const text = input ? input.value : "";
+    return normalize ? text.trim() : text;
   }
 
   function checked(row, field) {
@@ -253,28 +263,30 @@
     return !!(input && input.checked);
   }
 
-  function collect() {
+  function collect(normalize = true) {
     const rows = [...$("tbody").querySelectorAll("tr[data-index]")];
+    const read = (row, field) => value(row, field, normalize);
+    const next = { ...config };
     if (isService()) {
-      config.forward_targets = rows.map((row) => ({
-        id: value(row, "id"),
-        name: value(row, "name"),
-        target: value(row, "target"),
+      next.forward_targets = rows.map((row) => ({
+        id: read(row, "id"),
+        name: read(row, "name"),
+        target: read(row, "target"),
         enabled: checked(row, "enabled"),
-        allowed_peers: value(row, "allowed_peers").split(",").map((entry) => entry.trim()).filter(Boolean),
+        allowed_peers: read(row, "allowed_peers").split(",").map((entry) => entry.trim()).filter(Boolean),
       }));
     } else {
-      config.rules = rows.map((row) => ({
-        id: value(row, "id"),
-        name: value(row, "name"),
-        peer_node_id: value(row, "peer_node_id") || state.peer,
-        listen: value(row, "listen"),
-        target: value(row, "target"),
+      next.rules = rows.map((row) => ({
+        id: read(row, "id"),
+        name: read(row, "name"),
+        peer_node_id: read(row, "peer_node_id") || state.peer,
+        listen: read(row, "listen"),
+        target: read(row, "target"),
         enabled: checked(row, "enabled"),
         auto_start: checked(row, "auto_start"),
       }));
     }
-    return config;
+    return next;
   }
 
   async function load() {
@@ -284,6 +296,7 @@
     ]);
     state = status;
     config = configResponse.config;
+    draft = JSON.parse(JSON.stringify(config));
     $("auth").hidden = true;
     $("app").hidden = false;
     setStatus("");
@@ -314,9 +327,11 @@
   });
 
   $("add").addEventListener("click", () => {
+    if (busy) return;
+    draft = collect(false);
     const id = `rule-${Date.now().toString(36)}`;
     if (isService()) {
-      config.forward_targets.push({
+      draft.forward_targets.push({
         id,
         name: "新目标",
         target: "127.0.0.1:8080",
@@ -324,7 +339,7 @@
         allowed_peers: state.peer ? [state.peer] : [],
       });
     } else {
-      config.rules.push({
+      draft.rules.push({
         id,
         name: "新规则",
         peer_node_id: state.peer,
@@ -339,12 +354,15 @@
   });
 
   $("tbody").addEventListener("click", (event) => {
+    if (busy) return;
     const button = event.target.closest('[data-action="delete"]');
     if (!button) return;
     const row = button.closest("tr[data-index]");
-    const index = Number(row && row.dataset.index);
-    const list = isService() ? config.forward_targets : config.rules;
-    if (Number.isInteger(index) && index >= 0) {
+    if (!row) return;
+    const index = Number(row.dataset.index);
+    draft = collect(false);
+    const list = isService() ? draft.forward_targets : draft.rules;
+    if (Number.isInteger(index) && index >= 0 && index < list.length) {
       list.splice(index, 1);
       render();
       setStatus("已删除一行，点击“保存并应用”写入文件", "");
@@ -352,17 +370,24 @@
   });
 
   $("save").addEventListener("click", async () => {
+    if (busy) return;
+    const submitted = collect();
+    setBusy(true);
     setStatus("正在保存并应用…");
     try {
-      await api("/api/v1/config", { method: "PUT", body: JSON.stringify(collect()) });
+      await api("/api/v1/config", { method: "PUT", body: JSON.stringify(submitted) });
       await load();
       setStatus("已保存并应用", "ok");
     } catch (error) {
       showError(error);
+    } finally {
+      setBusy(false);
     }
   });
 
   $("reload").addEventListener("click", async () => {
+    if (busy) return;
+    setBusy(true);
     setStatus("正在从文件重载…");
     try {
       await api("/api/v1/reload", { method: "POST" });
@@ -370,6 +395,8 @@
       setStatus("已从文件重载", "ok");
     } catch (error) {
       showError(error);
+    } finally {
+      setBusy(false);
     }
   });
 
@@ -377,6 +404,7 @@
     token = "";
     state = null;
     config = null;
+    draft = null;
     sessionStorage.removeItem(TOKEN_KEY);
     $("app").hidden = true;
     $("auth").hidden = false;
