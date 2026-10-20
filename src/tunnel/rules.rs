@@ -13,7 +13,7 @@
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::RwLock;
+use std::sync::{RwLock, RwLockWriteGuard};
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -314,6 +314,17 @@ struct CompiledTarget {
     peers: HashSet<NodeId>,
 }
 
+pub(crate) struct PreparedPolicy<'a> {
+    guard: RwLockWriteGuard<'a, CompiledPolicy>,
+    next: CompiledPolicy,
+}
+
+impl PreparedPolicy<'_> {
+    pub(crate) fn commit(mut self) {
+        *self.guard = self.next;
+    }
+}
+
 impl ServePolicy {
     pub fn new(config: &ServiceConfig) -> Result<Self> {
         config.validate()?;
@@ -325,14 +336,21 @@ impl ServePolicy {
     /// Validate first, then swap. A failed reload leaves the previous policy
     /// untouched.
     pub fn replace(&self, config: &ServiceConfig) -> Result<()> {
+        self.prepare_replace(config)?.commit();
+        Ok(())
+    }
+
+    pub(crate) fn prepare_replace(&self, config: &ServiceConfig) -> Result<PreparedPolicy<'_>> {
         config.validate()?;
         let compiled = compile(config);
-        let mut guard = self
+        let guard = self
             .snapshot
             .write()
             .map_err(|_| Error::Protocol("服务策略锁已损坏".into()))?;
-        *guard = compiled;
-        Ok(())
+        Ok(PreparedPolicy {
+            guard,
+            next: compiled,
+        })
     }
 
     pub fn peer_allowed(&self, peer: NodeId) -> bool {

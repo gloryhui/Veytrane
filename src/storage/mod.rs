@@ -13,6 +13,8 @@
 //! 目前用的是同步 `std::fs`。放到异步传输循环里会阻塞执行器，正式实现应当把
 //! 这些调用挪进 `tokio::task::spawn_blocking`（TODO）。
 
+pub(crate) mod atomic;
+
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};

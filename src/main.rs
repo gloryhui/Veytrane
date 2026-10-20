@@ -561,32 +561,46 @@ async fn cmd_serve(key_file: &Option<PathBuf>, args: ServeArgs) -> Result<()> {
         ..ServeConfig::new()
     };
 
+    // The local coordinator exists even without HTTP. SIGHUP and HTTP receive
+    // clones of this exact state, including one operation lock and last_error.
+    let config_admin = if let (Some(path), Some(policy), Some(service)) = (
+        config_path.as_ref(),
+        policy.as_ref(),
+        loaded_service.as_ref(),
+    ) {
+        let token = if admin.admin_listen.is_some() {
+            let token_path = admin
+                .admin_token_file
+                .clone()
+                .unwrap_or_else(|| admin::default_token_path(path));
+            let token = admin::load_or_create_token(&token_path)?;
+            println!("管理 token 文件: {}", token_path.display());
+            token
+        } else {
+            String::new()
+        };
+        Some(admin::AdminState::service(
+            policy.clone(),
+            service.clone(),
+            peer,
+            path.clone(),
+            token,
+        ))
+    } else {
+        None
+    };
+
     let _admin = if let Some(listen) = admin.admin_listen {
-        let path = config_path.as_ref().expect("admin requires a config path");
-        let service = loaded_service
-            .clone()
-            .expect("admin requires a loaded service config");
-        let policy = policy
-            .as_ref()
-            .expect("admin requires a live service policy")
-            .clone();
-        let token_path = admin
-            .admin_token_file
-            .clone()
-            .unwrap_or_else(|| admin::default_token_path(path));
-        let token = admin::load_or_create_token(&token_path)?;
-        let state = admin::AdminState::service(policy, service, peer, path.clone(), token);
+        let state = config_admin.clone().expect("admin requires a config path");
         let handle = admin::spawn(listen, state).await?;
         println!("Web 管理页: http://{}/", handle.addr);
-        println!("管理 token 文件: {}", token_path.display());
         Some(handle)
     } else {
         None
     };
 
-    if let (Some(path), Some(policy)) = (config_path, policy) {
-        let config_state = loaded_service.expect("config path implies a loaded service config");
-        spawn_service_policy_reload(path, policy, peer, config_state);
+    if let Some(state) = config_admin {
+        spawn_service_policy_reload(state);
     }
 
     tokio::select! {
@@ -599,12 +613,7 @@ async fn cmd_serve(key_file: &Option<PathBuf>, args: ServeArgs) -> Result<()> {
 }
 
 #[cfg(unix)]
-fn spawn_service_policy_reload(
-    path: PathBuf,
-    policy: Arc<ServePolicy>,
-    serving_peer: p2p_file::identity::NodeId,
-    config_state: Arc<tokio::sync::RwLock<ServiceConfig>>,
-) {
+fn spawn_service_policy_reload(state: admin::AdminState) {
     tokio::spawn(async move {
         let Ok(mut hangup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
         else {
@@ -612,47 +621,17 @@ fn spawn_service_policy_reload(
             return;
         };
         while hangup.recv().await.is_some() {
-            match ServiceConfig::load(&path) {
-                Ok(config) => {
-                    let peers = config.peers();
-                    // The punching loop is bound to one peer. Changing that peer
-                    // requires a restart; target-only updates and full revocation
-                    // are safe to apply live.
-                    if peers.is_empty() || (peers.len() == 1 && peers[0] == serving_peer) {
-                        match policy.replace(&config) {
-                            Ok(()) => {
-                                *config_state.write().await = config;
-                                tracing::info!(path = %path.display(), "服务授权配置已热加载")
-                            }
-                            Err(error) => tracing::warn!(
-                                path = %path.display(),
-                                %error,
-                                "服务配置无效，保留原策略"
-                            ),
-                        }
-                    } else {
-                        tracing::warn!(
-                            path = %path.display(),
-                            "服务配置的对端发生变化，当前进程仍服务原对端；请重启 serve"
-                        );
-                    }
-                }
-                Err(error) => {
-                    tracing::warn!(path = %path.display(), %error, "服务配置加载失败，保留原策略")
-                }
+            match state.reload_local().await {
+                Ok(()) => tracing::info!("服务配置已通过共享协调器热加载"),
+                Err(error) => tracing::warn!(%error, "服务配置重载失败，错误已记录"),
             }
         }
     });
 }
 
 #[cfg(not(unix))]
-fn spawn_service_policy_reload(
-    _path: PathBuf,
-    _policy: Arc<ServePolicy>,
-    _serving_peer: p2p_file::identity::NodeId,
-    _config_state: Arc<tokio::sync::RwLock<ServiceConfig>>,
-) {
-    tracing::warn!("当前平台不支持 SIGHUP，服务配置只在启动时加载");
+fn spawn_service_policy_reload(_state: admin::AdminState) {
+    tracing::warn!("当前平台不支持 SIGHUP，可通过 Web 管理更新配置");
 }
 
 async fn cmd_tunnel(
@@ -716,22 +695,27 @@ async fn cmd_forward(
         config_path.display()
     );
 
-    let _admin = if let Some(listen) = admin.admin_listen {
+    let token = if admin.admin_listen.is_some() {
         let token_path = admin
             .admin_token_file
             .clone()
             .unwrap_or_else(|| admin::default_token_path(&config_path));
         let token = admin::load_or_create_token(&token_path)?;
-        let state = admin::AdminState::client(
-            supervisor.clone(),
-            client_config.clone(),
-            peer,
-            config_path.clone(),
-            token,
-        );
-        let handle = admin::spawn(listen, state).await?;
-        println!("Web 管理页: http://{}/", handle.addr);
         println!("管理 token 文件: {}", token_path.display());
+        token
+    } else {
+        String::new()
+    };
+    let config_admin = admin::AdminState::client(
+        supervisor.clone(),
+        client_config.clone(),
+        peer,
+        config_path.clone(),
+        token,
+    );
+    let _admin = if let Some(listen) = admin.admin_listen {
+        let handle = admin::spawn(listen, config_admin.clone()).await?;
+        println!("Web 管理页: http://{}/", handle.addr);
         Some(handle)
     } else {
         None
@@ -749,26 +733,12 @@ async fn cmd_forward(
                 return Ok(());
             }
             Some(()) = reload_rx.recv() => {
-                match ClientConfig::load(&config_path) {
-                    Ok(new_config) => {
-                        let peers = new_config.peers();
-                        if peers.is_empty() || (peers.len() == 1 && peers[0] == peer) {
-                            let errors = supervisor.lock().await.apply(&new_config.enabled_rules()).await;
-                            for error in &errors {
-                                eprintln!("配置热加载：{error}");
-                            }
-                            if errors.is_empty() {
-                                *client_config.write().await = new_config;
-                                tracing::info!(path = %config_path.display(), "客户端规则已热加载");
-                            }
-                            for (id, address) in supervisor.lock().await.listeners() {
-                                println!("规则 {id} 监听 {address}");
-                            }
-                        } else {
-                            eprintln!("拒绝热加载：规则对端与当前共享会话不一致");
-                        }
-                    }
-                    Err(error) => eprintln!("配置加载失败，保留原规则：{error}"),
+                match config_admin.reload_local().await {
+                    Ok(()) => tracing::info!("客户端配置已通过共享协调器热加载"),
+                    Err(error) => eprintln!("配置热加载失败，错误已记录：{error}"),
+                }
+                for (id, address) in supervisor.lock().await.listeners() {
+                    println!("规则 {id} 监听 {address}");
                 }
             }
         }

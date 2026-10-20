@@ -113,6 +113,9 @@ impl AdminState {
 
 /// Bind and spawn the admin server. Only loopback addresses are accepted.
 pub async fn spawn(listen: SocketAddr, state: AdminState) -> Result<AdminHandle> {
+    if state.inner.token.len() < 32 {
+        return Err(Error::Protocol("Web 管理必须配置独立的有效 token".into()));
+    }
     if !listen.ip().is_loopback() {
         return Err(Error::Protocol(format!(
             "Web 管理只能监听 loopback 地址（127.0.0.1 或 ::1），收到 {listen}；远程访问请用 SSH 隧道"
@@ -170,6 +173,7 @@ async fn get_status(
     headers: HeaderMap,
 ) -> std::result::Result<Json<Value>, ApiError> {
     authorize(&state, &headers)?;
+    let _operation = state.inner.op_lock.lock().await;
     let mut body = json!({
         "role": state.inner.backend.role(),
         "peer": state.inner.peer.to_hex(),
@@ -202,6 +206,7 @@ async fn get_config(
     headers: HeaderMap,
 ) -> std::result::Result<Json<Value>, ApiError> {
     authorize(&state, &headers)?;
+    let _operation = state.inner.op_lock.lock().await;
     let config = match &state.inner.backend {
         Backend::Service { config, .. } => serde_json::to_value(&*config.read().await)
             .map_err(|error| ApiError::internal(error.to_string()))?,
@@ -219,24 +224,35 @@ async fn get_config(
 async fn put_config(
     State(state): State<AdminState>,
     headers: HeaderMap,
-    Json(body): Json<Value>,
+    body: std::result::Result<Json<Value>, axum::extract::rejection::JsonRejection>,
 ) -> std::result::Result<Json<Value>, ApiError> {
     authorize(&state, &headers)?;
     let _operation = state.inner.op_lock.lock().await;
-    match &state.inner.backend {
-        Backend::Service { .. } => {
-            let next: ServiceConfig = serde_json::from_value(body)
-                .map_err(|error| ApiError::bad_request(format!("服务配置格式错误：{error}")))?;
-            validate_service_peer(&state, &next)?;
-            apply_service(&state, next, true).await?;
-        }
-        Backend::Client { .. } => {
-            let next: ClientConfig = serde_json::from_value(body)
-                .map_err(|error| ApiError::bad_request(format!("客户端配置格式错误：{error}")))?;
-            validate_client_peer(&state, &next)?;
-            apply_client(&state, next, true).await?;
+    let result = async {
+        let Json(body) = body.map_err(|error| ApiError {
+            status: error.status(),
+            message: error.body_text(),
+            details: Vec::new(),
+        })?;
+        match &state.inner.backend {
+            Backend::Service { .. } => {
+                let next: ServiceConfig = serde_json::from_value(body)
+                    .map_err(|error| ApiError::bad_request(format!("服务配置格式错误：{error}")))?;
+                validate_service_peer(&state, &next, true)?;
+                apply_service(&state, next, true).await
+            }
+            Backend::Client { .. } => {
+                let next: ClientConfig = serde_json::from_value(body).map_err(|error| {
+                    ApiError::bad_request(format!("客户端配置格式错误：{error}"))
+                })?;
+                validate_client_peer(&state, &next, true)?;
+                apply_client(&state, next, true).await
+            }
         }
     }
+    .await;
+    record_result(&state, &result).await;
+    result?;
     Ok(Json(json!({"ok": true})))
 }
 
@@ -245,38 +261,71 @@ async fn reload(
     headers: HeaderMap,
 ) -> std::result::Result<Json<Value>, ApiError> {
     authorize(&state, &headers)?;
+    reload_config(&state, true).await?;
+    Ok(Json(json!({"ok": true})))
+}
+
+impl AdminState {
+    /// Local SIGHUP shares exactly the HTTP coordinator, including its error state.
+    /// Empty enabled sets are permitted locally for complete revocation.
+    pub async fn reload_local(&self) -> Result<()> {
+        reload_config(self, false).await.map_err(|error| {
+            Error::Protocol(format!("{}：{}", error.message, error.details.join("; ")))
+        })
+    }
+}
+
+async fn reload_config(
+    state: &AdminState,
+    require_enabled: bool,
+) -> std::result::Result<(), ApiError> {
     let _operation = state.inner.op_lock.lock().await;
-    match &state.inner.backend {
-        Backend::Service { .. } => {
-            let next = ServiceConfig::load(&state.inner.config_path)
-                .map_err(|error| ApiError::bad_request(error.to_string()))?;
-            validate_service_peer(&state, &next)?;
-            apply_service(&state, next, false).await?;
-        }
-        Backend::Client { .. } => {
-            let next = ClientConfig::load(&state.inner.config_path)
-                .map_err(|error| ApiError::bad_request(error.to_string()))?;
-            validate_client_peer(&state, &next)?;
-            apply_client(&state, next, false).await?;
+    let result = async {
+        match &state.inner.backend {
+            Backend::Service { .. } => {
+                let next = ServiceConfig::load(&state.inner.config_path)
+                    .map_err(|error| ApiError::bad_request(error.to_string()))?;
+                validate_service_peer(state, &next, require_enabled)?;
+                apply_service(state, next, false).await
+            }
+            Backend::Client { .. } => {
+                let next = ClientConfig::load(&state.inner.config_path)
+                    .map_err(|error| ApiError::bad_request(error.to_string()))?;
+                validate_client_peer(state, &next, require_enabled)?;
+                apply_client(state, next, false).await
+            }
         }
     }
-    Ok(Json(json!({"ok": true})))
+    .await;
+    record_result(state, &result).await;
+    result
+}
+
+async fn record_result(state: &AdminState, result: &std::result::Result<(), ApiError>) {
+    *state.inner.last_error.write().await = result.as_ref().err().map(|error| {
+        if error.details.is_empty() {
+            error.message.clone()
+        } else {
+            format!("{}：{}", error.message, error.details.join("; "))
+        }
+    });
 }
 
 fn validate_service_peer(
     state: &AdminState,
     config: &ServiceConfig,
+    require_enabled: bool,
 ) -> std::result::Result<(), ApiError> {
     if let Err(error) = config.validate() {
         return Err(ApiError::bad_request(error.to_string()));
     }
     let peers = config.peers();
-    if peers.is_empty() {
+    if require_enabled && peers.is_empty() {
         return Err(ApiError::bad_request(
             "Web 保存至少保留一个启用的目标，否则重启 serve 时无法确定对端",
         ));
     }
-    if peers.len() != 1 || peers[0] != state.inner.peer {
+    if peers.len() > 1 || peers.first().is_some_and(|peer| *peer != state.inner.peer) {
         return Err(ApiError::bad_request(
             "serve 当前只服务一个对端；不能通过 Web 切换对端，请重启进程",
         ));
@@ -287,17 +336,18 @@ fn validate_service_peer(
 fn validate_client_peer(
     state: &AdminState,
     config: &ClientConfig,
+    require_enabled: bool,
 ) -> std::result::Result<(), ApiError> {
     if let Err(error) = config.validate() {
         return Err(ApiError::bad_request(error.to_string()));
     }
     let peers = config.peers();
-    if peers.is_empty() {
+    if require_enabled && peers.is_empty() {
         return Err(ApiError::bad_request(
             "Web 保存至少保留一条启用的转发规则，否则重启 forward 时无法确定对端",
         ));
     }
-    if peers.len() != 1 || peers[0] != state.inner.peer {
+    if peers.len() > 1 || peers.first().is_some_and(|peer| *peer != state.inner.peer) {
         return Err(ApiError::bad_request(
             "所有启用规则必须共享当前对端；切换对端需要重启 forward",
         ));
@@ -313,21 +363,26 @@ async fn apply_service(
     let Backend::Service { policy, config } = &state.inner.backend else {
         return Err(ApiError::internal("角色与请求不匹配"));
     };
-    let previous = config.read().await.clone();
-    policy
-        .replace(&next)
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
-
-    if persist && let Err(error) = write_json_atomic(&state.inner.config_path, &next) {
-        let _ = policy.replace(&previous);
-        let message = format!("配置已应用但写回失败，已回滚运行态：{error}");
-        *state.inner.last_error.write().await = Some(message.clone());
-        return Err(ApiError::internal(message));
+    let mut effective = config.write().await;
+    let mut last_error = state.inner.last_error.write().await;
+    let prepared = policy
+        .prepare_replace(&next)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let outcome = if persist {
+        write_json_atomic(&state.inner.config_path, &next)
+            .map_err(|error| ApiError::internal(format!("写回失败，保留原配置与策略：{error}")))?
+    } else {
+        Default::default()
+    };
+    // All async locks and resources are ready before the file replacement. No
+    // await is permitted between replacement and effective state publication.
+    prepared.commit();
+    *effective = next;
+    *last_error = outcome.durability_warning.clone();
+    match outcome.durability_warning {
+        Some(message) => Err(ApiError::internal(message)),
+        None => Ok(()),
     }
-
-    *config.write().await = next;
-    *state.inner.last_error.write().await = None;
-    Ok(())
 }
 
 async fn apply_client(
@@ -338,42 +393,34 @@ async fn apply_client(
     let Backend::Client { supervisor, config } = &state.inner.backend else {
         return Err(ApiError::internal("角色与请求不匹配"));
     };
-    let previous = config.read().await.clone();
-    let errors = supervisor.lock().await.apply(&next.enabled_rules()).await;
-    if !errors.is_empty() {
-        let rollback = supervisor
-            .lock()
-            .await
-            .apply(&previous.enabled_rules())
-            .await;
-        let mut details = errors;
-        details.extend(rollback.into_iter().map(|error| format!("回滚：{error}")));
-        let message = "规则应用失败，已尝试保留原规则".to_string();
-        *state.inner.last_error.write().await = Some(format!("{message}：{}", details.join("; ")));
-        return Err(ApiError::conflict(message, details));
+    let mut supervisor = supervisor.lock().await;
+    let prepared = supervisor
+        .prepare(&next.enabled_rules())
+        .await
+        .map_err(|error| {
+            ApiError::conflict("规则准备失败，保留全部原规则", vec![error.to_string()])
+        })?;
+    let mut effective = config.write().await;
+    let mut last_error = state.inner.last_error.write().await;
+    let outcome = if persist {
+        write_json_atomic(&state.inner.config_path, &next)
+            .map_err(|error| ApiError::internal(format!("写回失败，保留全部原规则：{error}")))?
+    } else {
+        Default::default()
+    };
+    let stopped = supervisor.commit(prepared);
+    *effective = next;
+    *last_error = outcome.durability_warning.clone();
+    drop(effective);
+    drop(last_error);
+    drop(supervisor);
+    for task in stopped {
+        let _ = task.await;
     }
-
-    if persist && let Err(error) = write_json_atomic(&state.inner.config_path, &next) {
-        let rollback = supervisor
-            .lock()
-            .await
-            .apply(&previous.enabled_rules())
-            .await;
-        let message = format!(
-            "配置已应用但写回失败，已尝试回滚：{error}{}",
-            if rollback.is_empty() {
-                String::new()
-            } else {
-                format!("；回滚错误：{}", rollback.join("; "))
-            }
-        );
-        *state.inner.last_error.write().await = Some(message.clone());
-        return Err(ApiError::internal(message));
+    match outcome.durability_warning {
+        Some(message) => Err(ApiError::internal(message)),
+        None => Ok(()),
     }
-
-    *config.write().await = next;
-    *state.inner.last_error.write().await = None;
-    Ok(())
 }
 
 fn authorize(state: &AdminState, headers: &HeaderMap) -> std::result::Result<(), ApiError> {
@@ -430,48 +477,11 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     difference == 0
 }
 
-fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> io::Result<()> {
-    let encoded = serde_json::to_vec_pretty(value).map_err(io::Error::other)?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("config.json");
-    let temporary = path.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
-
-    let write_result = (|| {
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&temporary)?;
-        file.write_all(&encoded)?;
-        file.write_all(b"\n")?;
-        file.sync_all()
-    })();
-    if let Err(error) = write_result {
-        let _ = std::fs::remove_file(&temporary);
-        return Err(error);
-    }
-
-    match std::fs::rename(&temporary, path) {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            #[cfg(windows)]
-            {
-                // Windows cannot rename over an existing file. This fallback is
-                // not atomic; the config is still validated before this point.
-                if path.exists() {
-                    std::fs::remove_file(path)?;
-                    return std::fs::rename(&temporary, path);
-                }
-            }
-            let _ = std::fs::remove_file(&temporary);
-            Err(error)
-        }
-    }
+fn write_json_atomic<T: Serialize>(
+    path: &Path,
+    value: &T,
+) -> io::Result<crate::storage::atomic::WriteOutcome> {
+    crate::storage::atomic::write_json(path, value)
 }
 
 /// Default token location next to the edited JSON file.
