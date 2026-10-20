@@ -43,3 +43,12 @@ pub mod control;
 pub mod dispatch;
 pub mod services;
 pub mod wire;
+
+pub mod agent_paths;
+pub mod ipc_transport;
+pub mod private_access;
+
+pub mod agent;
+pub mod agent_client;
+pub mod agent_config;
+pub mod ipc;

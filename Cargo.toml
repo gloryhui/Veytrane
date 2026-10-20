@@ -84,8 +84,13 @@ name = "p2p-desktop"
 path = "src/bin/p2p-desktop.rs"
 required-features = ["gui"]
 
+[[bin]]
+name = "p2p-agent"
+path = "src/bin/p2p-agent.rs"
+required-features = ["node"]
+
 [target."cfg(unix)".dependencies]
-rustix = { version = "=1.1.5", features = ["fs"], optional = true }
+rustix = { version = "=1.1.5", features = ["fs", "process"], optional = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 tray-icon = { version = "=0.24.1", default-features = false, optional = true }
@@ -95,7 +100,7 @@ objc2 = { version = "=0.6.4", optional = true }
 objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSScreen"], optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "=0.59.0", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Registry", "Win32_Security", "Win32_Storage_FileSystem"], optional = true }
+windows-sys = { version = "=0.59.0", features = ["Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Registry", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading", "Win32_Storage_FileSystem"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "=0.3.2", features = ["blocking"], optional = true }
