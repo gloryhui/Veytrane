@@ -74,6 +74,18 @@ struct RuleHandle {
     task: JoinHandle<()>,
 }
 
+struct PreparedListener {
+    rule: TunnelRule,
+    listener: TcpListener,
+    bound: SocketAddr,
+}
+
+/// Bound candidates are inert until commit; dropping releases every socket.
+pub(crate) struct PreparedRules {
+    desired: HashMap<String, TunnelRule>,
+    additions: HashMap<String, PreparedListener>,
+}
+
 /// Owns one listener task per enabled rule and applies config reloads.
 pub struct RuleSupervisor {
     session: Arc<SharedSession>,
@@ -107,83 +119,77 @@ impl RuleSupervisor {
         Ok(supervisor)
     }
 
-    /// Apply a validated rule set. Invalid/busy rules keep the previous listener
-    /// and are reported instead of taking down unrelated rules.
+    /// A failed preparation leaves the complete previous rule set untouched.
     pub async fn apply(&mut self, rules: &[TunnelRule]) -> Vec<String> {
-        let mut errors = Vec::new();
-        let desired: HashMap<String, TunnelRule> = rules
-            .iter()
-            .filter(|rule| rule.enabled)
-            .cloned()
-            .map(|rule| (rule.id.clone(), rule))
-            .collect();
+        match self.prepare(rules).await {
+            Ok(prepared) => {
+                let stopped = self.commit(prepared);
+                for task in stopped {
+                    let _ = task.await;
+                }
+                Vec::new()
+            }
+            Err(error) => vec![error.to_string()],
+        }
+    }
 
-        let removed: Vec<String> = self
+    pub(crate) async fn prepare(&self, rules: &[TunnelRule]) -> Result<PreparedRules> {
+        let mut desired = HashMap::new();
+        let mut additions = HashMap::new();
+        for rule in rules.iter().filter(|rule| rule.enabled) {
+            if desired.insert(rule.id.clone(), rule.clone()).is_some() {
+                return Err(Error::Protocol(format!("重复规则 ID：{}", rule.id)));
+            }
+            if self
+                .rules
+                .get(&rule.id)
+                .is_some_and(|old| old.rule.listen == rule.listen)
+            {
+                continue;
+            }
+            if rule.listen.port() != 0
+                && let Some((id, _)) = self.rules.iter().find(|(_, old)| old.bound == rule.listen)
+            {
+                return Err(Error::Protocol(format!(
+                    "监听地址 {} 仍由规则 {id} 占用；请先停用该规则，再分步修改",
+                    rule.listen
+                )));
+            }
+            let candidate = Self::prepare_listener(rule).await?;
+            additions.insert(rule.id.clone(), candidate);
+        }
+        Ok(PreparedRules { desired, additions })
+    }
+
+    /// The caller holds the supervisor lock from prepare through commit. This
+    /// section deliberately has no await or fallible resource acquisition.
+    pub(crate) fn commit(&mut self, prepared: PreparedRules) -> Vec<JoinHandle<()>> {
+        let PreparedRules { desired, additions } = prepared;
+        let removed: Vec<_> = self
             .rules
             .keys()
-            .filter(|id| !desired.contains_key(*id))
+            .filter(|id| !desired.contains_key(*id) || additions.contains_key(*id))
             .cloned()
             .collect();
+        let mut stopped = Vec::new();
         for id in removed {
-            if let Some(handle) = self.rules.remove(&id) {
-                info!(rule = %id, "本地转发规则已停止");
-                stop_handle(handle).await;
+            if let Some(old) = self.rules.remove(&id) {
+                let _ = old.shutdown.send(true);
+                stopped.push(old.task);
             }
         }
-
         for (id, rule) in desired {
-            if let Some(existing) = self.rules.get(&id)
-                && existing.rule.listen == rule.listen
-            {
-                let retarget = existing.rule.target != rule.target;
-                if let Some(existing) = self.rules.get_mut(&id) {
-                    if retarget {
-                        existing.target.send_replace(rule.target);
-                        info!(rule = %id, listen = %existing.bound, target = %rule.target, "本地转发目标已更新");
-                    }
-                    existing.rule = rule;
-                }
-                continue;
-            }
-
-            let conflict = self
-                .rules
-                .iter()
-                .find(|(other, handle)| *other != &id && handle.bound == rule.listen)
-                .map(|(other, _)| other.clone());
-            if let Some(other) = conflict {
-                errors.push(format!(
-                    "规则 {id} 的监听地址 {} 已被规则 {other} 占用，保持原规则不变",
-                    rule.listen
-                ));
-                continue;
-            }
-
-            let old = self.rules.remove(&id);
-            match self.spawn_rule(&rule).await {
-                Ok(handle) => {
-                    if let Some(old) = old {
-                        stop_handle(old).await;
-                    }
-                    info!(
-                        rule = %id,
-                        name = %rule.name,
-                        listen = %handle.bound,
-                        target = %rule.target,
-                        "本地转发规则已启动"
-                    );
-                    self.rules.insert(id, handle);
-                }
-                Err(error) => {
-                    errors.push(format!("规则 {id} 启动失败，保持原规则不变：{error}"));
-                    if let Some(old) = old {
-                        self.rules.insert(id, old);
-                    }
-                }
+            if let Some(existing) = self.rules.get_mut(&id) {
+                existing.target.send_replace(rule.target);
+                existing.rule = rule;
             }
         }
-
-        errors
+        for (id, candidate) in additions {
+            let handle = self.activate(candidate);
+            info!(rule = %id, listen = %handle.bound, "本地转发规则已提交");
+            self.rules.insert(id, handle);
+        }
+        stopped
     }
 
     pub async fn shutdown(&mut self) {
@@ -208,23 +214,40 @@ impl RuleSupervisor {
         self.session.peer()
     }
 
-    async fn spawn_rule(&self, rule: &TunnelRule) -> Result<RuleHandle> {
+    async fn prepare_listener(rule: &TunnelRule) -> Result<PreparedListener> {
         let listener = TcpListener::bind(rule.listen).await.map_err(|error| {
             Error::Transport(format!("监听本机地址 {} 失败: {error}", rule.listen))
         })?;
         let bound = listener.local_addr()?;
+        Ok(PreparedListener {
+            rule: rule.clone(),
+            listener,
+            bound,
+        })
+    }
+
+    async fn spawn_rule(&self, rule: &TunnelRule) -> Result<RuleHandle> {
+        Ok(self.activate(Self::prepare_listener(rule).await?))
+    }
+
+    fn activate(&self, candidate: PreparedListener) -> RuleHandle {
+        let PreparedListener {
+            rule,
+            listener,
+            bound,
+        } = candidate;
         let (shutdown, shutdown_rx) = watch::channel(false);
         let (target, target_rx) = watch::channel(rule.target);
         let session = self.session.clone();
         let id = rule.id.clone();
         let task = tokio::spawn(run_rule(id, listener, target_rx, session, shutdown_rx));
-        Ok(RuleHandle {
-            rule: rule.clone(),
+        RuleHandle {
+            rule,
             bound,
             shutdown,
             target,
             task,
-        })
+        }
     }
 }
 
