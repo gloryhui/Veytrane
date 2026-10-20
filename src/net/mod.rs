@@ -21,6 +21,7 @@
 
 pub mod family;
 pub mod race;
+pub(crate) mod signaling;
 pub use family::{AddressFamily, NetworkFamilies};
 
 use std::net::{SocketAddr, UdpSocket as StdUdpSocket};
@@ -237,6 +238,15 @@ pub struct DirectLink {
     observations: Vec<race::ProbeObservation>,
 }
 impl DirectLink {
+    pub(crate) fn signaling_config(
+        &self,
+    ) -> (
+        String,
+        Option<crate::discovery::signal_tls::SignalTlsClient>,
+    ) {
+        (self.signal_server.clone(), self.signal_tls.clone())
+    }
+
     pub(crate) fn probe_observations(&self) -> Vec<race::ProbeObservation> {
         self.observations.clone()
     }

@@ -244,7 +244,18 @@ pub async fn serve_session(
             link.probe_observations(),
         )
     });
-    let (network, mut signal, mut probes) = link.into_parts();
+    let (signal_server, signal_tls) = link.signaling_config();
+    let peer = link.peer_node_id;
+    let (network, initial_signal, mut probes) = link.into_parts();
+    let mut signal = crate::net::signaling::ResilientSignaling::spawn(
+        initial_signal,
+        signal_server,
+        signal_tls,
+        identity.clone(),
+        peer,
+        network.local_candidates.clone(),
+    );
+    let mut signal_alive = true;
     let (incoming_tx, mut incoming_rx) = mpsc::channel(64);
     let mut accept_tasks = JoinSet::new();
     for path in &network.paths {
@@ -300,9 +311,9 @@ pub async fn serve_session(
     loop {
         let incoming = tokio::select! {
             incoming = incoming_rx.recv(), if !network.paths.is_empty() => incoming,
-            message = signal.next_event() => {
+            message = signal.next_event(), if signal_alive => {
                 match message {
-                    Ok(crate::discovery::signal::SignalMessage::PeerCandidates {node_id, candidates, token}) => {
+                    Some(crate::discovery::signal::SignalMessage::PeerCandidates {node_id, candidates, token}) => {
                         if !config.peer_allowed(node_id) { continue; }
                         if let Some(relay) = &network.relay {
                             offers.retain(|_, offer| !offer.abort.is_finished() || offer.direct.as_ref().is_some_and(|c| c.close_reason().is_none()));
@@ -320,7 +331,10 @@ pub async fn serve_session(
                             let _ = spawn_punch_probes(&network, token, &candidates, &mut probes);
                         }
                     }
-                    Err(error) => { warn!(%error, "信令连接结束，本轮会话收尾"); break; }
+                    None => {
+                        warn!("信令恢复任务已结束，保留现有业务并停止读取封闭队列");
+                        signal_alive = false;
+                    }
                     _ => {}
                 }
                 continue;
