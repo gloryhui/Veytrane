@@ -926,11 +926,19 @@ impl ForwardStreamOwner {
     pub fn active(&self) -> usize {
         self.limit.saturating_sub(self.slots.available_permits())
     }
-    pub(crate) fn spawn(&self, task: impl Future<Output = ()> + Send + 'static) -> bool {
+    /// Reserve the same node TCP budget for a flow supervised by a peer task.
+    pub(crate) fn try_reserve(&self) -> Option<OwnedSemaphorePermit> {
         if self.closed.load(Ordering::Acquire) {
-            return false;
+            return None;
         }
-        let Ok(permit) = self.slots.clone().try_acquire_owned() else {
+        let permit = self.slots.clone().try_acquire_owned().ok()?;
+        if self.closed.load(Ordering::Acquire) {
+            return None;
+        }
+        Some(permit)
+    }
+    pub(crate) fn spawn(&self, task: impl Future<Output = ()> + Send + 'static) -> bool {
+        let Some(permit) = self.try_reserve() else {
             return false;
         };
         let mut tasks = self.tasks.lock().unwrap();
@@ -1273,6 +1281,22 @@ mod tests {
     use crate::nat::punch::PunchConfig;
     use crate::net::{DirectConfig, establish};
     use crate::tunnel::rules::TunnelRule;
+
+    #[tokio::test]
+    async fn reserved_service_flows_share_the_forward_budget_and_release_on_shutdown() {
+        let owner = ForwardStreamOwner::new(2);
+        let inbound = owner.try_reserve().unwrap();
+        assert!(owner.spawn(std::future::pending::<()>()));
+        assert_eq!(owner.active(), 2);
+        assert!(owner.try_reserve().is_none());
+        assert!(!owner.spawn(std::future::pending::<()>()));
+        drop(inbound);
+        let inbound = owner.try_reserve().unwrap();
+        owner.shutdown().await;
+        assert!(owner.try_reserve().is_none());
+        drop(inbound);
+        assert_eq!(owner.active(), 0);
+    }
 
     fn node_id(seed: u8) -> NodeId {
         // 用真实密钥推出来的节点 ID，保证和线上路径一致。

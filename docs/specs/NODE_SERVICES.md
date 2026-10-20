@@ -7,7 +7,7 @@
 
 入站 Service 接纳：先检查当前 LiveAuthorization 的 inbound、资源禁用状态；读取有效规则快照按 service_id 找到当前目标及 NodeId ACL；目标连接后再次读取规则确认 id/目标/授权未改变，再发送 TcpReady。缓存目录只用于选择，不能跳过检查。服务规则普通撤销仅阻止提交后尚未接纳的流；强撤销由 LiveAuthorization 关闭已经运行的流。
 
-目录查询/开流独立于文件服务装配，TCP-only 节点也运行 Dispatcher 和服务 RPC，未装配的文件/测速队列明确拒绝。每 peer 最多 8 条 Service 流处理，文件和测速各自有界，不让文件流耗尽 TCP 接纳槽。
+目录查询/开流独立于文件服务装配，TCP-only 节点也运行 Dispatcher 和服务 RPC，未装配的文件/测速队列明确拒绝。每 peer 最多 8 条尚未完成的服务控制 RPC；进入 TcpReady 后立即释放控制槽，TCP 字节搬运持有共享节点 TCP 预算的许可直到流结束。预算耗尽时在 TcpReady 前返回 Busy，服务目录查询仍可用。文件和测速各自有界，不让文件流耗尽 TCP 接纳槽；HTTP keep-alive、WebSocket 和 SMB 长连接也不能占满服务控制槽。
 
 本机规则的 service_id 在新配置中显式保存，T23 定义磁盘 schema；P3 暂用 NodeSessionConfig 的规则 ID→service ID 运行时映射，旧桌面/CLI 规则仍保存裸目标并走显式旧模式。Unified 缺少 service_id 拒绝启动，不把 target 反推成授权。NodeControl 提供已认证对端的目录查询；不暴露远程配置写接口。
 

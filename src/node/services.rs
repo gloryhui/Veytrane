@@ -1,10 +1,11 @@
 //! Authorized service discovery and ID-based TCP streams for node-v1.
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use quinn::Connection;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch};
 use tokio::task::JoinSet;
 
 use super::authorization::ResourcePolicy;
@@ -15,7 +16,7 @@ use super::wire::{self, NodeErrorCode, NodeFrame, NodeMessage, ServiceDescriptor
 use crate::error::{Error, Result};
 use crate::identity::NodeId;
 
-const MAX_STREAMS: usize = 8;
+const MAX_PENDING_CONTROLS: usize = 8;
 const RPC_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn visible(entry: &AllowedForwardTarget, peer: NodeId) -> bool {
@@ -38,22 +39,26 @@ pub async fn serve(
     targets: watch::Receiver<Vec<AllowedForwardTarget>>,
     resources: watch::Receiver<ResourcePolicy>,
     mut incoming: mpsc::Receiver<BiStream>,
+    tcp_streams: Arc<crate::tunnel::ForwardStreamOwner>,
 ) -> Result<()> {
     let mut streams = JoinSet::new();
+    let controls = Arc::new(Semaphore::new(MAX_PENDING_CONTROLS));
     loop {
+        while streams.try_join_next().is_some() {}
         tokio::select! {
             stream = incoming.recv() => {
                 let Some(mut stream) = stream else { break };
-                if streams.len() >= MAX_STREAMS {
+                let Ok(control) = controls.clone().try_acquire_owned() else {
                     let _ = stream.send.reset(dispatch::RESET_BUSY.into());
                     let _ = stream.recv.stop(dispatch::RESET_BUSY.into());
                     continue;
-                }
+                };
                 let authorization = authorization.clone();
                 let targets = targets.clone();
                 let resources = resources.clone();
+                let tcp_streams = tcp_streams.clone();
                 streams.spawn(async move {
-                    authorization.guard(true, handle(peer, &targets, &resources, stream)).await
+                    authorization.guard(true, handle(peer, &targets, &resources, stream, control, tcp_streams)).await
                 });
             }
             _ = streams.join_next(), if !streams.is_empty() => {}
@@ -78,11 +83,21 @@ async fn handle(
     targets: &watch::Receiver<Vec<AllowedForwardTarget>>,
     resources: &watch::Receiver<ResourcePolicy>,
     mut stream: BiStream,
+    control: OwnedSemaphorePermit,
+    tcp_streams: Arc<crate::tunnel::ForwardStreamOwner>,
 ) -> Result<()> {
-    let prepared =
-        tokio::time::timeout(RPC_TIMEOUT, prepare(peer, targets, resources, &mut stream)).await;
+    let prepared = tokio::time::timeout(
+        RPC_TIMEOUT,
+        prepare(peer, targets, resources, &mut stream, &tcp_streams),
+    )
+    .await;
+    // HTTP keep-alive, WebSocket and SMB data flows must not retain a control
+    // slot after TcpReady. Their permit belongs to the shared node TCP budget.
+    drop(control);
     match prepared {
-        Ok(Ok(Some(tcp))) => crate::tunnel::bridge_tcp(tcp, stream.send, stream.recv).await,
+        Ok(Ok(Some((tcp, _tcp_permit)))) => {
+            crate::tunnel::bridge_tcp(tcp, stream.send, stream.recv).await
+        }
         Ok(Ok(None)) => Ok(()),
         Ok(Err(error)) => Err(error),
         Err(_) => {
@@ -98,7 +113,8 @@ async fn prepare(
     targets: &watch::Receiver<Vec<AllowedForwardTarget>>,
     resources: &watch::Receiver<ResourcePolicy>,
     stream: &mut BiStream,
-) -> Result<Option<tokio::net::TcpStream>> {
+    tcp_streams: &crate::tunnel::ForwardStreamOwner,
+) -> Result<Option<(tokio::net::TcpStream, OwnedSemaphorePermit)>> {
     let request = tokio::time::timeout(Duration::from_secs(5), wire::read(&mut stream.recv))
         .await
         .map_err(|_| Error::Protocol("服务请求首帧超时".into()))??;
@@ -137,6 +153,9 @@ async fn prepare(
                     .await
                     .map(|_| None);
             };
+            let Some(permit) = tcp_streams.try_reserve() else {
+                return reject(stream, id, NodeErrorCode::Busy).await.map(|_| None);
+            };
             let tcp = match crate::tunnel::connect_allowed_target(target, &[target]).await {
                 Ok(tcp) => tcp,
                 Err(_) => {
@@ -153,7 +172,7 @@ async fn prepare(
                     .map(|_| None);
             }
             reply(stream, id, NodeMessage::TcpReady).await?;
-            Ok(Some(tcp))
+            Ok(Some((tcp, permit)))
         }
         _ => reject(stream, id, NodeErrorCode::InvalidRequest)
             .await

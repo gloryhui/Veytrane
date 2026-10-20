@@ -22,8 +22,13 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 struct Sandbox(PathBuf);
 impl Sandbox {
     fn new() -> Self {
-        let path =
-            std::env::temp_dir().join(format!("p2p-node-process-{:032x}", rand::random::<u128>()));
+        // macOS's per-user temp directory can exceed the Unix socket path limit
+        // once the node directory and agent.sock are appended.
+        #[cfg(target_os = "macos")]
+        let temporary = PathBuf::from("/tmp");
+        #[cfg(not(target_os = "macos"))]
+        let temporary = std::env::temp_dir();
+        let path = temporary.join(format!("p2p-node-process-{:032x}", rand::random::<u128>()));
         fs::create_dir(&path).unwrap();
         Self(path)
     }
@@ -347,6 +352,94 @@ async fn echo_request(address: std::net::SocketAddr, data: &[u8]) {
     })
     .await
     .expect("forward request timed out");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn unified_service_tcp_streams_do_not_exhaust_control_slots() {
+    let sandbox = Sandbox::new();
+    let signal_addr = free_tcp();
+    let _signal = spawn(
+        env!("CARGO_BIN_EXE_p2p_file"),
+        &["signal-server", "--listen", &signal_addr.to_string()],
+        &sandbox.0.join("signal.log"),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let target = listener.local_addr().unwrap();
+    let echo = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                let (mut read, mut write) = stream.split();
+                let _ = tokio::io::copy(&mut read, &mut write).await;
+            });
+        }
+    });
+    let mut home = Node::init(sandbox.0.join("home"));
+    let mut mac = Node::init(sandbox.0.join("mac"));
+    let home_id = home.id();
+    let mac_id = mac.id();
+    let port = free_tcp();
+    for (node, peer) in [(&home, &mac_id), (&mac, &home_id)] {
+        let mut settings = ConfigRecord::load(&node.root.join("node.json"))
+            .unwrap()
+            .settings
+            .redacted();
+        settings["signal_server"] = json!(signal_addr.to_string());
+        grant(&mut settings, std::slice::from_ref(peer));
+        settings["enable_files"] = json!(false);
+        settings["enable_speed"] = json!(false);
+        if peer == &mac_id {
+            settings["services"] = json!([{"id":"echo","name":"Echo","target":target,"enabled":true,"allowed_peers":[mac_id]}]);
+        } else {
+            settings["forwards"] = json!([forward("echo", &home_id, port)]);
+            settings["service_ids"] = json!({"echo":"echo"});
+        }
+        offline(node, settings);
+    }
+    home.start().await;
+    mac.start().await;
+    for node in [&home, &mac] {
+        node.ok(Api::SetPassword {
+            expected_revision: 1,
+            password: "X7t9Q2k4".into(),
+        })
+        .await;
+    }
+    mac.ok(Api::Connect {
+        peer: home_id.clone(),
+        password: None,
+    })
+    .await;
+    wait_peer(&mac, &home_id).await;
+    let mut held = Vec::new();
+    for index in 0..12u8 {
+        let mut stream = tokio::net::TcpStream::connect(port).await.unwrap();
+        stream.write_all(&[index]).await.unwrap();
+        let mut reply = [0];
+        tokio::time::timeout(Duration::from_secs(10), stream.read_exact(&mut reply))
+            .await
+            .expect("accepted TCP stream should remain usable")
+            .expect("established TCP streams must not exhaust service control slots");
+        assert_eq!(reply, [index]);
+        held.push(stream);
+    }
+    // Idle HTTP keep-alive / SMB streams must leave service discovery and new
+    // short-lived connections available on the same authenticated peer.
+    let services = mac.ok(Api::Services { peer: home_id }).await;
+    assert_eq!(services[0]["id"], "echo");
+    echo_request(port, b"new-request-with-twelve-idle-streams").await;
+    for (index, stream) in held.iter_mut().enumerate() {
+        stream.write_all(&[index as u8]).await.unwrap();
+        let mut reply = [0];
+        tokio::time::timeout(Duration::from_secs(10), stream.read_exact(&mut reply))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reply, [index as u8]);
+    }
+    drop(held);
+    mac.stop().await;
+    home.stop().await;
+    echo.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

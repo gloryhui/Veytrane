@@ -3201,6 +3201,7 @@ async fn run_session(
                 let allowed_targets = allowed_forward_targets.subscribe();
                 let resources = resource_policy.subscribe();
                 let business_events = events.clone();
+                let service_tcp_streams = forward_streams.clone();
                 peer_tasks.spawn(async move {
                     let _wire_binding = wire_binding;
                     if unified {
@@ -3230,7 +3231,8 @@ async fn run_session(
                                     live,
                                     allowed_targets,
                                     resources,
-                                    services
+                                    services,
+                                    service_tcp_streams
                                 ),
                             );
                             if file_result.is_err() || service_result.is_err() {
@@ -3249,6 +3251,7 @@ async fn run_session(
                                 allowed_targets,
                                 resources,
                                 services,
+                                service_tcp_streams,
                             )
                             .await;
                         }
