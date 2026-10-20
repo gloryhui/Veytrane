@@ -157,7 +157,10 @@ impl NodeSettings {
     }
     pub fn redacted(&self) -> serde_json::Value {
         let mut value = serde_json::to_value(self).expect("settings are JSON serializable");
-        value["remote_auth"] = serde_json::json!({"configured": self.remote_auth.is_some()});
+        value
+            .as_object_mut()
+            .expect("settings object")
+            .remove("remote_auth");
         value
     }
 }

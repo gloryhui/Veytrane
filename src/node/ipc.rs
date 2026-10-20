@@ -1,4 +1,4 @@
-use super::{agent_config::NodeSettings, task_model::TaskId};
+use super::task_model::TaskId;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{io, path::PathBuf};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -84,7 +84,11 @@ pub enum Command {
     },
     ApplyConfig {
         expected_revision: u64,
-        settings: Box<NodeSettings>,
+        settings: serde_json::Value,
+    },
+    SetPassword {
+        expected_revision: u64,
+        password: String,
     },
     Stop,
 }

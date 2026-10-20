@@ -926,7 +926,7 @@ impl ForwardStreamOwner {
     pub fn active(&self) -> usize {
         self.limit.saturating_sub(self.slots.available_permits())
     }
-    fn spawn(&self, task: impl Future<Output = ()> + Send + 'static) -> bool {
+    pub(crate) fn spawn(&self, task: impl Future<Output = ()> + Send + 'static) -> bool {
         if self.closed.load(Ordering::Acquire) {
             return false;
         }

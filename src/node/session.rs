@@ -35,7 +35,7 @@ use super::remote_auth::{AuthContext, RemoteAuthorization, RemoteVerifier, Secre
 use crate::discovery::short_id::ShortId;
 
 use super::network_state::{
-    BeginPeerAttempt, MAX_PENDING_PEERS, NetworkLifecycle, PeerLifecycle, PeerRegistry,
+    BeginPeerAttempt, MAX_PEERS, MAX_PENDING_PEERS, NetworkLifecycle, PeerLifecycle, PeerRegistry,
     reconnect_delay, should_initiate_quic,
 };
 
@@ -259,6 +259,35 @@ impl Drop for SessionLifetime {
 }
 
 impl NodeSessionHandle {
+    pub(crate) async fn connection_updates(
+        &self,
+        peer: NodeId,
+    ) -> std::result::Result<watch::Receiver<Option<quinn::Connection>>, String> {
+        let (done, result) = oneshot::channel();
+        self.commands
+            .send(SessionCommand::ConnectionUpdates { peer, done })
+            .await
+            .map_err(|_| "会话已关闭".to_owned())?;
+        result.await.map_err(|_| "会话已关闭".to_owned())?
+    }
+    pub(crate) async fn commit_agent_policy(
+        &self,
+        record: super::agent_config::ConfigRecord,
+        path: std::path::PathBuf,
+    ) -> std::result::Result<crate::storage::atomic::WriteOutcome, String> {
+        let (done, result) = oneshot::channel();
+        self.commands
+            .send(SessionCommand::CommitAgentPolicy {
+                record: Box::new(record),
+                path,
+                done,
+            })
+            .await
+            .map_err(|_| "会话已关闭，配置未入队".to_owned())?;
+        result
+            .await
+            .map_err(|_| "recovery_required: 配置结果未知，须按磁盘根重启恢复".to_owned())?
+    }
     pub async fn list_services(
         &self,
         peer: NodeId,
@@ -705,6 +734,17 @@ enum SessionCommand {
         rule_id: String,
         delete: bool,
         done: oneshot::Sender<()>,
+    },
+    ConnectionUpdates {
+        peer: NodeId,
+        done: oneshot::Sender<
+            std::result::Result<watch::Receiver<Option<quinn::Connection>>, String>,
+        >,
+    },
+    CommitAgentPolicy {
+        record: Box<super::agent_config::ConfigRecord>,
+        path: std::path::PathBuf,
+        done: oneshot::Sender<std::result::Result<crate::storage::atomic::WriteOutcome, String>>,
     },
     UpdateTunnelSettings {
         tunnel_rules: Vec<super::config::TunnelRule>,
@@ -1244,6 +1284,111 @@ async fn run_session(
             #[cfg(test)]
             Wake::Command(Some(SessionCommand::Inspect(reply))) => {
                 let _ = reply.send(connections.clone());
+            }
+            Wake::Command(Some(SessionCommand::ConnectionUpdates { peer, done })) => {
+                if peer_connection_updates.len() >= MAX_PEERS
+                    && !peer_connection_updates.contains_key(&peer)
+                {
+                    peer_connection_updates.retain(|_, sender| sender.receiver_count() > 0);
+                }
+                if peer == local_node
+                    || (peer_connection_updates.len() >= MAX_PEERS
+                        && !peer_connection_updates.contains_key(&peer))
+                {
+                    let _ = done.send(Err("转发对端超出上限或指向本机".into()));
+                    continue;
+                }
+                let authorized = peers
+                    .state(peer)
+                    .is_some_and(PeerLifecycle::outbound_authorized)
+                    && !resource_policy.borrow().for_peer(peer).disabled
+                    && peer_capabilities
+                        .get(&peer)
+                        .is_some_and(|c| c & super::protocol::CAP_TCP_TUNNEL != 0);
+                let current = connections
+                    .get(&peer)
+                    .filter(|(_, c)| authorized && c.close_reason().is_none())
+                    .map(|(_, c)| c.clone());
+                let sender = peer_connection_updates
+                    .entry(peer)
+                    .or_insert_with(|| watch::channel(None).0);
+                sender.send_replace(current);
+                let _ = done.send(Ok(sender.subscribe()));
+            }
+            Wake::Command(Some(SessionCommand::CommitAgentPolicy { record, path, done })) => {
+                // Bind preparation belongs to Agent. This actor is the single
+                // authorization publisher and persists before exposing grants.
+                if let Err(error) = record.settings.validate() {
+                    let _ = done.send(Err(error.to_string()));
+                    continue;
+                }
+                let outcome = match crate::storage::atomic::write_json(&path, &record) {
+                    Ok(outcome) => outcome,
+                    Err(error) => {
+                        let _ = done.send(Err(error.to_string()));
+                        continue;
+                    }
+                };
+                let password_changed = remote_verifier != record.settings.remote_auth;
+                let previous = resource_policy.borrow().clone();
+                let old_trusted = trusted_devices.clone();
+                trusted_devices = record.settings.trusted_devices.clone();
+                remote_verifier = record.settings.remote_auth.clone();
+                auth_context.set_trusted(&trusted_devices);
+                resource_policy.send_replace(record.settings.resources.clone());
+                allowed_forward_targets.send_replace(record.settings.services.clone());
+                let sources = record
+                    .settings
+                    .trust_sources
+                    .iter()
+                    .filter_map(|(id, source)| NodeId::from_hex(id).ok().map(|id| (id, *source)))
+                    .collect();
+                events.control.set_trust_sources(&sources);
+                let revoke = connections
+                    .keys()
+                    .chain(peer_attempts.keys())
+                    .copied()
+                    .filter(|peer| {
+                        let old = previous.for_peer(*peer);
+                        let next = record.settings.resources.for_peer(*peer);
+                        password_changed
+                            || next.disabled
+                            || (old.files && !next.files)
+                            || (old.speed && !next.speed)
+                            || (super::trusted_devices::contains(&old_trusted, *peer)
+                                && !super::trusted_devices::contains(&trusted_devices, *peer))
+                    })
+                    .collect::<HashSet<_>>();
+                if password_changed {
+                    credentials.clear();
+                    short_queries.clear();
+                    credential_retries.clear();
+                }
+                for peer in revoke {
+                    credentials.remove(&peer);
+                    credential_retries.remove(&peer);
+                    deferred_candidates.remove(&peer);
+                    peer_candidates.remove(&peer);
+                    reconnect_probes.remove(&peer);
+                    pending_inbound.retain(|(id, _), _| *id != peer);
+                    queued_lookups.retain(|(id, _)| *id != peer);
+                    if let Some((_, attempt)) = peer_attempts.remove(&peer) {
+                        attempt.abort();
+                    }
+                    if let Some((_, _, rights)) = authorizations.get(&peer) {
+                        rights.send_replace(RemoteAuthorization::default());
+                    }
+                    if let Some((_, connection)) = connections.get(&peer) {
+                        connection.close(3u32.into(), b"node policy revoked");
+                    }
+                    if let Some(sender) = peer_connection_updates.get(&peer) {
+                        sender.send_replace(None);
+                    }
+                    if let Some(service) = &config.transfer {
+                        service.cancel_peer_recovery(peer);
+                    }
+                }
+                let _ = done.send(Ok(outcome));
             }
             Wake::Command(Some(SessionCommand::ListServices { peer, done })) => {
                 if mode_for(peer) != super::wire::PeerWireMode::UnifiedV1

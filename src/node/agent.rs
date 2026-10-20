@@ -25,7 +25,7 @@ struct Cached {
 }
 struct Journal {
     events: VecDeque<SequencedEvent>,
-    lost: bool,
+    floor: u64,
 }
 pub struct Agent {
     pub(crate) control: NodeControl,
@@ -37,16 +37,19 @@ pub struct Agent {
     pub(crate) mutations: Mutex<()>,
     workers: Mutex<JoinSet<()>>,
     pub(crate) last_error: Mutex<Option<String>>,
+    pub(crate) forwards: Mutex<super::agent_forward::ForwardManager>,
 }
 impl Agent {
-    async fn execute(&self, command: Command) -> Result<Value, String> {
+    async fn execute(&self, command: Command, id: &str, digest: &str) -> Result<Value, String> {
         match command {
             Command::Status => Ok(
-                json!({"data_dir":self.paths.root,"epoch":self.epoch,"revision":self.config.lock().await.revision,"node":self.control.snapshot().map_err(|e|e.to_string())?,"last_error":*self.last_error.lock().await}),
+                json!({"data_dir":self.paths.root,"epoch":self.epoch,"revision":self.config.lock().await.revision,"node":self.control.snapshot().map_err(|e|e.to_string())?,"last_error":*self.last_error.lock().await,"forwards":self.forwards.lock().await.snapshot()}),
             ),
             Command::Config => {
                 let record = self.config.lock().await;
-                Ok(json!({"revision":record.revision,"settings":record.settings.redacted()}))
+                Ok(
+                    json!({"revision":record.revision,"settings":record.settings.redacted(),"password_configured":record.settings.remote_auth.is_some()}),
+                )
             }
             Command::Tasks => {
                 let snapshot = self.control.task_snapshot().map_err(|e| e.to_string())?;
@@ -57,7 +60,7 @@ impl Agent {
                 let journal = self.journal.lock().await;
                 let snapshot = self.control.snapshot().map_err(|e| e.to_string())?;
                 let lost = epoch != self.epoch
-                    || journal.lost
+                    || after < journal.floor
                     || after > snapshot.sequence
                     || journal
                         .events
@@ -127,14 +130,60 @@ impl Agent {
                 Ok(json!({"cancelled":true}))
             }
             Command::StartForward { rule } => {
-                self.control.start_tunnel_rule(rule)?;
-                Ok(json!({"accepted":true}))
+                let record = self.config.lock().await;
+                if !record
+                    .settings
+                    .forwards
+                    .iter()
+                    .any(|r| r.id == rule && r.enabled)
+                {
+                    return Err("转发规则不存在或已禁用".into());
+                }
+                let mut forwards = self.forwards.lock().await;
+                let plan = forwards
+                    .prepare(&record.settings, &self.control, Some(&rule))
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let retired = forwards.commit(plan);
+                drop(forwards);
+                for task in retired {
+                    let _ = task.await;
+                }
+                Ok(json!({"listening":true}))
             }
             Command::StopForward { rule } => {
-                self.control.revoke_tunnel_rule(rule, false).await?;
+                self.forwards
+                    .lock()
+                    .await
+                    .stop(&rule)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 Ok(json!({"stopped":true}))
             }
-            Command::ApplyConfig { .. } => Err("restart_required: 在线配置协调器尚未装配".into()),
+            Command::ApplyConfig {
+                expected_revision,
+                settings,
+            } => {
+                self.apply_settings(expected_revision, settings, id, digest)
+                    .await
+            }
+            Command::SetPassword {
+                expected_revision,
+                password,
+            } => {
+                let verifier = tokio::task::spawn_blocking(move || {
+                    super::remote_auth::SecretPassword::new(password)
+                        .and_then(|p| super::remote_auth::RemoteVerifier::create(&p))
+                })
+                .await
+                .map_err(|e| e.to_string())?
+                .map_err(|e| e.to_string())?;
+                let mut record = self.config.lock().await;
+                let mut settings = record.settings.clone();
+                settings.remote_auth = Some(verifier);
+                self.commit_settings(&mut record, expected_revision, settings, id, digest)
+                    .await
+            }
             Command::Stop => Ok(json!({"stopping":true})),
         }
     }
@@ -146,7 +195,7 @@ impl Agent {
         if request.command.is_query() {
             return match tokio::time::timeout(
                 Duration::from_millis(request.timeout_ms.into()),
-                self.execute(request.command),
+                self.execute(request.command, &request.request_id, ""),
             )
             .await
             {
@@ -159,6 +208,21 @@ impl Agent {
             serde_json::to_vec(&serde_json::to_value(&request.command).expect("command JSON"))
                 .expect("command bytes");
         let digest = blake3::hash(&bytes).to_hex().to_string();
+        {
+            let record = self.config.lock().await;
+            if let Some((last, hash)) = &record.last_request
+                && last == &request.request_id
+            {
+                return if hash == &digest {
+                    Response::ok(
+                        last,
+                        json!({"revision":record.revision,"already_committed":true}),
+                    )
+                } else {
+                    Response::error(last, "id_conflict", "已持久提交的请求ID包含不同命令")
+                };
+            }
+        }
         let mut cache = self.cache.lock().await;
         cache.retain(|_, entry| {
             entry.created.elapsed() < Duration::from_secs(300) || entry.response.borrow().is_none()
@@ -180,7 +244,7 @@ impl Agent {
             cache.insert(
                 request.request_id.clone(),
                 Cached {
-                    digest,
+                    digest: digest.clone(),
                     created: Instant::now(),
                     response: response.clone(),
                 },
@@ -192,7 +256,7 @@ impl Agent {
             while workers.try_join_next().is_some() {}
             workers.spawn(async move {
                 let _serial = owner.mutations.lock().await;
-                let result = match owner.execute(command).await {
+                let result = match owner.execute(command, &id, &digest).await {
                     Ok(v) => Response::ok(&id, v),
                     Err(e) => {
                         *owner.last_error.lock().await = Some(e.clone());
@@ -235,7 +299,8 @@ pub async fn run(paths: AgentPaths) -> io::Result<()> {
     let identity = Identity::load(&paths.identity()).map_err(io::Error::other)?;
     let _identity_lock = AgentPaths::identity_lock(identity.node_id())?;
     super::private_access::ensure_directory(&record.settings.receive_root)?;
-    let session = record.settings.session().map_err(io::Error::other)?;
+    let mut session = record.settings.session().map_err(io::Error::other)?;
+    session.tunnel_rules.clear();
     let (control, mut raw) = control::spawn_with_storage(
         identity,
         session,
@@ -251,14 +316,25 @@ pub async fn run(paths: AgentPaths) -> io::Result<()> {
         epoch: format!("{:032x}", rand::random::<u128>()),
         journal: Mutex::new(Journal {
             events: VecDeque::new(),
-            lost: false,
+            floor: 0,
         }),
         cache: Mutex::new(HashMap::new()),
         mutations: Mutex::new(()),
         workers: Mutex::new(JoinSet::new()),
         last_error: Mutex::new(None),
+        forwards: Mutex::new(super::agent_forward::ForwardManager::default()),
     });
     let mut listener = super::ipc_transport::Listener::bind(&paths)?;
+    {
+        let record = agent.config.lock().await;
+        let mut forwards = agent.forwards.lock().await;
+        let plan = forwards
+            .prepare(&record.settings, &agent.control, None)
+            .await
+            .map_err(io::Error::other)?;
+        let _ = forwards.commit(plan);
+    }
+
     let collector = agent.clone();
     let drain = tokio::spawn(async move {
         loop {
@@ -266,7 +342,7 @@ pub async fn run(paths: AgentPaths) -> io::Result<()> {
                 raw=raw.recv()=>{if raw.is_none(){break;}},
                 event=events.recv()=>{match event {
                     Ok(event)=>{let mut journal=collector.journal.lock().await;if journal.events.len()==256{journal.events.pop_front();}journal.events.push_back(event);},
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_))=>{let mut journal=collector.journal.lock().await;journal.events.clear();journal.lost=true;},
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_))=>{let mut journal=collector.journal.lock().await;journal.events.clear();journal.floor=collector.control.snapshot().map(|s|s.sequence).unwrap_or(u64::MAX);},
                     Err(_)=>break,
                 }}
             }
@@ -275,10 +351,28 @@ pub async fn run(paths: AgentPaths) -> io::Result<()> {
     let (stop, mut stopping) = watch::channel(false);
     let slots = Arc::new(Semaphore::new(32));
     let mut connections = JoinSet::new();
+    let shutdown = shutdown_signal();
+    tokio::pin!(shutdown);
+    let reload = reload_signal();
+    tokio::pin!(reload);
     let outcome = loop {
         tokio::select! {
             _=stopping.changed()=>break Ok(()),
-            signal=shutdown_signal()=>break signal,
+            signal=&mut shutdown=>break signal,
+            signal=&mut reload=>{
+                if let Err(error)=signal {break Err(error);}
+                reload.set(reload_signal());
+                if let Ok(permit)=slots.clone().try_acquire_owned() {
+                    let agent=agent.clone();
+                    connections.spawn(async move {
+                        let _permit=permit;
+                        match read_candidate(&agent.paths.root.join("node.pending.json")) {
+                            Ok(request)=>{let result=agent.submit(request).await;if let Some(error)=result.error{*agent.last_error.lock().await=Some(error.message);}},
+                            Err(error)=>{*agent.last_error.lock().await=Some(error.to_string());}
+                        }
+                    });
+                }
+            },
             accepted=listener.accept()=>{
                 let mut stream=match accepted { Ok(stream)=>stream, Err(error)=>break Err(error) };
                 let Ok(permit)=slots.clone().try_acquire_owned() else {continue;};
@@ -305,6 +399,7 @@ pub async fn run(paths: AgentPaths) -> io::Result<()> {
     workers.abort_all();
     while workers.join_next().await.is_some() {}
     drop(workers);
+    agent.forwards.lock().await.shutdown().await;
     agent.control.shutdown();
     let control = agent.control.clone();
     tokio::task::spawn_blocking(move || control.shutdown_and_wait())
@@ -325,4 +420,40 @@ async fn shutdown_signal() -> io::Result<()> {
     {
         tokio::signal::ctrl_c().await
     }
+}
+
+async fn reload_signal() -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
+        signal.recv().await;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        std::future::pending().await
+    }
+}
+fn read_candidate(path: &std::path::Path) -> io::Result<Request> {
+    use std::io::Read;
+    let metadata = std::fs::symlink_metadata(path)?;
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() > ipc::FRAME_LIMIT as u64
+    {
+        return Err(io::Error::other("候选必须是最大1MiB的普通文件"));
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(ipc::FRAME_LIMIT as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > ipc::FRAME_LIMIT {
+        return Err(io::Error::other("候选过大"));
+    }
+    let request: Request = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+    request.validate()?;
+    if !matches!(request.command, Command::ApplyConfig { .. }) {
+        return Err(io::Error::other("SIGHUP候选只能是apply_config请求"));
+    }
+    Ok(request)
 }
