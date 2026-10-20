@@ -492,6 +492,11 @@ cargo fmt --check
 
 架构、协议格式和踩过的坑见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
+后续统一节点方向见 [目标架构设计](docs/NODE_ARCHITECTURE.md)、
+[分阶段迁移与验收计划](docs/NODE_MIGRATION_PLAN.md) 和
+[Agent 执行任务与审核流程](docs/NODE_EXECUTION_TASKS.md)。这些文档为待实施方案，
+明确 CLI、桌面与无界面 Agent 的职责、协议兼容范围和验收条件，不表示这些目标能力已实现。
+
 ## 已实现的安全性质
 
 - **通道加密**：QUIC 自带 TLS 1.3。TLS 证书是**自签**的，不依赖 CA。

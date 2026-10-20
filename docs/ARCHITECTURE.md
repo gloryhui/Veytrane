@@ -1,5 +1,8 @@
 # 架构设计
 
+> 后续统一节点架构见 [ARCH-NODE-001](NODE_ARCHITECTURE.md)，实施阶段及验收见
+> [PLAN-NODE-001](NODE_MIGRATION_PLAN.md)。本文件保留既有阶段的设计记录；当前能力须结合源码和各功能文档核对，目标设计不代表已完成迁移。
+
 > 状态：M0~M2 已实现并真机验证，M3 认证 UDP Relay 已实现；验收以本地回归与 CI 为准。
 
 ## 1. 总体目标
