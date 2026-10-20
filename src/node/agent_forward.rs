@@ -5,7 +5,12 @@ use crate::{
     error::{Error, Result},
     identity::NodeId,
 };
-use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{
     net::TcpListener,
     sync::{Semaphore, watch},
@@ -28,10 +33,13 @@ struct Running {
     error: Arc<std::sync::Mutex<Option<String>>>,
 }
 pub(crate) struct Prepared {
+    known: HashSet<String>,
+    forced_start: Option<String>,
     desired: HashMap<String, (SocketAddr, Route)>,
     additions: HashMap<String, TcpListener>,
 }
 pub(crate) struct ForwardManager {
+    suppressed: HashSet<String>,
     active: HashMap<String, Running>,
     owner: Arc<crate::tunnel::ForwardStreamOwner>,
 }
@@ -39,6 +47,7 @@ impl Default for ForwardManager {
     fn default() -> Self {
         Self {
             active: HashMap::new(),
+            suppressed: HashSet::new(),
             owner: Arc::new(crate::tunnel::ForwardStreamOwner::new(256)),
         }
     }
@@ -51,12 +60,16 @@ impl ForwardManager {
         start: Option<&str>,
     ) -> Result<Prepared> {
         let mut plan = Prepared {
+            known: settings.forwards.iter().map(|r| r.id.clone()).collect(),
+            forced_start: start.map(str::to_owned),
             desired: HashMap::new(),
             additions: HashMap::new(),
         };
         for rule in settings.forwards.iter().filter(|r| {
             r.enabled
-                && (r.auto_start || self.active.contains_key(&r.id) || start == Some(r.id.as_str()))
+                && (start == Some(r.id.as_str())
+                    || (!self.suppressed.contains(&r.id)
+                        && (r.auto_start || self.active.contains_key(&r.id))))
         }) {
             let peer = NodeId::from_hex(&rule.peer_node_id)?;
             let connection = control
@@ -97,6 +110,10 @@ impl ForwardManager {
         Ok(plan)
     }
     pub fn commit(&mut self, mut plan: Prepared) -> Vec<JoinHandle<()>> {
+        self.suppressed.retain(|id| plan.known.contains(id));
+        if let Some(id) = &plan.forced_start {
+            self.suppressed.remove(id);
+        }
         let mut retired = vec![];
         let removed = self
             .active
@@ -159,6 +176,7 @@ impl ForwardManager {
         retired
     }
     pub async fn stop(&mut self, id: &str) -> Result<()> {
+        self.suppressed.insert(id.to_owned());
         if let Some(old) = self.active.remove(id) {
             old.stop.send_replace(true);
             old.task.await.map_err(|e| Error::Protocol(e.to_string()))?;
@@ -166,7 +184,7 @@ impl ForwardManager {
         Ok(())
     }
     pub fn snapshot(&self) -> serde_json::Value {
-        serde_json::json!({"active_streams":self.owner.active(),"rules":self.active.iter().map(|(id,r)|serde_json::json!({"id":id,"listen":r.listen,"listening":!r.task.is_finished(),"peer_ready":r.route.borrow().connection.borrow().as_ref().is_some_and(|c|c.close_reason().is_none()),"last_error":*r.error.lock().unwrap()})).collect::<Vec<_>>()})
+        serde_json::json!({"active_streams":self.owner.active(),"manually_stopped":self.suppressed,"rules":self.active.iter().map(|(id,r)|serde_json::json!({"id":id,"listen":r.listen,"listening":!r.task.is_finished(),"peer_ready":r.route.borrow().connection.borrow().as_ref().is_some_and(|c|c.close_reason().is_none()),"last_error":*r.error.lock().unwrap()})).collect::<Vec<_>>()})
     }
     pub async fn shutdown(&mut self) {
         for (_, old) in self.active.drain() {

@@ -212,6 +212,10 @@ impl Agent {
                 Ok(json!({"listening":true}))
             }
             Command::StopForward { rule } => {
+                let record = self.config.lock().await;
+                if !record.settings.forwards.iter().any(|r| r.id == rule) {
+                    return Err("转发规则不存在".into());
+                }
                 self.forwards
                     .lock()
                     .await
