@@ -21,11 +21,7 @@ pub(crate) fn write_json<T: Serialize>(path: &Path, value: &T) -> io::Result<Wri
 
 pub(crate) fn write_bytes(path: &Path, bytes: &[u8]) -> io::Result<WriteOutcome> {
     match std::fs::symlink_metadata(path) {
-        Ok(metadata)
-            if !metadata.is_file()
-                || metadata.file_type().is_symlink()
-                || is_reparse(&metadata) =>
-        {
+        Ok(metadata) if !regular_file(&metadata) => {
             return Err(io::Error::other("配置目标必须是普通文件，不能是链接"));
         }
         Ok(_) => {}

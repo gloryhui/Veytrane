@@ -231,7 +231,12 @@ impl AgentShell {
         match kind {
             Kind::Status => {
                 self.state = value;
-                self.connection_note = "已附着同一后台节点".into();
+                self.connection_note = if self.state["core_running"].as_bool() == Some(false) {
+                    "后台核心已停止，请查看诊断并重新启动"
+                } else {
+                    "已附着同一后台节点"
+                }
+                .into();
                 if self.draft.is_none() && !self.busy {
                     self.send(Command::Config, Kind::Config, cx);
                 }
@@ -610,6 +615,30 @@ impl Render for AgentShell {
                     ),
             )
             .child(div().text_sm().child(self.message.clone()));
+        let mut peers = ui_components::card().child("设备连接与方向授权");
+        if let Some(entries) = self.state["node"]["peers"].as_object() {
+            for (id, peer) in entries {
+                let inbound = peer["inbound_password"].as_bool() == Some(true)
+                    || peer["inbound_trusted"].as_bool() == Some(true);
+                let outbound = peer["outbound_password"].as_bool() == Some(true)
+                    || peer["outbound_trusted"].as_bool() == Some(true);
+                peers = peers.child(format!(
+                    "{} · {} · 入站{} · 出站{}",
+                    id,
+                    peer["phase"].as_str().unwrap_or("未知"),
+                    if inbound { "已授权" } else { "未授权" },
+                    if outbound { "已授权" } else { "未授权" }
+                ));
+            }
+        }
+        if let Some(message) = self.state["diagnostics"]
+            .as_array()
+            .and_then(|lines| lines.last())
+            .and_then(Value::as_str)
+        {
+            peers = peers.child(message.chars().take(512).collect::<String>());
+        }
+        root = root.child(peers);
         let mut directory = ui_components::card().child("远端授权服务（点击选择）");
         for service in &self.services {
             let id = service["id"].as_str().unwrap_or("").to_owned();
