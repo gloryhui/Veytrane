@@ -3,45 +3,38 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>我的服务 · P2P 导航</title>
+<title>P2P Service Navigation</title>
 <style>
-:root{--ink:#18293a;--muted:#718093;--blue:#2463dc;--line:#e2e7ed;--bg:#f5f7fa}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}button,input,a{-webkit-tap-highlight-color:transparent}button,a{touch-action:manipulation}button{font:inherit;cursor:pointer}a{color:inherit;text-decoration:none}button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid #82abff;outline-offset:4px}.top{background:#fff;border-bottom:1px solid var(--line)}.top-inner{max-width:1120px;margin:auto;padding:22px 30px;display:flex;align-items:center;justify-content:space-between;gap:12px}.brand{display:flex;align-items:center;gap:12px;font-weight:700;letter-spacing:.4px}.logo{width:35px;height:35px;border-radius:11px;background:var(--blue);color:white;display:grid;place-items:center}.private{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:7px}.dot{width:6px;height:6px;background:#7c8da4;border-radius:50%}main{max-width:1120px;margin:auto;padding:46px 30px 30px}.eyebrow{color:var(--blue);font-size:12px;font-weight:650;letter-spacing:2px}h1{font-size:38px;letter-spacing:-1.5px;line-height:1.25;margin:10px 0 14px}.intro{color:var(--muted);margin:0;max-width:700px}.overview{margin-top:30px;display:flex;gap:30px;align-items:center;border-bottom:1px solid var(--line);padding-bottom:28px}.metric{display:flex;align-items:baseline;gap:9px}.metric b{font-size:25px;line-height:1;font-variant-numeric:tabular-nums}.metric span{font-size:12px;color:var(--muted)}.toolbar{display:flex;justify-content:space-between;gap:20px;margin:28px 0 20px;align-items:center}.tabs{display:flex;gap:6px;flex-wrap:wrap}.tab{background:transparent;border:0;padding:7px 13px;border-radius:8px;color:var(--muted);font-size:13px}.tab[aria-pressed=true]{background:#e5edfc;color:#245bc3;font-weight:600}.search{width:245px;max-width:100%;border:1px solid var(--line);background:white;border-radius:9px;padding:10px 13px;font:inherit;font-size:13px;color:var(--ink)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:24px;display:flex;flex-direction:column;min-width:0;transition:box-shadow .2s,border-color .2s}.card:hover{box-shadow:0 8px 28px #24354a09;border-color:#c7d4e7}.card-top{display:flex;justify-content:space-between;align-items:center;gap:12px}.icon{width:43px;height:43px;border-radius:12px;display:grid;place-items:center;color:#3165bb;background:#edf3fd}.icon svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.pill{font-size:11px;color:#497265;background:#eef6f2;border-radius:6px;padding:4px 8px}.pill.off{color:#8b7156;background:#faf0e4}h2{font-size:19px;line-height:1.35;margin:19px 0 7px;letter-spacing:-.3px}.description{font-size:13px;color:var(--muted);margin:0 0 22px;min-height:43px}.endpoint{padding:13px 14px;background:#f7f9fc;border:1px solid #eef1f5;border-radius:10px;display:flex;justify-content:space-between;gap:8px;align-items:center}.endpoint code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.protocol{font-size:10px;font-weight:650;color:#7a8ba2;letter-spacing:.6px;flex-shrink:0}.route{font-size:11px;color:var(--muted);margin:10px 0 21px;overflow-wrap:anywhere}.actions{display:flex;gap:10px;margin-top:auto}.primary,.copy{border-radius:8px;padding:9px 14px;font-size:12px;font-weight:550;display:inline-flex;align-items:center;justify-content:center;gap:8px}.primary{background:var(--blue);border:1px solid var(--blue);color:white;flex:1}.primary:hover{background:#1c52bd}.copy{border:1px solid var(--line);background:white;color:#62748b}.copy:hover{background:#f6f8fb}.hint{background:#edf2f9;border:1px solid #e1e8f1;border-radius:12px;padding:18px 21px;display:flex;gap:14px;margin:28px 0 0;font-size:12px;color:#63748a}.hint strong{display:block;font-size:13px;color:#344c69;margin-bottom:3px}.hint p{margin:0}.foot{display:flex;justify-content:space-between;gap:14px;font-size:11px;color:#8591a2;margin-top:23px;padding-bottom:12px}.empty{grid-column:1/-1;text-align:center;padding:45px;color:var(--muted)}.toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#23374e;color:white;border-radius:9px;padding:10px 20px;box-shadow:0 5px 25px #1e304522;max-width:90vw;font-size:13px}.toast[hidden]{display:none}@media(min-width:1000px){.card:last-child:nth-child(odd){grid-column:1/2}}@media(max-width:680px){main{padding:30px 18px}.top-inner{padding:18px}.private{font-size:10px}h1{font-size:31px}.overview{gap:23px}.toolbar{align-items:stretch;flex-direction:column;gap:14px}.search{width:100%}.grid{grid-template-columns:1fr}.card{padding:21px}.foot{flex-direction:column;gap:4px}.hint{padding:16px}.metric b{font-size:22px}}
+:root{--ink:#18293a;--muted:#718093;--blue:#2463dc;--line:#e2e7ed;--bg:#f5f7fa}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}button,input,a{-webkit-tap-highlight-color:transparent}button,a{touch-action:manipulation}button{font:inherit;cursor:pointer}a{color:inherit;text-decoration:none}button:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid #82abff;outline-offset:4px}.top{background:#fff;border-bottom:1px solid var(--line)}.top-inner{max-width:1120px;margin:auto;padding:22px 30px;display:flex;align-items:center;justify-content:space-between;gap:12px}.brand{display:flex;align-items:center;gap:12px;font-weight:700;letter-spacing:.4px}.logo{width:35px;height:35px;border-radius:11px;background:var(--blue);color:white;display:grid;place-items:center}.private{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:7px}.dot{width:6px;height:6px;background:#7c8da4;border-radius:50%}main{max-width:1120px;margin:auto;padding:46px 30px 30px}.eyebrow{color:var(--blue);font-size:12px;font-weight:650;letter-spacing:2px}h1{font-size:38px;letter-spacing:-1.5px;line-height:1.25;margin:10px 0 14px}.intro{color:var(--muted);margin:0;max-width:700px}.overview{margin-top:30px;display:flex;gap:30px;align-items:center;border-bottom:1px solid var(--line);padding-bottom:28px}.metric{display:flex;align-items:baseline;gap:9px}.metric b{font-size:25px;line-height:1;font-variant-numeric:tabular-nums}.metric span{font-size:12px;color:var(--muted)}.toolbar{display:flex;justify-content:space-between;gap:20px;margin:28px 0 20px;align-items:center}.tabs{display:flex;gap:6px;flex-wrap:wrap}.tab{background:transparent;border:0;padding:7px 13px;border-radius:8px;color:var(--muted);font-size:13px}.tab[aria-pressed=true]{background:#e5edfc;color:#245bc3;font-weight:600}.search{width:245px;max-width:100%;border:1px solid var(--line);background:white;border-radius:9px;padding:10px 13px;font:inherit;font-size:13px;color:var(--ink)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:24px;display:flex;flex-direction:column;min-width:0;transition:box-shadow .2s,border-color .2s}.card:hover{box-shadow:0 8px 28px #24354a09;border-color:#c7d4e7}.card-top{display:flex;justify-content:space-between;align-items:center;gap:12px}.icon{width:43px;height:43px;border-radius:12px;display:grid;place-items:center;color:#3165bb;background:#edf3fd}.icon svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.pill{font-size:11px;color:#497265;background:#eef6f2;border-radius:6px;padding:4px 8px}.pill.off{color:#8b7156;background:#faf0e4}h2{font-size:19px;line-height:1.35;margin:19px 0 7px;letter-spacing:-.3px}.description{font-size:13px;color:var(--muted);margin:0 0 22px;min-height:43px}.endpoint{padding:13px 14px;background:#f7f9fc;border:1px solid #eef1f5;border-radius:10px;display:flex;justify-content:space-between;gap:8px;align-items:center}.endpoint code{font:13px ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.protocol{font-size:10px;font-weight:650;color:#7a8ba2;letter-spacing:.6px;flex-shrink:0}.actions{display:flex;gap:10px;margin-top:auto}.primary,.copy{border-radius:8px;padding:9px 14px;font-size:12px;font-weight:550;display:inline-flex;align-items:center;justify-content:center;gap:8px}.primary{background:var(--blue);border:1px solid var(--blue);color:white;flex:1}.primary:hover{background:#1c52bd}.copy{border:1px solid var(--line);background:white;color:#62748b}.copy:hover{background:#f6f8fb}.hint{background:#edf2f9;border:1px solid #e1e8f1;border-radius:12px;padding:18px 21px;display:flex;gap:14px;margin:28px 0 0;font-size:12px;color:#63748a}.hint strong{display:block;font-size:13px;color:#344c69;margin-bottom:3px}.hint p{margin:0}.foot{display:flex;justify-content:space-between;gap:14px;font-size:11px;color:#8591a2;margin-top:23px;padding-bottom:12px}.empty{grid-column:1/-1;text-align:center;padding:45px;color:var(--muted)}.toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#23374e;color:white;border-radius:9px;padding:10px 20px;box-shadow:0 5px 25px #1e304522;max-width:90vw;font-size:13px}.toast[hidden]{display:none}@media(min-width:1000px){.node-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:680px){main{padding:30px 18px}.top-inner{padding:18px}.private{font-size:10px}h1{font-size:31px}.overview{gap:23px}.toolbar{align-items:stretch;flex-direction:column;gap:14px}.search{width:100%}.grid{grid-template-columns:1fr}.card{padding:21px}.foot{flex-direction:column;gap:4px}.hint{padding:16px}.metric b{font-size:22px}}
+.token-help{margin-top:16px;padding-top:16px;border-top:1px solid var(--line);font-size:12px;color:#63748a}.token-help strong{color:#344c69}.token-help pre{margin:9px 0;white-space:pre-wrap;overflow-wrap:anywhere;user-select:all;background:#f7f9fc;border-radius:8px;padding:11px;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}.token-help p{margin:9px 0 0}
+.service-group+.service-group{margin-top:32px}.group-heading{display:flex;align-items:baseline;gap:10px;margin:0 0 5px}.group-heading h2{margin:0;font-size:18px}.group-count{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}.group-description{margin:0 0 16px;color:var(--muted);font-size:12px}.service-group .card h3{font-size:19px;line-height:1.35;margin:19px 0 7px;letter-spacing:-.3px}.node-grid .token-help pre{min-height:62px}.node-local{border-top:4px solid #2463dc}.node-remote{border-top:4px solid #ae5819}.node-remote .icon{color:#a34e10;background:#fff0e0}.node-remote .primary{background:#a34e10;border-color:#a34e10}.service-group .grid{align-items:stretch}.toolbar{align-items:flex-start}.tabs{flex:1}.search{flex-shrink:0}
+@media(min-width:681px){.service-group:not(.node-group) .grid{grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}}
+@media(max-width:680px){.node-grid{grid-template-columns:1fr}}
+.mapping-route{margin:14px 0 20px;padding:15px;border:1px solid #b9cff0;border-radius:12px;background:#f0f5ff}.mapping-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:13px}.mapping-heading strong{font-size:13px;color:#234c85}.mapping-mode{font-size:10px;font-weight:650;color:#426ba4;background:#fff;border-radius:5px;padding:3px 6px;white-space:nowrap}.mapping-line{display:grid;grid-template-columns:minmax(0,1fr) 36px minmax(0,1fr);gap:7px;align-items:center}.mapping-end{min-width:0;background:#fff;border:1px solid #d7e2f2;border-radius:8px;padding:10px}.mapping-label{display:block;font-size:11px;color:#546c8c;margin-bottom:5px}.mapping-address{display:block;font:700 14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#163965;overflow-wrap:anywhere}.mapping-hop{display:flex;flex-direction:column;align-items:center;color:#3467b2;font-size:10px;line-height:1.4}.mapping-hop b{font-size:25px;line-height:1.2}.mapping-note{font-size:11px;color:#516d94;line-height:1.65;margin:11px 0 0;overflow-wrap:anywhere}.mapping-note code{font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace}.mapping-local{background:#f4f7fc;border-color:#cbd8eb}.node-remote .mapping-route{background:#fff6eb;border-color:#e4c59e}.node-remote .mapping-heading strong,.node-remote .mapping-address{color:#824813}.node-remote .mapping-mode,.node-remote .mapping-hop{color:#97551b}.node-remote .mapping-end{border-color:#ecdbc4}.node-remote .mapping-note{color:#816647}@media(max-width:380px){.mapping-line{grid-template-columns:minmax(0,1fr)}.mapping-hop b{transform:rotate(90deg)}.mapping-heading{align-items:flex-start;flex-direction:column}}
+.mapping-end.mapping-remote{background:#fff2e6;border:1px solid #e6bf98;border-top:3px solid #a24c0b}.mapping-remote .mapping-label,.mapping-remote .mapping-address{color:#a24c0b}.mapping-end.mapping-local{background:#eaf1ff;border:1px solid #aec5ec;border-top:3px solid #244f9d}.mapping-local .mapping-label,.mapping-local .mapping-address{color:#244f9d}
 </style>
 </head>
 <body>
-<header class="top"><div class="top-inner"><div class="brand"><span class="logo" aria-hidden="true">↗</span> 我的服务 <span style="color:#a1acbb;font-size:12px;font-weight:400">/ P2P 导航</span></div><div class="private"><span class="dot"></span> 本机访问 · 私有入口</div></div></header>
+<header class="top"><div class="top-inner"><div class="brand"><span class="logo" aria-hidden="true">↗</span> P2P Service Navigation</div><div class="private"><span class="dot"></span> 本机访问 · 私有入口</div></div></header>
 <main>
 <div class="eyebrow">YOUR LOCAL WORKSPACE</div>
 <h1>服务入口，一处直达。</h1>
-<p class="intro">Ubuntu 上的应用与共享，连接到这台 Mac。选择服务，继续你的工作。</p>
+<p class="intro">先管理节点，再按功能访问应用、路由器与文件共享。所有入口都从这台 Mac 打开。</p>
 <div class="overview"><div class="metric"><b id="total">—</b><span>服务入口</span></div><div class="metric"><b id="mapped">—</b><span>远程映射</span></div><div class="metric"><b id="automatic">—</b><span>映射自动启动</span></div></div>
-<div class="toolbar"><nav class="tabs" aria-label="按服务类型筛选"><button class="tab" data-filter="全部" aria-pressed="true">全部服务</button><button class="tab" data-filter="应用" aria-pressed="false">应用</button><button class="tab" data-filter="管理" aria-pressed="false">管理</button><button class="tab" data-filter="文件" aria-pressed="false">文件共享</button></nav><input class="search" id="search" type="search" placeholder="搜索服务或端口…" aria-label="搜索服务或端口"></div>
-<section class="grid" id="services" aria-label="服务入口"></section>
+<div class="toolbar"><nav class="tabs" id="filters" aria-label="按服务类型筛选"></nav><input class="search" id="search" type="search" placeholder="搜索名称、服务 ID 或端口…" aria-label="搜索服务或端口"></div>
+<div id="services" aria-label="按功能分组的服务入口"></div>
 <noscript><p>请允许本地页面运行 JavaScript 以显示服务入口。</p></noscript>
-<aside class="hint"><span aria-hidden="true">ⓘ</span><div><strong>后台连接，按需访问</strong><p>Mac 登录后由后台服务启动映射，无需手动打开 P2P 软件。管理页面需使用对应节点的令牌登录；Samba 请在 Finder 中连接。</p><p style="margin-top:6px">标签表示保存的配置，不代表实时连通性。更新映射后同步此页面，刷新即可看到最新入口。</p></div></aside>
+<aside class="hint"><span aria-hidden="true">ⓘ</span><div><strong>后台连接，按需访问</strong><p>Mac 登录后由后台服务启动映射，无需手动打开 P2P 软件。管理页面需使用对应节点的令牌登录；Samba 请在 Finder 中连接。</p><p style="margin-top:6px">标签表示保存的配置，不代表实时连通性。更新映射后请让 Codex 重新同步并整理此页面，刷新即可看到最新入口。</p></div></aside>
 <footer class="foot"><span id="updated"></span><span>Mac 本地入口 → Ubuntu 服务 · 无外部资源</span></footer>
 </main>
 <div class="toast" id="toast" role="status" hidden></div>
 <script id="navigation-data" type="application/json">
 {
-  "updatedAt": "2026-10-21T11:08:56+08:00",
+  "updatedAt": "2026-10-21T16:41:37+08:00",
   "services": [
     {
-      "id": "ubuntu-ubuntu-admin",
-      "title": "配置 Ubuntu",
-      "name": "Ubuntu Web 管理",
-      "description": "管理 Ubuntu 的 P2P 节点、信任设备和端口服务。",
-      "category": "管理",
-      "protocol": "http",
-      "url": "http://127.0.0.1:7788/",
-      "listen": "127.0.0.1:7788",
-      "target": "127.0.0.1:8787",
-      "enabled": true,
-      "autoStart": true,
-      "remote": true
-    },
-    {
       "id": "ubuntu-sub2api",
+      "serviceId": "sub2api",
       "title": "使用 Sub2API",
       "name": "Sub2API",
       "description": "打开 Sub2API 控制台，管理账号与 API 服务。",
@@ -55,21 +48,8 @@
       "remote": true
     },
     {
-      "id": "ubuntu-streamdesk",
-      "title": "打开 StreamDesk",
-      "name": "StreamDesk",
-      "description": "访问部署在 Ubuntu 内网的 StreamDesk。",
-      "category": "应用",
-      "protocol": "https",
-      "url": "https://localhost:18443/login",
-      "listen": "127.0.0.1:18443",
-      "target": "192.168.3.192:18443",
-      "enabled": true,
-      "autoStart": true,
-      "remote": true
-    },
-    {
       "id": "ubuntu-samba",
+      "serviceId": "samba",
       "title": "Samba 文件共享",
       "name": "Samba",
       "description": "在 Finder 中按 ⌘K，将共享地址粘贴到「连接服务器」。",
@@ -83,11 +63,72 @@
       "remote": true
     },
     {
+      "id": "ubuntu-streamdesk",
+      "serviceId": "streamdesk",
+      "title": "打开 StreamDesk",
+      "name": "StreamDesk",
+      "description": "访问部署在 Ubuntu 内网的 StreamDesk。",
+      "category": "应用",
+      "protocol": "https",
+      "url": "https://localhost:18443/login",
+      "listen": "127.0.0.1:18443",
+      "target": "192.168.3.192:18443",
+      "enabled": true,
+      "autoStart": true,
+      "remote": true
+    },
+    {
+      "id": "ubuntu-ubuntu-admin",
+      "serviceId": "ubuntu-admin",
+      "title": "远程 Ubuntu · 节点管理",
+      "name": "Ubuntu Web 管理",
+      "description": "配置 Ubuntu 服务器提供的服务、目标地址和允许访问的设备。",
+      "category": "节点管理",
+      "protocol": "http",
+      "url": "http://127.0.0.1:7788/",
+      "listen": "127.0.0.1:7788",
+      "target": "127.0.0.1:8787",
+      "enabled": true,
+      "autoStart": true,
+      "remote": true
+    },
+    {
+      "id": "ubuntu-istore-web",
+      "serviceId": "istore-web",
+      "title": "iStore · 路由器管理",
+      "name": "路由器管理",
+      "description": "管理 iStore 路由器的网络、设备与系统设置。",
+      "category": "路由与网络",
+      "protocol": "http",
+      "url": "http://127.0.0.1:18082/cgi-bin/luci/",
+      "listen": "127.0.0.1:18082",
+      "target": "192.168.3.1:80",
+      "enabled": true,
+      "autoStart": true,
+      "remote": true
+    },
+    {
+      "id": "istore-nikki",
+      "serviceId": "istore-nikki",
+      "title": "iStore · Nikki 代理面板",
+      "name": "istore-nikki",
+      "description": "打开 Nikki 的 zashboard 面板，查看连接、代理与规则。",
+      "category": "路由与网络",
+      "protocol": "http",
+      "url": "http://127.0.0.1:9090/ui/",
+      "listen": "127.0.0.1:9090",
+      "target": "192.168.3.1:9090",
+      "enabled": true,
+      "autoStart": true,
+      "remote": true
+    },
+    {
       "id": "mac-admin",
-      "title": "配置本机 Mac",
+      "serviceId": "mac-admin",
+      "title": "本机 Mac · 节点管理",
       "name": "Mac P2P 管理",
-      "description": "管理本机节点、映射规则及连接设置。",
-      "category": "管理",
+      "description": "配置这台 Mac 的监听端口，接收 Ubuntu 等远端设备提供的服务。",
+      "category": "节点管理",
       "protocol": "http",
       "url": "http://127.0.0.1:7789/",
       "listen": "127.0.0.1:7789",
@@ -105,14 +146,95 @@ const icons={管理:'<rect x="3" y="4" width="18" height="15" rx="2"/><path d="M
 let filter='全部',timer;
 function el(tag,cls,text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n}
 function notify(message){const t=document.getElementById('toast');t.textContent=message;t.hidden=false;clearTimeout(timer);timer=setTimeout(()=>t.hidden=true,2600)}
-async function copy(text){try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text)}else{const t=el('textarea');t.value=text;t.style.cssText='position:fixed;top:-9999px';document.body.append(t);t.select();const ok=document.execCommand('copy');t.remove();if(!ok)throw Error('clipboard')}notify('地址已复制')}catch{notify('复制失败，请手动选择并复制上方地址')}}
-function render(){const q=document.getElementById('search').value.trim().toLowerCase();const grid=document.getElementById('services');grid.replaceChildren();const list=data.services.filter(s=>(filter==='全部'||s.category===filter)&&[s.title,s.name,s.listen,s.target,s.url].join(' ').toLowerCase().includes(q));for(const s of list){const card=el('article','card');const top=el('div','card-top');const icon=el('div','icon');icon.setAttribute('aria-hidden','true');icon.innerHTML='<svg viewBox="0 0 24 24">'+(icons[s.category]||icons.应用)+'</svg>';let state=s.remote?(s.enabled?(s.autoStart?'已启用 · 自动启动':'已启用 · 手动启动'):'已停用'):'本机管理';top.append(icon,el('span','pill'+(s.enabled?'':' off'),state));card.append(top,el('h2','',s.title),el('p','description',s.description));const endpoint=el('div','endpoint');endpoint.append(el('code','',s.url),el('span','protocol',s.protocol.toUpperCase()));card.append(endpoint,el('div','route',s.remote?'Ubuntu 目标  →  '+s.target:s.target));const actions=el('div','actions');if(['http','https'].includes(s.protocol)&&s.enabled){const a=el('a','primary','打开页面 ↗');a.href=s.url;a.target='_blank';a.rel='noopener noreferrer';a.setAttribute('aria-label','打开'+s.title);actions.append(a)}else{const b=el('button','primary',s.protocol==='smb'?'复制 Finder 连接地址':'复制连接地址');b.onclick=()=>copy(s.url);actions.append(b)}const c=el('button','copy','复制地址');c.setAttribute('aria-label','复制'+s.name+'地址');c.onclick=()=>copy(s.url);if(['http','https'].includes(s.protocol))actions.append(c);card.append(actions);grid.append(card)}if(!list.length)grid.append(el('p','empty','没有匹配的服务，试试其他名称或端口。'))}
+async function copy(text,label='地址'){try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text)}else{const t=el('textarea');t.value=text;t.style.cssText='position:fixed;top:-9999px';document.body.append(t);t.select();const ok=document.execCommand('copy');t.remove();if(!ok)throw Error('clipboard')}notify(label+'已复制')}catch{notify('复制失败，请手动选择并复制上方内容')}}
+function tokenHelp(card,s){
+ if(!isNode(s))return;
+ const isMac=s.serviceId==='mac-admin'||s.id==='mac-admin';
+ const command=isMac?'pbcopy < "$HOME/Library/Application Support/p2p-file/node/admin.token"':"ssh ubuntu 'cat ~/.local/share/p2p-file/node/admin.token' | pbcopy";
+ const box=el('div','token-help');
+ box.append(el('strong','',(isMac?'Mac':'Ubuntu')+' 管理 token'));
+ box.append(el('p','','在 Mac 终端执行下面的命令，将对应节点的 token 复制到剪贴板：'));
+ const pre=el('pre');pre.append(el('code','',command));box.append(pre);
+ const button=el('button','copy','复制获取 token 的命令');button.type='button';button.onclick=()=>copy(command,'命令');box.append(button);
+ box.append(el('p','','执行后终端没有输出是正常的。打开上方管理页面，在“管理 token”输入框按 ⌘V 粘贴，再点击“读取配置（放弃草稿）”。'));
+ box.append(el('p','','Mac 与 Ubuntu 使用各自的 token；此网页只提供命令，不保存 token。'));
+ card.append(box);
+}
+const groups=[
+ {category:'节点管理',title:'节点管理',description:'这台 Mac 与远程 Ubuntu 并排管理。服务提供方和接收方，请分别在对应节点配置。'},
+ {category:'路由与网络',title:'路由与网络',description:'路由器系统、网络设备和代理控制面板。'},
+ {category:'应用',title:'应用服务',description:'日常使用的应用与控制台。'},
+ {category:'文件',title:'文件共享',description:'使用 Finder 或对应客户端访问文件。'},
+ {category:'其他',title:'其他入口',description:'尚未标明访问方式的入口仅提供地址复制。'}
+];
+icons['节点管理']=icons.管理;
+icons['路由与网络']='<rect x="3" y="10" width="18" height="10" rx="2"/><path d="M7 10V5m10 5V5M7 15h.01M11 15h.01M8 3a7 7 0 0 1 8 0"/>';
+function isNode(s){return ['mac-admin','ubuntu-admin'].includes(s.serviceId)||['mac-admin','ubuntu-ubuntu-admin'].includes(s.id)}
+function groupOf(s){return isNode(s)?'节点管理':s.category||'其他'}
+function definitions(){const known=new Set(groups.map(g=>g.category));return [...groups,...[...new Set(data.services.map(groupOf))].filter(c=>!known.has(c)).sort((a,b)=>a.localeCompare(b,'zh-CN')).map(c=>({category:c,title:c,description:''}))]}
+function mappingRoute(s){
+ const box=el('div','mapping-route'+(s.remote?'':' mapping-local'));
+ box.setAttribute('aria-label',s.remote?'远端 Ubuntu 服务映射到 Mac 本机端口的链路':'Mac 节点管理的本机访问链路');
+ const heading=el('div','mapping-heading');heading.append(el('strong','','端口映射链路'),el('span','mapping-mode',s.remote?'经 Ubuntu 转发':'本机直接访问'));box.append(heading);
+ const line=el('div','mapping-line');
+ function end(label,address,role='local'){const step=el('div','mapping-end mapping-'+role);step.append(el('span','mapping-label',label),el('code','mapping-address',address));return step}
+ const hop=el('div','mapping-hop');hop.setAttribute('aria-hidden','true');hop.append(el('b','','→'),el('span','',s.remote?'P2P':'本机'));
+ if(s.remote){
+  const targetIsLoopback=/^(127\.|localhost:|\[::1\]:)/.test(s.target);
+  line.append(end(targetIsLoopback?'① 远端 Ubuntu 服务':'① 远端 Ubuntu 侧目标',s.target,'remote'),hop,end('② Mac 本机监听',s.listen));
+  box.append(line);
+  const note=el('p','mapping-note');note.append(document.createTextNode('左侧为远端服务，右侧为这台 Mac 的入口 · 服务 ID：'),el('code','',s.serviceId||'未指定'));
+  if(targetIsLoopback)note.append(document.createTextNode('。左侧回环地址属于远端 Ubuntu。'));
+  box.append(note);
+ }else{
+  line.append(end('① 本机访问端','这台 Mac 的浏览器'),hop,end('② Mac 节点管理服务',s.listen));box.append(line);
+  box.append(el('p','mapping-note','直接访问这台 Mac 的 '+s.listen.split(':').at(-1)+' 端口，不经过 Ubuntu 或 P2P 转发。'));
+ }
+ return box;
+}
+function serviceCard(s){
+ const node=isNode(s),local=s.serviceId==='mac-admin'||s.id==='mac-admin';
+ const card=el('article','card'+(node?(local?' node-local':' node-remote'):''));card.dataset.serviceId=s.serviceId||s.id;
+ const top=el('div','card-top'),icon=el('div','icon');icon.setAttribute('aria-hidden','true');icon.innerHTML='<svg viewBox="0 0 24 24">'+(icons[groupOf(s)]||icons.应用)+'</svg>';
+ const state=s.remote?(s.enabled?(s.autoStart?'已启用 · 自动启动':'已启用 · 手动启动'):'已停用'):'本机管理';
+ top.append(icon,el('span','pill'+(s.enabled?'':' off'),state));card.append(top,el('h3','',s.title),el('p','description',s.description));
+ const endpoint=el('div','endpoint');endpoint.append(el('code','',s.url),el('span','protocol',s.protocol.toUpperCase()));card.append(endpoint,mappingRoute(s));
+ const actions=el('div','actions');
+ if(['http','https'].includes(s.protocol)&&s.enabled){const a=el('a','primary','打开页面 ↗');a.href=s.url;a.target='_blank';a.rel='noopener noreferrer';a.setAttribute('aria-label','打开'+s.title);actions.append(a)}
+ else{const b=el('button','primary',s.protocol==='smb'?'复制 Finder 连接地址':'复制连接地址');b.onclick=()=>copy(s.url);actions.append(b)}
+ if(['http','https'].includes(s.protocol)){const button=el('button','copy','复制地址');button.setAttribute('aria-label','复制'+s.name+'地址');button.onclick=()=>copy(s.url);actions.append(button)}
+ card.append(actions);tokenHelp(card,s);return card;
+}
+function render(){
+ const q=document.getElementById('search').value.trim().toLowerCase(),container=document.getElementById('services');container.replaceChildren();
+ const list=data.services.filter(s=>(filter==='全部'||groupOf(s)===filter)&&[s.title,s.name,s.description,s.id,s.serviceId,s.listen,s.target,s.url].join(' ').toLowerCase().includes(q));
+ for(const [index,g] of definitions().entries()){
+  const services=list.filter(s=>groupOf(s)===g.category).sort((a,b)=>{
+   if(g.category==='节点管理')return Number(a.id==='mac-admin')-Number(b.id==='mac-admin');
+   return a.title.localeCompare(b.title,'zh-CN',{numeric:true})||a.id.localeCompare(b.id);
+  });
+  if(!services.length)continue;
+  const section=el('section','service-group'+(g.category==='节点管理'?' node-group':''));section.dataset.category=g.category;
+  const heading=el('div','group-heading'),title=el('h2','',g.title);title.id='service-group-'+index;section.setAttribute('aria-labelledby',title.id);heading.append(title,el('span','group-count',services.length+' 个入口'));section.append(heading);
+  if(g.description)section.append(el('p','group-description',g.description));
+  const grid=el('div','grid'+(g.category==='节点管理'?' node-grid':''));services.forEach(s=>grid.append(serviceCard(s)));section.append(grid);container.append(section);
+ }
+ if(!list.length)container.append(el('p','empty','没有匹配的服务，试试其他名称、服务 ID 或端口。'));
+}
+function renderFilters(){
+ const nav=document.getElementById('filters');nav.replaceChildren();
+ for(const category of ['全部',...definitions().filter(g=>data.services.some(s=>groupOf(s)===g.category)).map(g=>g.category)]){
+  const label=category==='全部'?'全部服务':(definitions().find(g=>g.category===category)?.title||category);
+  const button=el('button','tab',label);button.dataset.filter=category;button.setAttribute('aria-pressed',String(category===filter));
+  button.onclick=()=>{filter=category;renderFilters();render()};nav.append(button);
+ }
+}
 document.getElementById('total').textContent=data.services.length;
 document.getElementById('mapped').textContent=data.services.filter(s=>s.remote).length;
 document.getElementById('automatic').textContent=data.services.filter(s=>s.remote&&s.enabled&&s.autoStart).length;
 document.getElementById('updated').textContent='配置更新于 '+new Date(data.updatedAt).toLocaleString('zh-CN',{hour12:false});
 document.getElementById('search').addEventListener('input',render);
-document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{filter=b.dataset.filter;document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-pressed',String(t===b)));render()}));render();
+renderFilters();render();
 </script>
 </body>
 </html>

@@ -8,9 +8,11 @@ import re
 import subprocess
 
 SERVICE_UI = {
-    "ubuntu-admin": ("配置 Ubuntu", "管理 Ubuntu 的 P2P 节点、信任设备和端口服务。", "管理", "http", "/"),
+    "ubuntu-admin": ("远程 Ubuntu · 节点管理", "配置 Ubuntu 服务器提供的服务、目标地址和允许访问的设备。", "节点管理", "http", "/"),
     "sub2api": ("使用 Sub2API", "打开 Sub2API 控制台，管理账号与 API 服务。", "应用", "http", "/"),
     "streamdesk": ("打开 StreamDesk", "访问部署在 Ubuntu 内网的 StreamDesk。", "应用", "https", "/login"),
+    "istore-web": ("iStore · 路由器管理", "管理 iStore 路由器的网络、设备与系统设置。", "路由与网络", "http", "/cgi-bin/luci/"),
+    "istore-nikki": ("iStore · Nikki 代理面板", "打开 Nikki 的 zashboard 面板，查看连接、代理与规则。", "路由与网络", "http", "/ui/"),
     "samba": ("Samba 文件共享", "在 Finder 中按 ⌘K，将共享地址粘贴到「连接服务器」。", "文件", "smb", ""),
 }
 
@@ -39,15 +41,12 @@ def main():
         # StreamDesk's TLS certificate is issued for localhost.
         url_host = "localhost" if protocol == "https" and host in ("127.0.0.1", "localhost") else host
         url = f"{protocol}://{url_host}:{port}{path}" if protocol != "tcp" else listen
-        services.append(dict(id=forward["id"], title=title, name=forward["name"], description=description,
+        services.append(dict(id=forward["id"], serviceId=service_id, title=title, name=forward["name"], description=description,
                              category=category, protocol=protocol, url=url, listen=listen,
                              target=service["target"] if service else forward["target"],
                              enabled=bool(forward["enabled"] and (service is None or service["enabled"])),
                              autoStart=bool(forward["auto_start"]), remote=True))
-    order = {"ubuntu-admin": 0, "sub2api": 1, "streamdesk": 2, "samba": 3}
-    ids = local.get("service_ids", {})
-    services.sort(key=lambda x: order.get(ids.get(x["id"]), 10))
-    services.append(dict(id="mac-admin", title="配置本机 Mac", name="Mac P2P 管理", description="管理本机节点、映射规则及连接设置。", category="管理", protocol="http", url=args.mac_web, listen=args.mac_web.split("://", 1)[1].rstrip("/"), target="本机 P2P Web 管理", enabled=True, autoStart=None, remote=False))
+    services.append(dict(id="mac-admin", serviceId="mac-admin", title="本机 Mac · 节点管理", name="Mac P2P 管理", description="配置这台 Mac 的监听端口，接收 Ubuntu 等远端设备提供的服务。", category="节点管理", protocol="http", url=args.mac_web, listen=args.mac_web.split("://", 1)[1].rstrip("/"), target="本机 P2P Web 管理", enabled=True, autoStart=None, remote=False))
     data = dict(updatedAt=datetime.datetime.now().astimezone().isoformat(timespec="seconds"), services=services)
     encoded = json.dumps(data, ensure_ascii=False, indent=2).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
     html = args.output.read_text()

@@ -96,8 +96,62 @@ async fn request(State(state): State<Gateway>, Json(request): Json<ipc::Request>
             .into_response(),
     }
 }
+fn node_platform() -> &'static str {
+    if std::env::consts::OS == "linux"
+        && std::fs::read_to_string("/etc/os-release").is_ok_and(|release| {
+            release
+                .lines()
+                .any(|line| matches!(line, "ID=ubuntu" | "ID=\"ubuntu\""))
+        })
+    {
+        "ubuntu"
+    } else {
+        std::env::consts::OS
+    }
+}
+
+fn index_html(platform: &str) -> String {
+    let (name, scope, theme, purpose) = match platform {
+        "macos" => (
+            "Mac",
+            "本机 Mac",
+            "mac",
+            "在这台 Mac 上接收远程服务，配置本机监听端口。",
+        ),
+        "ubuntu" => (
+            "Ubuntu",
+            "Ubuntu 服务器",
+            "server",
+            "管理 Ubuntu 提供的服务、目标地址与允许访问的设备。",
+        ),
+        "linux" => (
+            "Linux",
+            "Linux 服务器",
+            "server",
+            "管理 Linux 提供的服务、目标地址与允许访问的设备。",
+        ),
+        "windows" => (
+            "Windows",
+            "Windows 节点",
+            "windows",
+            "管理这台 Windows 的服务、端口转发与文件任务。",
+        ),
+        _ => (
+            "当前节点",
+            "当前节点",
+            "default",
+            "管理当前后台节点的服务、端口转发与文件任务。",
+        ),
+    };
+    include_str!("agent_web.html")
+        .replace("__NODE_NAME__", name)
+        .replace("__NODE_SCOPE__", scope)
+        .replace("__NODE_THEME__", theme)
+        .replace("__NODE_PURPOSE__", purpose)
+}
+
 async fn index() -> Response {
-    let mut response = Html(include_str!("agent_web.html")).into_response();
+    let mut response = Html(index_html(node_platform())).into_response();
     for (name, value) in [
         (
             "content-security-policy",
