@@ -12,6 +12,7 @@
 @media(max-width:680px){.node-grid{grid-template-columns:1fr}}
 .mapping-route{margin:14px 0 20px;padding:15px;border:1px solid #b9cff0;border-radius:12px;background:#f0f5ff}.mapping-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:13px}.mapping-heading strong{font-size:13px;color:#234c85}.mapping-mode{font-size:10px;font-weight:650;color:#426ba4;background:#fff;border-radius:5px;padding:3px 6px;white-space:nowrap}.mapping-line{display:grid;grid-template-columns:minmax(0,1fr) 36px minmax(0,1fr);gap:7px;align-items:center}.mapping-end{min-width:0;background:#fff;border:1px solid #d7e2f2;border-radius:8px;padding:10px}.mapping-label{display:block;font-size:11px;color:#546c8c;margin-bottom:5px}.mapping-address{display:block;font:700 14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#163965;overflow-wrap:anywhere}.mapping-hop{display:flex;flex-direction:column;align-items:center;color:#3467b2;font-size:10px;line-height:1.4}.mapping-hop b{font-size:25px;line-height:1.2}.mapping-note{font-size:11px;color:#516d94;line-height:1.65;margin:11px 0 0;overflow-wrap:anywhere}.mapping-note code{font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace}.mapping-local{background:#f4f7fc;border-color:#cbd8eb}.node-remote .mapping-route{background:#fff6eb;border-color:#e4c59e}.node-remote .mapping-heading strong,.node-remote .mapping-address{color:#824813}.node-remote .mapping-mode,.node-remote .mapping-hop{color:#97551b}.node-remote .mapping-end{border-color:#ecdbc4}.node-remote .mapping-note{color:#816647}@media(max-width:380px){.mapping-line{grid-template-columns:minmax(0,1fr)}.mapping-hop b{transform:rotate(90deg)}.mapping-heading{align-items:flex-start;flex-direction:column}}
 .mapping-end.mapping-remote{background:#fff2e6;border:1px solid #e6bf98;border-top:3px solid #a24c0b}.mapping-remote .mapping-label,.mapping-remote .mapping-address{color:#a24c0b}.mapping-end.mapping-local{background:#eaf1ff;border:1px solid #aec5ec;border-top:3px solid #244f9d}.mapping-local .mapping-label,.mapping-local .mapping-address{color:#244f9d}
+.login-help{padding:15px;margin:0 0 18px;border:1px solid #d7e2f2;border-radius:10px;background:#f7f9fc}.login-heading{display:block;color:#344c69;font-size:13px;margin-bottom:10px}.login-row{display:grid;grid-template-columns:35px minmax(0,1fr) auto;gap:8px;align-items:center;margin-top:8px;font-size:12px}.login-row code{font:600 12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere;user-select:all}.login-row .copy{padding:5px 8px;font-size:11px}
 </style>
 </head>
 <body>
@@ -30,7 +31,7 @@
 <div class="toast" id="toast" role="status" hidden></div>
 <script id="navigation-data" type="application/json">
 {
-  "updatedAt": "2026-10-21T16:41:37+08:00",
+  "updatedAt": "2026-10-21T17:14:03+08:00",
   "services": [
     {
       "id": "ubuntu-sub2api",
@@ -123,6 +124,21 @@
       "remote": true
     },
     {
+      "id": "ubuntu-chromium",
+      "serviceId": "chromium-web",
+      "title": "Chromium · 远程浏览器",
+      "name": "Chromium 远程浏览器",
+      "description": "在 Mac 浏览器中操作远端 Ubuntu 的 Chromium，使用原有账号登录。",
+      "category": "应用",
+      "protocol": "https",
+      "url": "https://localhost:13001/",
+      "listen": "127.0.0.1:13001",
+      "target": "127.0.0.1:3001",
+      "enabled": true,
+      "autoStart": true,
+      "remote": true
+    },
+    {
       "id": "mac-admin",
       "serviceId": "mac-admin",
       "title": "本机 Mac · 节点管理",
@@ -192,13 +208,22 @@ function mappingRoute(s){
  }
  return box;
 }
+function loginHelp(card,s){
+ if(s.serviceId!=='chromium-web'||!s.login)return;
+ const box=el('div','login-help');box.append(el('strong','login-heading','Chromium 登录信息'));
+ for(const [label,key] of [['账号','username'],['密码','password']]){
+  const row=el('div','login-row'),button=el('button','copy','复制'+label);button.type='button';button.setAttribute('aria-label','复制 Chromium '+label);button.onclick=()=>copy(s.login[key],label);
+  row.append(el('span','',label),el('code','',s.login[key]),button);box.append(row);
+ }
+ card.append(box);
+}
 function serviceCard(s){
  const node=isNode(s),local=s.serviceId==='mac-admin'||s.id==='mac-admin';
  const card=el('article','card'+(node?(local?' node-local':' node-remote'):''));card.dataset.serviceId=s.serviceId||s.id;
  const top=el('div','card-top'),icon=el('div','icon');icon.setAttribute('aria-hidden','true');icon.innerHTML='<svg viewBox="0 0 24 24">'+(icons[groupOf(s)]||icons.应用)+'</svg>';
  const state=s.remote?(s.enabled?(s.autoStart?'已启用 · 自动启动':'已启用 · 手动启动'):'已停用'):'本机管理';
  top.append(icon,el('span','pill'+(s.enabled?'':' off'),state));card.append(top,el('h3','',s.title),el('p','description',s.description));
- const endpoint=el('div','endpoint');endpoint.append(el('code','',s.url),el('span','protocol',s.protocol.toUpperCase()));card.append(endpoint,mappingRoute(s));
+ const endpoint=el('div','endpoint');endpoint.append(el('code','',s.url),el('span','protocol',s.protocol.toUpperCase()));card.append(endpoint,mappingRoute(s));loginHelp(card,s);
  const actions=el('div','actions');
  if(['http','https'].includes(s.protocol)&&s.enabled){const a=el('a','primary','打开页面 ↗');a.href=s.url;a.target='_blank';a.rel='noopener noreferrer';a.setAttribute('aria-label','打开'+s.title);actions.append(a)}
  else{const b=el('button','primary',s.protocol==='smb'?'复制 Finder 连接地址':'复制连接地址');b.onclick=()=>copy(s.url);actions.append(b)}
