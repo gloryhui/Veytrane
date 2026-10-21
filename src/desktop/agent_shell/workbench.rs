@@ -1,7 +1,7 @@
 //! The original desktop workbench, projected exclusively from Agent IPC DTOs.
 //! This view never opens an identity, task store, network session or transfer service.
 use super::*;
-use crate::node::config::SpeedtestDirection as AgentSpeedDirection;
+use crate::node::core::config::SpeedtestDirection as AgentSpeedDirection;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Page {
@@ -250,17 +250,17 @@ impl AgentShell {
         cx.spawn(async move |shell, cx| {
             let result = background
                 .spawn(async move {
-                    let source =
-                        crate::node::config::AppPaths::discover().map_err(|e| e.to_string())?;
+                    let source = crate::node::core::config::AppPaths::discover()
+                        .map_err(|e| e.to_string())?;
                     if let Some(expected) = expected.filter(|_| import) {
-                        crate::node::migration::import(
+                        crate::node::adapters::migration::import(
                             &destination,
                             &source.config_file(),
                             &source.data_dir,
                             &expected,
                         )
                     } else {
-                        crate::node::migration::preview(
+                        crate::node::adapters::migration::preview(
                             &destination,
                             &source.config_file(),
                             &source.data_dir,
@@ -536,7 +536,7 @@ impl AgentShell {
             .items_center()
             .justify_between()
             .gap_3()
-            .child(DesktopShell::brand_identity(
+            .child(crate::desktop::ui::branding::brand_identity(
                 "P2P File",
                 "设备之间，直接传文件",
             ))
@@ -1464,7 +1464,7 @@ impl AgentShell {
                     && value
                         .downcast_ref::<gpui::ExternalPaths>()
                         .is_some_and(|paths| {
-                            crate::node::drop_send::validate_paths(paths.paths()).is_ok()
+                            crate::node::core::drop_send::validate_paths(paths.paths()).is_ok()
                         })
             })
             .on_drop(cx.listener(|s, paths: &gpui::ExternalPaths, _, cx| {
@@ -1609,7 +1609,7 @@ impl AgentShell {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(DesktopShell::brand_identity(
+                    .child(crate::desktop::ui::branding::brand_identity(
                         "P2P File 设置",
                         "个性化设置你的使用体验",
                     ))
@@ -1710,7 +1710,7 @@ impl AgentShell {
                         ui_components::secondary_button("保存并应用限速", enabled).on_mouse_up(
                             MouseButton::Left,
                             cx.listener(|s, _, _, cx| {
-                                match crate::node::bandwidth::FileLimits::parse(
+                                match crate::node::core::bandwidth::FileLimits::parse(
                                     &Self::text(&s.ui.upload, cx),
                                     &Self::text(&s.ui.download, cx),
                                 ) {

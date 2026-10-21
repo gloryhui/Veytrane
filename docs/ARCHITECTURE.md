@@ -1,5 +1,7 @@
 # 架构设计
 
+> 本文为历史网络设计记录。当前源码分层与保留/清理决定见 [仓库分层说明](REPOSITORY_LAYOUT.md)。
+
 > 后续统一节点架构见 [ARCH-NODE-001](NODE_ARCHITECTURE.md)，实施阶段及验收见
 > [PLAN-NODE-001](NODE_MIGRATION_PLAN.md)。本文件保留既有阶段的设计记录；当前能力须结合源码和各功能文档核对，目标设计不代表已完成迁移。
 
@@ -26,7 +28,6 @@ src/
     stun.rs         STUN Binding 请求，获取公网映射地址
     classify.rs     NAT mapping 判定（EIM / ADM / APDM / 证据不足）
     punch.rs       打洞状态机（同时开启 + 令牌鉴权）
-    portmap.rs     UPnP IGD / NAT-PMP 主动端口映射（空壳）
   net/            把上面这些串起来：STUN → 候选收集 → 信令 → 打洞 → QUIC 端点
   relay/          可选认证 UDP Relay：pairing admission、原样 datagram 转发与客户端兜底
   tunnel/         通用 TCP 端口转发 + 文件直推 + 测速分发 + 空闲重打洞
@@ -34,7 +35,6 @@ src/
   transport/      数据通道（QUIC）
   protocol/       应用层协议：握手、文件清单、分片请求、控制消息
   transfer/       发送端 / 接收端、断点续传、进度
-  crypto/         BLAKE3 分片校验、证书指纹校验
   storage/        临时文件与续传状态持久化
 ```
 

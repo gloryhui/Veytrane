@@ -1,0 +1,1103 @@
+{
+  "version": 1,
+  "date": "2026-10-21",
+  "modules": [
+    {
+      "id": "desktop",
+      "title": "桌面工作台",
+      "tag": "PRESENTATION",
+      "path": "src/desktop/agent_shell.rs",
+      "summary": "默认 GPUI 桌面通过 IPC 管理已有 Agent，多个窗口共享一个模型。",
+      "rules": [
+        "不持有私钥、任务库或 P2P 连接。",
+        "关闭窗口与停止后台是独立操作。"
+      ],
+      "parts": [
+        {
+          "name": "工作台",
+          "path": "src/desktop/agent_shell/workbench.rs",
+          "detail": "文件任务、配置、诊断与服务入口。"
+        },
+        {
+          "name": "窗口注册",
+          "path": "src/desktop/agent_shell/windows.rs",
+          "detail": "二级原生窗口共用 AgentShell。"
+        },
+        {
+          "name": "托盘宿主",
+          "path": "src/desktop/agent_shell/tray_host.rs",
+          "detail": "通过管理 API 投影后台状态。"
+        }
+      ],
+      "section": "desktop",
+      "drill": "desktop"
+    },
+    {
+      "id": "cli",
+      "title": "管理 CLI",
+      "tag": "ENTRY POINT",
+      "path": "src/bin/p2p-node.rs",
+      "summary": "p2p-node 提供状态查询、配置和离线生命周期入口。",
+      "rules": [
+        "在线动作使用统一管理契约。",
+        "离线迁移必须检查所有权和预览指纹。"
+      ],
+      "parts": [
+        {
+          "name": "CLI 适配",
+          "path": "src/node/adapters/cli.rs",
+          "detail": "解析命令并调用管理客户端。"
+        },
+        {
+          "name": "迁移",
+          "path": "src/node/adapters/migration.rs",
+          "detail": "停机后导入身份、配置和任务。"
+        }
+      ],
+      "section": "topology"
+    },
+    {
+      "id": "web",
+      "title": "Web 管理网关",
+      "tag": "HTTP ADAPTER",
+      "path": "src/node/adapters/web.rs",
+      "summary": "浏览器发来的管理请求经 AgentClient 转为本地 IPC。",
+      "rules": [
+        "仅监听 loopback，API 需要管理令牌。",
+        "文件字节和 TCP 负载不经过管理 HTTP。"
+      ],
+      "parts": [
+        {
+          "name": "HTTP 桥接",
+          "path": "src/node/adapters/web.rs",
+          "detail": "校验请求并转发到 Agent。"
+        },
+        {
+          "name": "内嵌管理页",
+          "path": "src/node/adapters/web.html",
+          "detail": "草稿、配置提交与节点身份展示。"
+        }
+      ],
+      "section": "topology"
+    },
+    {
+      "id": "products",
+      "title": "Sub2API 专用版",
+      "tag": "PRODUCT COMPOSITION",
+      "path": "src/node/products/sub2api.rs",
+      "summary": "固定客户端和隔离网关直接装配核心，使用独立身份目录。",
+      "rules": [
+        "不经过通用 Agent 管理 IPC。",
+        "固定服务目标，连接授权与应用账号分开。"
+      ],
+      "parts": [
+        {
+          "name": "专用组合",
+          "path": "src/node/products/sub2api.rs",
+          "detail": "客户端监听、网关内存 ACL 和服务就绪探测。"
+        },
+        {
+          "name": "恢复策略",
+          "path": "src/node/products/recovery.rs",
+          "detail": "有界重试、通道健康与重建决策。"
+        },
+        {
+          "name": "专用入口",
+          "path": "src/bin/sub2api-client.rs",
+          "detail": "无配置参数启动。"
+        }
+      ],
+      "section": "distribution"
+    },
+    {
+      "id": "api",
+      "title": "管理 API / 客户端",
+      "tag": "CONTRACT + CLIENT",
+      "path": "src/node/api/mod.rs",
+      "summary": "所有在线管理入口共用请求、响应、超时与认证客户端。",
+      "rules": [
+        "API 不依赖 Agent 的运行实现。",
+        "命令 accepted 不等于文件已完成。"
+      ],
+      "parts": [
+        {
+          "name": "协议 DTO",
+          "path": "src/node/api/protocol.rs",
+          "detail": "Command、Request、Response 与帧限制。"
+        },
+        {
+          "name": "AgentClient",
+          "path": "src/node/api/client.rs",
+          "detail": "经 local transport 执行请求。"
+        },
+        {
+          "name": "构建信息",
+          "path": "src/node/api/build_info.rs",
+          "detail": "统一版本和源码状态元数据。"
+        }
+      ],
+      "section": "protocol"
+    },
+    {
+      "id": "local",
+      "title": "本地 IPC 与路径",
+      "tag": "OS BOUNDARY",
+      "path": "src/node/local/mod.rs",
+      "summary": "定位当前用户的数据目录并建立受本机身份保护的 socket / named pipe。",
+      "rules": [
+        "本地管理令牌与远端访问密码不同。",
+        "不包含核心业务或前端窗口。"
+      ],
+      "parts": [
+        {
+          "name": "节点路径",
+          "path": "src/node/local/paths.rs",
+          "detail": "配置、令牌与 IPC 地址。"
+        },
+        {
+          "name": "本地传输",
+          "path": "src/node/local/transport.rs",
+          "detail": "Unix socket / Windows named pipe。"
+        },
+        {
+          "name": "私有目录权限",
+          "path": "src/storage/permissions.rs",
+          "detail": "当前 OS 用户权限与 Windows DACL。"
+        }
+      ],
+      "section": "storage"
+    },
+    {
+      "id": "host",
+      "title": "Agent 唯一宿主",
+      "tag": "SINGLE OWNER",
+      "path": "src/node/host/agent.rs",
+      "summary": "一个 Agent 独占一个节点目录与身份，协调业务核心和管理请求。",
+      "rules": [
+        "配置按 revision 协调，不允许多入口覆盖。",
+        "先准备资源，再提交配置和运行策略。"
+      ],
+      "parts": [
+        {
+          "name": "进程宿主",
+          "path": "src/node/host/agent.rs",
+          "detail": "启动、所有权、命令执行和请求去重。"
+        },
+        {
+          "name": "配置协调",
+          "path": "src/node/host/configuration.rs",
+          "detail": "幂等配置事务与运行状态发布。"
+        },
+        {
+          "name": "转发监听",
+          "path": "src/node/host/forwarding.rs",
+          "detail": "准备、切换与回收 TCP listener。"
+        },
+        {
+          "name": "托管恢复",
+          "path": "src/node/host/recovery.rs",
+          "detail": "Mac managed 模式恢复信号。"
+        }
+      ],
+      "section": "operations"
+    },
+    {
+      "id": "core",
+      "title": "共享节点核心",
+      "tag": "HEADLESS CORE",
+      "path": "src/node/core/mod.rs",
+      "summary": "唯一业务运行时：会话、授权、文件、服务、测速和持久任务模型。",
+      "rules": [
+        "不反向依赖 host、api、local、adapters、products 或 desktop。",
+        "通用 Agent 与专用版共享实现，各自持有运行时。"
+      ],
+      "parts": [
+        {
+          "name": "控制契约",
+          "path": "src/node/core/control.rs",
+          "detail": "NodeControl、事件与状态快照。"
+        },
+        {
+          "name": "当前配置",
+          "path": "src/node/core/settings.rs",
+          "detail": "NodeSettings、ConfigRecord 和 CommitOptions。"
+        },
+        {
+          "name": "会话编排",
+          "path": "src/node/core/session.rs",
+          "detail": "连接代际、重连、授权与流分发。"
+        }
+      ],
+      "section": "core",
+      "drill": "core"
+    },
+    {
+      "id": "network",
+      "title": "直连网络 / QUIC",
+      "tag": "TRANSPORT",
+      "path": "src/net/mod.rs",
+      "summary": "发现候选后进行双栈竞速、打洞和身份绑定，业务数据使用加密 QUIC。",
+      "rules": [
+        "信令断流不等于既有业务流立即失效。",
+        "UPnP / NAT-PMP / PCP 仍未实现，占位代码已删除。"
+      ],
+      "parts": [
+        {
+          "name": "路径竞速",
+          "path": "src/net/race.rs",
+          "detail": "代际与竞速结果的发布门禁。"
+        },
+        {
+          "name": "QUIC",
+          "path": "src/transport/quic.rs",
+          "detail": "连接和加密数据通道。"
+        },
+        {
+          "name": "身份握手",
+          "path": "src/transport/handshake.rs",
+          "detail": "签名绑定当前会话。"
+        },
+        {
+          "name": "STUN / 打洞",
+          "path": "src/nat/mod.rs",
+          "detail": "地址探测与 UDP 同端口穿透。"
+        }
+      ],
+      "section": "protocol"
+    },
+    {
+      "id": "peer",
+      "title": "远端对等节点",
+      "tag": "REMOTE NODE",
+      "path": "src/node/core/services.rs",
+      "summary": "远端运行同一业务核心，在接收业务流时独立检查当前授权。",
+      "rules": [
+        "连接通过认证不等于获得所有服务。",
+        "远端只开放明确配置的目标与资源。"
+      ],
+      "parts": [
+        {
+          "name": "资源授权",
+          "path": "src/node/core/authorization.rs",
+          "detail": "按 peer 区分文件、测速与服务权限。"
+        },
+        {
+          "name": "服务目录",
+          "path": "src/node/core/services.rs",
+          "detail": "用 service ID 查询并申请 TCP 流。"
+        }
+      ],
+      "section": "topology"
+    },
+    {
+      "id": "signal",
+      "title": "信令 / 短 ID",
+      "tag": "DISCOVERY",
+      "path": "src/discovery/signal.rs",
+      "summary": "负责节点登记、短 ID 查找和候选交换，帮助设备找到彼此。",
+      "rules": [
+        "直连成功时不承载文件或 TCP 业务字节。",
+        "短 ID 是寻址工具，不是访问凭据。"
+      ],
+      "parts": [
+        {
+          "name": "信令",
+          "path": "src/discovery/signal.rs",
+          "detail": "登记、心跳、查找与交换候选。"
+        },
+        {
+          "name": "短 ID",
+          "path": "src/discovery/short_id.rs",
+          "detail": "短 ID 分配和查找。"
+        }
+      ],
+      "section": "protocol"
+    },
+    {
+      "id": "relay",
+      "title": "可选 UDP Relay",
+      "tag": "ENCRYPTED FALLBACK",
+      "path": "src/relay/mod.rs",
+      "summary": "配置 Relay 后，直连未及时认证成功时允许延迟尝试中继。",
+      "rules": [
+        "仅转发端到端加密数据报。",
+        "Relay 票据不替代节点业务授权。"
+      ],
+      "parts": [
+        {
+          "name": "客户端",
+          "path": "src/relay/client.rs",
+          "detail": "Relay admission 与直连竞速配合。"
+        },
+        {
+          "name": "服务端",
+          "path": "src/relay/server.rs",
+          "detail": "配对、额度和超时。"
+        }
+      ],
+      "section": "protocol"
+    },
+    {
+      "id": "storage",
+      "title": "安全存储与身份",
+      "tag": "FOUNDATION",
+      "path": "src/storage/mod.rs",
+      "summary": "持久化、目录权限和安全路径规则下沉到通用基础设施。",
+      "rules": [
+        "不反向依赖 node 或 desktop。",
+        "身份与任务所有权在上层通过锁保护。"
+      ],
+      "parts": [
+        {
+          "name": "原子替换",
+          "path": "src/storage/atomic.rs",
+          "detail": "区分提交前失败与提交后持久化警告。"
+        },
+        {
+          "name": "句柄相对访问",
+          "path": "src/storage/secure_fs.rs",
+          "detail": "阻止路径逃逸和链接替换。"
+        },
+        {
+          "name": "路径约束",
+          "path": "src/storage/relative_path.rs",
+          "detail": "统一跨平台相对路径拒绝规则。"
+        },
+        {
+          "name": "身份与租约",
+          "path": "src/identity.rs",
+          "detail": "Ed25519 身份和跨入口身份租约。"
+        }
+      ],
+      "section": "storage"
+    },
+    {
+      "id": "legacy",
+      "title": "显式旧桌面",
+      "tag": "COMPATIBILITY",
+      "path": "src/desktop/legacy/mod.rs",
+      "summary": "只有 --legacy 进入内嵌旧运行时，默认桌面不再借用这个大窗口。",
+      "rules": [
+        "保留仍在用的功能和协议回归。",
+        "已移除 29 个领域转发包装文件，直接使用 core。"
+      ],
+      "parts": [
+        {
+          "name": "旧窗口",
+          "path": "src/desktop/legacy/mod.rs",
+          "detail": "显式旧入口。"
+        },
+        {
+          "name": "旧后台所有权",
+          "path": "src/desktop/legacy/background.rs",
+          "detail": "旧窗口生命周期与后台协作。"
+        },
+        {
+          "name": "旧进程回归",
+          "path": "src/desktop/legacy/e2e.rs",
+          "detail": "传输、暂停、目录和崩溃恢复。"
+        }
+      ],
+      "section": "boundaries"
+    },
+    {
+      "id": "adapters",
+      "title": "CLI / HTTP / 迁移",
+      "tag": "APPLICATION ADAPTERS",
+      "path": "src/node/adapters/mod.rs",
+      "summary": "面向用户的管理协议适配与显式离线导入。",
+      "rules": [
+        "在线入口使用统一客户端。",
+        "离线操作与在线配置协调的所有权边界分开。"
+      ],
+      "parts": [
+        {
+          "name": "管理 CLI",
+          "path": "src/node/adapters/cli.rs",
+          "detail": "命令行适配。"
+        },
+        {
+          "name": "Web",
+          "path": "src/node/adapters/web.rs",
+          "detail": "HTTP 管理桥。"
+        },
+        {
+          "name": "迁移",
+          "path": "src/node/adapters/migration.rs",
+          "detail": "预览、校验与导入。"
+        }
+      ],
+      "section": "topology"
+    },
+    {
+      "id": "session",
+      "title": "控制与会话",
+      "tag": "CORE / ORCHESTRATION",
+      "path": "src/node/core/session.rs",
+      "summary": "维护多 peer 代际、连接状态、认证和唯一入站业务流分发。",
+      "rules": [
+        "一个入站接纳者分派 File / Service / Speed。",
+        "旧代际结果不得覆盖当前连接。"
+      ],
+      "parts": [
+        {
+          "name": "控制门面",
+          "path": "src/node/core/control.rs",
+          "detail": "命令、事件与有界快照。"
+        },
+        {
+          "name": "会话循环",
+          "path": "src/node/core/session.rs",
+          "detail": "信令与 QUIC 生命周期。"
+        },
+        {
+          "name": "统一协议",
+          "path": "src/node/core/wire.rs",
+          "detail": "能力协商和流前缀。"
+        },
+        {
+          "name": "流分发",
+          "path": "src/node/core/dispatch.rs",
+          "detail": "按业务类型进入处理器。"
+        }
+      ],
+      "section": "core"
+    },
+    {
+      "id": "auth",
+      "title": "身份与资源授权",
+      "tag": "CORE / SECURITY",
+      "path": "src/node/core/authorization.rs",
+      "summary": "身份握手、密码证明、可信设备、方向与资源授权共同构成业务门禁。",
+      "rules": [
+        "认证、发送/接收权限、服务权限分层判断。",
+        "撤销后继续检查存量连接上的新业务流。"
+      ],
+      "parts": [
+        {
+          "name": "密码认证",
+          "path": "src/node/core/remote_auth.rs",
+          "detail": "连接绑定的访问证明。"
+        },
+        {
+          "name": "资源策略",
+          "path": "src/node/core/authorization.rs",
+          "detail": "文件、测速和服务权限。"
+        },
+        {
+          "name": "可信设备",
+          "path": "src/node/core/trusted_devices.rs",
+          "detail": "持久设备记录与授权来源。"
+        }
+      ],
+      "section": "protocol"
+    },
+    {
+      "id": "files",
+      "title": "文件与目录任务",
+      "tag": "CORE / FILES",
+      "path": "src/node/core/transfer.rs",
+      "summary": "持久任务、并发调度、增量预览、暂停续传与安全发布。",
+      "rules": [
+        "完成以接收端持久回执为准。",
+        "预览结果和 accepted 均不是完成证明。"
+      ],
+      "parts": [
+        {
+          "name": "传输执行",
+          "path": "src/node/core/transfer.rs",
+          "detail": "文件流与任务状态机。"
+        },
+        {
+          "name": "增量预览",
+          "path": "src/node/core/incremental.rs",
+          "detail": "比较目录并在执行时再次校验。"
+        },
+        {
+          "name": "任务队列",
+          "path": "src/node/core/queue.rs",
+          "detail": "并发、公平性与限流。"
+        },
+        {
+          "name": "安全发布",
+          "path": "src/node/core/publish.rs",
+          "detail": "目录事务、碰撞备份和回执。"
+        }
+      ],
+      "section": "flows"
+    },
+    {
+      "id": "services",
+      "title": "TCP 服务与转发",
+      "tag": "CORE / SERVICES",
+      "path": "src/node/core/services.rs",
+      "summary": "根据 service ID 和当前 peer 权限，将 QUIC 业务流接入固定 TCP 目标。",
+      "rules": [
+        "长连接不持续占用服务协商配额。",
+        "TCP 断开后需要新连接，不透明续接字节流。"
+      ],
+      "parts": [
+        {
+          "name": "服务控制",
+          "path": "src/node/core/services.rs",
+          "detail": "目录与开流授权。"
+        },
+        {
+          "name": "TCP 搬运",
+          "path": "src/node/core/tunnel.rs",
+          "detail": "双向字节传输和资源限制。"
+        }
+      ],
+      "section": "flows"
+    },
+    {
+      "id": "speed",
+      "title": "测速业务",
+      "tag": "CORE / SPEED",
+      "path": "src/node/core/speed.rs",
+      "summary": "在授权后的独立流测量传输率、RTT 和双向结果。",
+      "rules": [
+        "测速与文件限速分别管理。",
+        "业务通道可用不代表全部公网场景验收完成。"
+      ],
+      "parts": [
+        {
+          "name": "测速运行",
+          "path": "src/node/core/speed.rs",
+          "detail": "所有权、取消和结果快照。"
+        }
+      ],
+      "section": "flows"
+    },
+    {
+      "id": "state",
+      "title": "配置与任务模型",
+      "tag": "CORE / STATE",
+      "path": "src/node/core/settings.rs",
+      "summary": "配置、任务模型和恢复状态属于核心契约，不依赖宿主协调器。",
+      "rules": [
+        "CommitOptions 已下沉到核心。",
+        "历史 DesktopConfig 仍由旧桌面和迁移读取。"
+      ],
+      "parts": [
+        {
+          "name": "节点设置",
+          "path": "src/node/core/settings.rs",
+          "detail": "node.json 的 schema 和提交记录。"
+        },
+        {
+          "name": "旧配置兼容",
+          "path": "src/node/core/config.rs",
+          "detail": "旧偏好和共享规则校验。"
+        },
+        {
+          "name": "任务存储",
+          "path": "src/node/core/task_store.rs",
+          "detail": "任务、检查点和回执。"
+        },
+        {
+          "name": "投影",
+          "path": "src/node/core/snapshot.rs",
+          "detail": "权威状态的轻量展示模型。"
+        }
+      ],
+      "section": "storage"
+    },
+    {
+      "id": "ui",
+      "title": "共享界面组件",
+      "tag": "DESKTOP / UI",
+      "path": "src/desktop/ui/mod.rs",
+      "summary": "新旧桌面共用的输入、主题、按钮、品牌和格式化。",
+      "rules": [
+        "不引用 AgentShell 或旧 DesktopShell。",
+        "组件不拥有业务运行时。"
+      ],
+      "parts": [
+        {
+          "name": "输入与 IME",
+          "path": "src/desktop/ui/text_field.rs",
+          "detail": "光标、UTF-16、密码与粘贴。"
+        },
+        {
+          "name": "组件与主题",
+          "path": "src/desktop/ui/components.rs",
+          "detail": "统一视觉组件。"
+        },
+        {
+          "name": "品牌",
+          "path": "src/desktop/ui/branding.rs",
+          "detail": "新旧窗口共用图标与标题。"
+        }
+      ],
+      "section": "desktop"
+    },
+    {
+      "id": "platform",
+      "title": "原生窗口与托盘",
+      "tag": "DESKTOP / PLATFORM",
+      "path": "src/desktop/platform/mod.rs",
+      "summary": "跨桌面入口共享窗口显隐、系统托盘和展示状态。",
+      "rules": [
+        "平台工具不反向引用窗口所有者。",
+        "后台所有权继续留在对应宿主。"
+      ],
+      "parts": [
+        {
+          "name": "窗口操作",
+          "path": "src/desktop/platform/window.rs",
+          "detail": "macOS、Windows、X11 可见性控制。"
+        },
+        {
+          "name": "托盘",
+          "path": "src/desktop/platform/tray.rs",
+          "detail": "原生菜单和事件。"
+        },
+        {
+          "name": "展示状态",
+          "path": "src/desktop/platform/status.rs",
+          "detail": "无运行时所有权的状态投影。"
+        }
+      ],
+      "section": "desktop"
+    }
+  ],
+  "views": [
+    {
+      "id": "system",
+      "title": "系统全景",
+      "description": "管理请求进入唯一宿主；业务数据经核心与 QUIC 到达远端。图中只呈现主要关系，箭头不表示部署是否在线。",
+      "nodes": [
+        {
+          "id": "desktop",
+          "x": 40,
+          "y": 65
+        },
+        {
+          "id": "cli",
+          "x": 330,
+          "y": 65
+        },
+        {
+          "id": "web",
+          "x": 620,
+          "y": 65
+        },
+        {
+          "id": "products",
+          "x": 910,
+          "y": 65
+        },
+        {
+          "id": "local",
+          "x": 40,
+          "y": 245
+        },
+        {
+          "id": "api",
+          "x": 330,
+          "y": 245
+        },
+        {
+          "id": "signal",
+          "x": 620,
+          "y": 245
+        },
+        {
+          "id": "relay",
+          "x": 910,
+          "y": 245
+        },
+        {
+          "id": "legacy",
+          "x": 40,
+          "y": 425
+        },
+        {
+          "id": "host",
+          "x": 330,
+          "y": 425
+        },
+        {
+          "id": "network",
+          "x": 620,
+          "y": 425
+        },
+        {
+          "id": "peer",
+          "x": 910,
+          "y": 425
+        },
+        {
+          "id": "storage",
+          "x": 40,
+          "y": 605
+        },
+        {
+          "id": "core",
+          "x": 330,
+          "y": 605
+        }
+      ],
+      "edges": [
+        {
+          "source": "desktop",
+          "target": "api",
+          "kind": "control"
+        },
+        {
+          "source": "cli",
+          "target": "api",
+          "kind": "control"
+        },
+        {
+          "source": "web",
+          "target": "api",
+          "kind": "control"
+        },
+        {
+          "source": "api",
+          "target": "host",
+          "kind": "control"
+        },
+        {
+          "source": "api",
+          "target": "local",
+          "kind": "dependency"
+        },
+        {
+          "source": "host",
+          "target": "core",
+          "kind": "dependency"
+        },
+        {
+          "source": "legacy",
+          "target": "core",
+          "kind": "dependency"
+        },
+        {
+          "source": "core",
+          "target": "storage",
+          "kind": "store"
+        },
+        {
+          "source": "core",
+          "target": "network",
+          "kind": "data"
+        },
+        {
+          "source": "network",
+          "target": "peer",
+          "kind": "data"
+        },
+        {
+          "source": "signal",
+          "target": "network",
+          "kind": "control"
+        },
+        {
+          "source": "relay",
+          "target": "peer",
+          "kind": "data"
+        },
+        {
+          "source": "products",
+          "target": "core",
+          "kind": "dependency"
+        }
+      ]
+    },
+    {
+      "id": "layers",
+      "title": "节点分层",
+      "description": "箭头表示代码依赖：入口与宿主依赖核心契约；核心不会反向依赖宿主、IPC 客户端或界面。",
+      "nodes": [
+        {
+          "id": "adapters",
+          "x": 40,
+          "y": 95
+        },
+        {
+          "id": "products",
+          "x": 910,
+          "y": 95
+        },
+        {
+          "id": "api",
+          "x": 330,
+          "y": 275
+        },
+        {
+          "id": "host",
+          "x": 620,
+          "y": 275
+        },
+        {
+          "id": "local",
+          "x": 40,
+          "y": 455
+        },
+        {
+          "id": "core",
+          "x": 620,
+          "y": 455
+        },
+        {
+          "id": "storage",
+          "x": 330,
+          "y": 635
+        },
+        {
+          "id": "network",
+          "x": 910,
+          "y": 635
+        }
+      ],
+      "edges": [
+        {
+          "source": "adapters",
+          "target": "api",
+          "kind": "dependency"
+        },
+        {
+          "source": "adapters",
+          "target": "host",
+          "kind": "dependency"
+        },
+        {
+          "source": "products",
+          "target": "host",
+          "kind": "dependency"
+        },
+        {
+          "source": "products",
+          "target": "core",
+          "kind": "dependency"
+        },
+        {
+          "source": "api",
+          "target": "local",
+          "kind": "dependency"
+        },
+        {
+          "source": "api",
+          "target": "core",
+          "kind": "dependency"
+        },
+        {
+          "source": "host",
+          "target": "api",
+          "kind": "dependency"
+        },
+        {
+          "source": "host",
+          "target": "core",
+          "kind": "dependency"
+        },
+        {
+          "source": "host",
+          "target": "local",
+          "kind": "dependency"
+        },
+        {
+          "source": "core",
+          "target": "storage",
+          "kind": "store"
+        },
+        {
+          "source": "core",
+          "target": "network",
+          "kind": "dependency"
+        },
+        {
+          "source": "local",
+          "target": "storage",
+          "kind": "store"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "title": "核心内部",
+      "description": "会话协调认证、状态和业务分派；文件、TCP、测速使用独立业务流。这里展示职责流，不声称核心内部完全无相互依赖。",
+      "nodes": [
+        {
+          "id": "host",
+          "x": 40,
+          "y": 85
+        },
+        {
+          "id": "products",
+          "x": 910,
+          "y": 85
+        },
+        {
+          "id": "session",
+          "x": 475,
+          "y": 85
+        },
+        {
+          "id": "auth",
+          "x": 40,
+          "y": 295
+        },
+        {
+          "id": "state",
+          "x": 910,
+          "y": 295
+        },
+        {
+          "id": "files",
+          "x": 330,
+          "y": 475
+        },
+        {
+          "id": "services",
+          "x": 620,
+          "y": 475
+        },
+        {
+          "id": "speed",
+          "x": 910,
+          "y": 475
+        },
+        {
+          "id": "storage",
+          "x": 330,
+          "y": 655
+        },
+        {
+          "id": "network",
+          "x": 620,
+          "y": 655
+        }
+      ],
+      "edges": [
+        {
+          "source": "host",
+          "target": "session",
+          "kind": "control"
+        },
+        {
+          "source": "products",
+          "target": "session",
+          "kind": "control"
+        },
+        {
+          "source": "session",
+          "target": "auth",
+          "kind": "control"
+        },
+        {
+          "source": "session",
+          "target": "state",
+          "kind": "control"
+        },
+        {
+          "source": "session",
+          "target": "files",
+          "kind": "data"
+        },
+        {
+          "source": "session",
+          "target": "services",
+          "kind": "data"
+        },
+        {
+          "source": "session",
+          "target": "speed",
+          "kind": "data"
+        },
+        {
+          "source": "files",
+          "target": "storage",
+          "kind": "store"
+        },
+        {
+          "source": "files",
+          "target": "network",
+          "kind": "data"
+        },
+        {
+          "source": "services",
+          "target": "network",
+          "kind": "data"
+        },
+        {
+          "source": "speed",
+          "target": "network",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "id": "desktop",
+      "title": "桌面边界",
+      "description": "默认桌面通过管理 API 操作 Agent，显式旧桌面直接使用 core；两者只共享 UI 与平台工具。",
+      "nodes": [
+        {
+          "id": "desktop",
+          "x": 185,
+          "y": 100
+        },
+        {
+          "id": "legacy",
+          "x": 765,
+          "y": 100
+        },
+        {
+          "id": "ui",
+          "x": 330,
+          "y": 320
+        },
+        {
+          "id": "platform",
+          "x": 620,
+          "y": 320
+        },
+        {
+          "id": "api",
+          "x": 185,
+          "y": 560
+        },
+        {
+          "id": "core",
+          "x": 765,
+          "y": 560
+        }
+      ],
+      "edges": [
+        {
+          "source": "desktop",
+          "target": "ui",
+          "kind": "dependency"
+        },
+        {
+          "source": "desktop",
+          "target": "platform",
+          "kind": "dependency"
+        },
+        {
+          "source": "legacy",
+          "target": "ui",
+          "kind": "dependency"
+        },
+        {
+          "source": "legacy",
+          "target": "platform",
+          "kind": "dependency"
+        },
+        {
+          "source": "desktop",
+          "target": "api",
+          "kind": "control"
+        },
+        {
+          "source": "legacy",
+          "target": "core",
+          "kind": "dependency"
+        }
+      ]
+    }
+  ]
+}

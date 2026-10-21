@@ -1,6 +1,6 @@
 //! Dedicated password-authorized Sub2API gateway, isolated from the user's node.
 use clap::Parser;
-use p2p_file::node::restricted_sub2api;
+use p2p_file::node::products::sub2api as restricted_sub2api;
 use std::path::PathBuf;
 
 #[derive(Parser)]

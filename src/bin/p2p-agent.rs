@@ -1,6 +1,6 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 use clap::Parser;
-use p2p_file::node::{agent, agent_paths::AgentPaths, management_cli};
+use p2p_file::node::{adapters::cli as management_cli, host::agent, local::paths::AgentPaths};
 use std::path::PathBuf;
 #[derive(Parser)]
 #[command(about = "无图形界面的 P2P 节点宿主", version)]
@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
     let args = Args::parse();
     if args.build_info {
-        println!("{}", p2p_file::node::build_info::value("p2p-agent"));
+        println!("{}", p2p_file::node::api::build_info::value("p2p-agent"));
         return Ok(());
     }
     let root = match args.data_dir {

@@ -1,6 +1,6 @@
 //! Desktop lifetime only. The Agent remains independent until explicit Quit.
 use super::{workbench::Page, *};
-use background::{CoreState, StatusSnapshot};
+use status::{CoreState, StatusSnapshot};
 use tray::{NativeTray, TrayAction};
 #[cfg(all(test, target_os = "windows"))]
 #[path = "tray_host_tests.rs"]
@@ -73,7 +73,7 @@ fn close_main(window: &mut Window, cx: &mut App) -> bool {
         .tray
         .as_ref()
         .is_some_and(NativeTray::available);
-    if available && background::hide_window(window).is_ok() {
+    if available && native_window::hide_window(window).is_ok() {
         let mut children = Vec::new();
         for handle in cx.windows() {
             if handle.window_id() == window.window_handle().window_id() {
@@ -83,7 +83,7 @@ fn close_main(window: &mut Window, cx: &mut App) -> bool {
                 .update(cx, |_, child, _| {
                     #[cfg(any(target_os = "windows", target_os = "macos"))]
                     {
-                        background::hide_window(child)
+                        native_window::hide_window(child)
                     }
                     #[cfg(target_os = "linux")]
                     {
@@ -115,10 +115,10 @@ pub(super) fn show_main(cx: &mut App) {
     let main = runtime.main;
     let children = runtime.hidden_children.clone();
     for handle in children {
-        let _ = handle.update(cx, |_, window, _| background::show_window(window));
+        let _ = handle.update(cx, |_, window, _| native_window::show_window(window));
     }
     let _ = main.update(cx, |_, window, cx| {
-        background::show_window(window);
+        native_window::show_window(window);
         window.activate_window();
         cx.activate(true);
     });
@@ -221,9 +221,9 @@ fn handle_action(action: TrayAction, cx: &mut App) {
 }
 
 async fn stopped(paths: &AgentPaths) -> bool {
-    crate::node::management_cli::run(crate::node::management_cli::Args {
+    crate::node::adapters::cli::run(crate::node::adapters::cli::Args {
         data_dir: Some(paths.root.clone()),
-        command: crate::node::management_cli::Action::OwnershipStatus,
+        command: crate::node::adapters::cli::Action::OwnershipStatus,
     })
     .await
     .is_ok()

@@ -7,84 +7,1270 @@
 <style>
 :root{color-scheme:light;--bg:#f5f7fb;--panel:#fff;--ink:#19253b;--muted:#52647d;--line:#dce3ee;--blue:#275fe8;--soft:#edf3ff;--green:#14694b;--greenbg:#eaf7f0;--amber:#875b09;--amberbg:#fff6e3;--shadow:0 12px 40px #23335408}*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:30px}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.75 "Segoe UI","Microsoft YaHei",sans-serif}a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}button{font:inherit;cursor:pointer}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var(--blue);outline-offset:4px}button{color:var(--ink)}.layout{display:grid;grid-template-columns:240px minmax(0,1fr);max-width:1600px;margin:auto}.sidebar{position:sticky;top:0;height:100vh;padding:36px 24px;border-right:1px solid var(--line);overflow:auto}.brand{font-size:22px;font-weight:750;letter-spacing:-.6px}.brand span{color:var(--blue)}.sidebar small{display:block;color:var(--muted);margin:5px 0 30px}.sidebar nav a{display:block;border-radius:8px;padding:8px 12px;margin:4px 0;color:var(--muted);font-size:14px}.sidebar nav a.active{background:var(--soft);color:var(--blue);font-weight:650}.side-footer{margin-top:30px;padding-top:20px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}main{padding:48px 52px 60px;min-width:0}header{margin-bottom:35px}.eyebrow{font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--blue);font-weight:700}h1{font-size:42px;line-height:1.25;letter-spacing:-1.6px;margin:12px 0 18px}h2{font-size:26px;line-height:1.4;margin:0 0 16px;letter-spacing:-.5px}h3{font-size:17px;margin:0 0 10px;line-height:1.5}p{margin:8px 0 16px}.lead{font-size:18px;max-width:850px;color:var(--muted)}.meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}.badge{padding:3px 10px;border:1px solid var(--line);border-radius:30px;font-size:12px;color:var(--muted);background:var(--panel)}.badge.ok{color:var(--green);background:var(--greenbg);border-color:transparent}.badge.warn{color:var(--amber);background:var(--amberbg);border-color:transparent}.tools{display:flex;gap:10px;margin-top:20px}.btn{border:1px solid var(--line);background:var(--panel);padding:7px 14px;border-radius:8px;font-size:13px}.btn:hover{border-color:var(--blue)}section{margin:38px 0 54px;scroll-margin-top:28px}.section-title{display:flex;gap:14px;align-items:baseline}.index{font:12px Consolas,monospace;color:var(--blue)}.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:24px;box-shadow:var(--shadow);min-width:0}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.two{grid-template-columns:repeat(2,minmax(0,1fr))}.card p{color:var(--muted);font-size:14px;margin-bottom:0}.card .label{color:var(--blue);font:12px Consolas,monospace;margin-bottom:8px}.callout{border-left:3px solid var(--blue);background:var(--soft);border-radius:0 10px 10px 0;padding:14px 18px;margin:18px 0;font-size:14px}.callout.warn{border-color:var(--amber);background:var(--amberbg)}code{font:13px/1.65 Consolas,"Microsoft YaHei",monospace;overflow-wrap:anywhere;background:var(--soft);padding:2px 5px;border-radius:4px}pre{background:var(--bg);border:1px solid var(--line);padding:18px;border-radius:10px;overflow:auto;line-height:1.8;font-size:12px}pre code{background:transparent;padding:0;white-space:pre}.small{font-size:13px;color:var(--muted)}.caption{margin-top:12px;font-size:12px;color:var(--muted)}.scroll-table{overflow:auto;border:1px solid var(--line);border-radius:12px;margin:18px 0}table{border-collapse:collapse;width:100%;font-size:13px;background:var(--panel);min-width:620px}th,td{padding:13px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}th{background:var(--soft);font-weight:650}tr:last-child td{border-bottom:0}td:first-child{font-weight:600}td a{display:inline-block}ul{padding-left:20px;margin:8px 0 12px}li{margin:6px 0}.architecture{display:grid;grid-template-columns:minmax(0,1fr) 285px;gap:20px;align-items:start}.diagram{display:grid;gap:10px}.boundary{border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--panel)}.boundary-title{font-size:11px;letter-spacing:1px;color:var(--muted);margin-bottom:10px}.nodes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.node{display:flex;flex-direction:column;justify-content:center;gap:3px;min-height:76px;text-align:left;border:1px solid var(--line);background:var(--bg);border-radius:9px;padding:10px 12px;font-size:13px;transition:.15s}.node strong{font-size:14px}.node span{font-size:11px;color:var(--muted)}.node:hover{border-color:var(--blue);transform:translateY(-1px)}.node.selected{border-color:var(--blue);background:var(--soft);box-shadow:0 0 0 1px var(--blue)}.node.full{width:100%;margin:8px 0}.agent-boundary{border-color:#9eb6ee;background:var(--soft)}.agent-boundary .node{background:var(--panel)}.flow-label{font-size:12px;color:var(--blue);text-align:center;line-height:1.5}.flow-label b{font-size:18px;padding-right:8px}.detail{position:sticky;top:24px;min-height:300px;background:var(--ink);color:var(--panel);border:0}.detail p,.detail .small{color:#cbd7ee}.detail h3{font-size:20px;margin-top:8px}.detail .detail-tag{font-size:11px;letter-spacing:1px;color:#9cbbff}.detail ul{font-size:13px}.detail a{color:#a9c4ff}.detail code{background:#ffffff16;color:inherit}.detail hr{border:0;border-top:1px solid #ffffff25;margin:20px 0}.tabs{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0}.tab{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:8px 15px;font-size:13px}.tab[aria-selected=true]{background:var(--blue);color:#fff;border-color:var(--blue)}.story{display:grid;grid-template-columns:250px minmax(0,1fr);gap:24px}.steps{display:grid;gap:8px;align-content:start}.step{border:1px solid var(--line);background:var(--bg);padding:12px;border-radius:9px;text-align:left;font-size:13px;display:flex;gap:10px;align-items:center}.step i{font:12px Consolas,monospace;color:var(--muted);font-style:normal}.step[aria-current=step]{border-color:var(--blue);background:var(--soft);color:var(--blue)}.step-detail{padding:8px 0}.step-detail .route{font-size:13px;color:var(--blue);padding-bottom:15px;border-bottom:1px solid var(--line);margin-bottom:18px}.step-detail h3{font-size:21px}.step-detail p{color:var(--muted)}.flow-buttons{display:flex;justify-content:space-between;margin-top:24px}.window-map{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:16px 0}.window{padding:12px;border:1px solid var(--line);border-radius:9px;font-size:13px;background:var(--bg)}.window span{display:block;color:var(--muted);font-size:12px}.source-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.source-groups ul{list-style:none;padding:0;font-size:13px}.source-groups li{margin:9px 0}.source-groups code{font-size:12px}details{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin:10px 0;padding:13px 18px}summary{cursor:pointer;font-weight:600;font-size:14px}details p{font-size:14px;color:var(--muted);margin-top:12px}.footer{border-top:1px solid var(--line);padding-top:25px;color:var(--muted);font-size:12px}.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:14px}.legend span::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--blue);margin-right:6px}.legend span:last-child::before{background:var(--green)}[data-theme=dark]{color-scheme:dark;--bg:#121a28;--panel:#1c2739;--ink:#e5ecf7;--muted:#a9bad1;--line:#34445d;--blue:#91b5ff;--soft:#263a5c;--green:#94dfbd;--greenbg:#203f36;--amber:#f0c570;--amberbg:#40341f;--shadow:none}[data-theme=dark] .tab[aria-selected=true]{color:#14223c}[data-theme=dark] .detail{background:#253c62;color:#f0f5ff}[data-theme=dark] .detail p{color:#d4e0f4}
 @media(min-width:1450px){main{padding-left:64px;padding-right:64px}}@media(max-width:1180px){main{padding:36px 28px}.layout{grid-template-columns:205px minmax(0,1fr)}.sidebar{padding:30px 15px}.architecture{grid-template-columns:1fr}.detail{position:static;min-height:0}.grid{grid-template-columns:1fr}.two,.source-groups{grid-template-columns:1fr 1fr}}@media(max-width:760px){.layout{display:block}.sidebar{position:static;height:auto;padding:18px;border-right:0;border-bottom:1px solid var(--line)}.sidebar small,.side-footer{display:none}.sidebar nav{display:flex;gap:4px;overflow:auto;margin-top:10px}.sidebar nav a{white-space:nowrap;padding:5px 9px;font-size:12px}.brand{font-size:19px}main{padding:28px 18px}h1{font-size:32px}.lead{font-size:16px}.two,.source-groups,.story{grid-template-columns:1fr}.nodes{grid-template-columns:1fr}.node{min-height:60px}.window-map{grid-template-columns:1fr 1fr}.panel{padding:18px}.steps{grid-template-columns:1fr 1fr}.step{font-size:12px}section{margin:32px 0 42px}h2{font-size:23px}}@media print{html{scroll-behavior:auto}.sidebar,.tools,.tabs,.flow-buttons{display:none}.layout{display:block}body{background:white;color:black;font-size:11px}main{padding:0}h1{font-size:28px}section{margin:20px 0;break-inside:auto}.panel,.boundary{box-shadow:none;break-inside:avoid}.architecture{grid-template-columns:1fr}.detail{position:static;background:#eef3ff;color:#14223c}.detail p,.detail .small{color:#31435e}.detail a{color:#275fe8}.scroll-table{overflow:visible}table{min-width:0;font-size:10px}.story{grid-template-columns:220px 1fr}a{color:#244d96}.footer{margin-top:20px}}
+
+.lane-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.lane{border:1px solid var(--line);border-radius:12px;padding:20px;background:var(--bg);min-width:0}.lane strong{display:block;font-size:15px}.special{border-color:#87b9a6;background:var(--greenbg)}.shared-map{margin-bottom:20px}.core-strip{border:1px solid #9eb6ee;border-radius:10px;background:var(--soft);padding:18px;text-align:center}.core-strip span{display:block;margin-top:5px;font-size:12px;color:var(--muted)}.recovery-map{margin:18px 0}.special .node{background:var(--panel)}.lane code{font-size:12px}.lane .flow-label{padding:7px 0}@media(max-width:760px){.lane-grid{grid-template-columns:1fr}}
+/* Interactive architecture explorer; all assets remain inline/offline. */
+.layout{max-width:1920px;grid-template-columns:205px minmax(0,1fr)}main{padding:40px 36px 60px}header{max-width:1000px}.sidebar{padding:30px 18px}.arch-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}.arch-tabs{display:flex;gap:5px;padding:5px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.arch-tabs button{border:0;border-radius:8px;background:transparent;padding:8px 15px;color:var(--muted);font-weight:650}.arch-tabs button[aria-selected=true]{background:var(--blue);color:var(--panel)}.arch-search{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}.arch-search input{width:245px;max-width:100%;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font:inherit}.arch-search input:focus-visible{outline:3px solid var(--blue);outline-offset:2px}#arch-results{padding:12px 0 18px;display:flex;gap:8px;flex-wrap:wrap}#arch-results[hidden]{display:none}.arch-chip{border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:7px 11px;color:var(--ink)}.arch-map-layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:18px;align-items:start}.arch-canvas-panel{padding:20px;overflow:hidden}.arch-map-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.arch-map-head p{margin:0;max-width:740px;color:var(--muted);font-size:13px}.arch-map-head button{flex-shrink:0;font-size:12px;padding:5px 9px}.arch-legend{display:flex;gap:18px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin:16px 0 5px}.arch-legend span:before{content:'';display:inline-block;width:18px;height:3px;background:var(--blue);vertical-align:middle;margin-right:6px}.arch-legend .data:before{background:var(--green)}.arch-legend .store:before{background:var(--amber)}.arch-legend .dependency:before{height:0;border-top:2px dashed var(--muted);background:none}#arch-canvas{overflow:auto;border-radius:10px;background:radial-gradient(circle,var(--line) .7px,transparent .8px);background-size:18px 18px;margin-top:12px}#arch-canvas svg{width:100%;min-width:700px;display:block}#arch-canvas.zoom svg{min-width:1190px}.arch-edge{fill:none;stroke-width:2;stroke:var(--blue);opacity:.44;transition:opacity .15s}.arch-edge.data{stroke:var(--green)}.arch-edge.store{stroke:var(--amber)}.arch-edge.dependency{stroke:var(--muted);stroke-dasharray:6 5}.arch-edge.related{opacity:1;stroke-width:3}.arch-node{cursor:pointer;outline:none}.arch-node rect{fill:var(--panel);stroke:var(--line);stroke-width:1.7;transition:fill .15s,stroke .15s}.arch-node text{fill:var(--ink);font:650 18px system-ui,-apple-system,'PingFang SC',sans-serif;pointer-events:none}.arch-node .arch-tag{font-size:10px;letter-spacing:.6px;fill:var(--muted);font-weight:550}.arch-node .arch-path{font-size:10px;fill:var(--muted);font-weight:400}.arch-node:hover rect,.arch-node:focus-visible rect{stroke:var(--blue);stroke-width:3;fill:var(--soft)}.arch-node.selected rect{fill:var(--soft);stroke:var(--blue);stroke-width:3}.arch-node.related rect{stroke:var(--blue)}.arch-node.muted{opacity:.78}.arch-hint{font-size:11px!important;margin:10px 0 0!important}.arch-detail{padding:24px;min-height:575px;position:sticky;top:24px}.arch-detail .arch-label{color:var(--blue);font-size:11px;font-weight:700;letter-spacing:.7px}.arch-detail h3{font-size:22px;line-height:1.4;margin:10px 0}.arch-detail p{font-size:13px;color:var(--muted)}.arch-detail h4{font-size:13px;margin:20px 0 8px}.arch-detail ul{padding-left:18px;font-size:12px;color:var(--muted)}.arch-detail code{font-size:11px;word-break:break-word}.arch-detail details{margin:8px 0;border:1px solid var(--line);border-radius:8px;padding:8px 11px}.arch-detail summary{font-size:13px;color:var(--ink);cursor:pointer}.arch-detail details p{font-size:12px;margin:8px 0}.arch-detail details a{font-size:11px;overflow-wrap:anywhere}.arch-detail .arch-related{display:flex;gap:5px;flex-wrap:wrap}.arch-detail .arch-chip{font-size:11px;padding:4px 7px}.arch-drill{width:100%;border:0;border-radius:8px;padding:10px 12px;background:var(--blue);color:var(--panel);font-size:13px;font-weight:650;margin-top:12px}.arch-detail .arch-doc-link{display:block;font-size:12px;margin-top:14px}.arch-boundary{margin:18px 0 0;padding:18px 22px;border-left:3px solid var(--blue);background:var(--soft);border-radius:0 10px 10px 0;font-size:13px}.arch-boundary>span{margin-left:16px;color:var(--muted);font-size:12px}.arch-boundary p{margin:7px 0;color:var(--muted)}.arch-boundary a{font-size:12px}
+@media(max-width:1500px){.arch-map-layout{grid-template-columns:1fr}.arch-detail{position:static;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:0 28px}.arch-detail .arch-intro{grid-column:1}.arch-detail .arch-internals{grid-column:2;grid-row:1 / span 3}.arch-detail .arch-links{grid-column:1}.arch-map-head p{max-width:80%}}
+@media(max-width:760px){.layout{display:block}main{padding:28px 18px}.arch-toolbar{align-items:stretch;gap:12px}.arch-tabs{width:100%;overflow:auto}.arch-tabs button{padding:8px 10px;white-space:nowrap;font-size:13px}.arch-search{width:100%}.arch-search input{flex:1;width:auto;min-width:0}.arch-map-layout{display:block}.arch-canvas-panel{padding:12px}.arch-detail{display:block;margin-top:14px;padding:20px}.arch-map-head{display:block}.arch-map-head p{max-width:none}.arch-map-head button{margin-top:10px}.arch-boundary>span{display:block;margin:8px 0 0}.arch-legend{gap:10px}.arch-node text{font-size:19px}}
+@media print{.arch-toolbar,.arch-map-head button,.arch-hint{display:none}.arch-map-layout{display:block}#arch-canvas svg{min-width:0!important;width:100%}.arch-detail{position:static;display:block;break-inside:avoid}.arch-node.muted{opacity:.78}.arch-edge{opacity:1}.arch-canvas-panel{break-inside:avoid}.arch-boundary{break-inside:avoid}}
+
 </style>
 </head>
 <body>
 <div class="layout">
-<aside class="sidebar"><div class="brand">P2P <span>File</span></div><small>当前软件架构 · 代码实况</small><nav aria-label="文档目录">
-<a href="#overview" class="active">01 · 架构总览</a><a href="#topology">02 · 进程与部署</a><a href="#desktop">03 · 界面与托盘</a><a href="#core">04 · 核心模块</a><a href="#flows">05 · 关键流程</a><a href="#protocol">06 · 协议与安全</a><a href="#storage">07 · 配置与存储</a><a href="#operations">08 · 运行与恢复</a><a href="#boundaries">09 · 兼容与边界</a><a href="#sources">10 · 源码索引</a>
-</nav><div class="side-footer">2026-10-20 / Windows 工作区<br>基线 <code>91589a5</code><br>包含当前未提交改动<br><br>单文件 HTML · 可离线阅读<br>架构节点和流程步骤可点选</div></aside>
+<aside class="sidebar"><div class="brand">P2P <span>File</span></div><small>当前软件架构 · 代码实况</small><nav aria-label="文档目录"><a href="#overview" class="active">01 · 架构总览</a><a href="#topology">02 · 通用节点</a><a href="#distribution">03 · Sub2API 专用版</a><a href="#deployment">04 · 部署快照</a><a href="#desktop">05 · 界面与托盘</a><a href="#core">06 · 核心模块</a><a href="#flows">07 · 关键流程</a><a href="#protocol">08 · 协议与安全</a><a href="#storage">09 · 配置与存储</a><a href="#operations">10 · 自动恢复</a><a href="#boundaries">11 · 兼容与边界</a><a href="#sources">12 · 源码索引</a></nav><div class="side-footer">2026-10-21 / 当前分支<br><code>codex/sub2api-distribution</code><br>分层整理 · 2026-10-21<br><br>单文件 HTML · 可离线阅读<br>架构节点和流程步骤可点选</div></aside>
 <main>
-<header><div class="eyebrow">Engineering architecture / current implementation</div><h1>一个后台节点，<br>多个管理入口。</h1><p class="lead">P2P File 用独立 Agent 承载身份、连接和传输。桌面保留原来的文件传输主界面，通过本地 IPC 管理 Agent；命令行和可选 Web 管理接入同一套后台能力。</p><div class="meta"><span class="badge ok">按当前源码整理</span><span class="badge">Rust · GPUI · Tokio · QUIC</span><span class="badge">2026-10-20</span><span class="badge warn">工作区快照，含未提交改动</span></div><div class="tools"><button class="btn" id="theme" type="button">切换深色</button><button class="btn" id="print" type="button">打印 / 保存 PDF</button></div></header>
+<header><div class="eyebrow">Engineering architecture / current implementation</div><h1>从全局，看进每一层。</h1><p class="lead">通用版由 Agent 统一承载身份、连接、文件与端口映射；桌面、CLI 和 Web 管理同一后台。Sub2API 专用版复用节点核心，以独立 Windows 客户端和 Ubuntu 网关提供限定服务，并在网络恢复后自动重连。</p><div class="meta"><span class="badge ok">按当前源码整理</span><span class="badge">Rust · GPUI · Tokio · QUIC</span><span class="badge">2026-10-21</span><span class="badge">当前源码 · 分层整理</span><span class="badge warn">源码与部署范围分别标注</span></div><div class="tools"><button class="btn" id="theme" type="button">切换深色</button><button class="btn" id="print" type="button">打印 / 保存 PDF</button></div></header>
 
-<section id="overview"><div class="section-title"><span class="index">01</span><h2>架构总览</h2></div><div class="grid"><article class="panel card"><div class="label">PRESENTATION</div><h3>界面负责操作与展示</h3><p>主界面、六类二级窗口、托盘、CLI 和 Web 都是管理入口。窗口不持有 P2P 连接、身份私钥或任务库。</p></article><article class="panel card"><div class="label">SINGLE OWNER</div><h3>Agent 负责实际工作</h3><p>同一身份、数据目录由一个 Agent 独占。它统一处理文件、目录、测速、TCP 服务、授权及配置提交。</p></article><article class="panel card"><div class="label">END-TO-END</div><h3>节点之间传输数据</h3><p>设备间使用认证后的 QUIC。优先 IPv4 / IPv6 直连；配置 Relay 后可回退到加密数据报中继。</p></article></div><div class="callout"><strong>阅读口径：</strong>本文描述当前工作区实现，不将历史目标设计当作已经实现的功能。仓库仍保留显式旧入口；默认桌面已走 Agent 架构。基线提交为 <code>91589a5c831aa553dfd4e716ca6d145a7398ba0f</code>，本次界面、独立窗口和托盘改动包含在此快照中。</div></section>
-
-<section id="topology"><div class="section-title"><span class="index">02</span><h2>进程关系与部署拓扑</h2></div><p class="small">点击任意模块查看职责与源码。上半部分为本机；下半部分为远端节点与网络基础设施。</p><div class="architecture"><div class="diagram">
+<section id="overview"><div class="section-title"><span class="index">01</span><h2>可点击的整体架构图</h2></div>
+<div class="arch-toolbar"><div class="arch-tabs" role="tablist" aria-label="架构图视图"></div><div class="arch-search"><label for="arch-search">查找模块</label><input id="arch-search" type="search" placeholder="模块、职责或源码路径" autocomplete="off"></div></div>
+<div id="arch-results" hidden aria-live="polite"></div>
+<div class="arch-map-layout"><div class="panel arch-canvas-panel"><div class="arch-map-head"><p id="arch-description"></p><button type="button" class="btn" id="arch-fit" aria-pressed="false">放大阅读</button></div><div class="arch-legend"><span class="control">管理 / 控制</span><span class="data">业务数据</span><span class="store">状态 / 存储</span><span class="dependency">源码依赖</span></div><div id="arch-canvas" tabindex="0" aria-label="可横向滚动的交互架构图"></div><p class="small arch-hint">点击任意节点展开内部职责 · Tab / Enter 可操作 · 实线为控制、数据与存储，虚线为源码依赖</p></div><aside class="panel arch-detail" id="arch-detail" aria-label="选中模块详情" aria-live="polite"></aside></div>
+<div class="arch-boundary"><strong>分层整理后的源码视图</strong><span>23 个模块 · 4 个可切换视图 · 不依赖外部库</span><p>通用 Agent 与专用版共享核心，分别持有运行时和状态。核心不依赖界面或宿主；默认桌面不再引用旧窗口。下方部署关系是此前读取配置的历史快照，不能据此判断当前实时状态。</p><a href="REPOSITORY_LAYOUT.md">查看分层与清理依据 ↗</a> · <a href="task-reports/REPOSITORY_REORGANIZATION.md">查看回归验证记录 ↗</a></div></section>
+<section id="topology"><div class="section-title"><span class="index">02</span><h2>通用节点：进程关系</h2></div><p class="small">点击任意模块查看职责与源码。上半部分为本机；下半部分为远端节点与网络基础设施。</p><div class="architecture"><div class="diagram">
 <div class="boundary"><div class="boundary-title">本机 · 管理入口 / 独立进程</div><div class="nodes"><button class="node" data-node="desktop"><strong>原生桌面</strong><span>主窗口 + 二级窗口 + 托盘</span></button><button class="node" data-node="cli"><strong>p2p-node</strong><span>命令行管理客户端</span></button><button class="node" data-node="web"><strong>可选 Web 网关</strong><span>浏览器 → loopback HTTP</span></button></div></div>
 <div class="flow-label"><b>↓ ↑</b> 本地管理：版本化 JSON 请求 / 响应<br>Windows 命名管道 · Unix Domain Socket</div>
 <div class="boundary agent-boundary"><div class="boundary-title">本机 · p2p-agent / 同一数据目录的唯一业务宿主</div><button class="node full selected" data-node="agent"><strong>Agent 宿主与统一控制接口</strong><span>生命周期 / IPC / revision / 幂等请求 / 事件快照</span></button><div class="nodes"><button class="node" data-node="session"><strong>会话与授权</strong><span>多设备 / 身份校验 / 流分发</span></button><button class="node" data-node="business"><strong>文件 · TCP · 测速</strong><span>任务调度 / 服务目录 / 限额</span></button><button class="node" data-node="state"><strong>持久化状态</strong><span>私钥 / 配置 / 任务 / 检查点</span></button></div></div>
 <div class="flow-label"><b>↓ ↑</b> 端到端认证 QUIC / UDP<br>业务数据走设备连接，管理 IPC 留在本机</div>
 <div class="boundary"><div class="boundary-title">远端设备与基础设施 · 按角色部署</div><div class="nodes"><button class="node" data-node="peer"><strong>远端 Agent</strong><span>相同核心 / 对称节点能力</span></button><button class="node" data-node="signal"><strong>信令 + STUN</strong><span>登记 / 寻址 / 候选 / NAT 探测</span></button><button class="node" data-node="relay"><strong>可选 UDP Relay</strong><span>转发加密 QUIC 数据报</span></button></div></div>
 </div><aside class="panel detail" id="node-detail" aria-live="polite"></aside></div><p class="caption">图中的信令与 STUN 是两种服务职责：信令交换设备信息，STUN 探测地址映射；它们不处理文件任务。Relay 可与信令服务共同部署。</p>
-<div class="scroll-table"><table><thead><tr><th>可执行程序</th><th>职责与使用方式</th><th>部署位置</th></tr></thead><tbody><tr><td><code>p2p-desktop.exe</code></td><td>GPUI 原生界面。默认附着同目录 Agent；有现存配置且后台未运行时尝试启动同目录的 <code>p2p-agent</code>。首次初始化为显式动作。</td><td>有界面的 Windows / macOS / Linux 设备</td></tr><tr><td><code>p2p-agent.exe</code></td><td>无图形业务进程；装配节点核心、独占身份和存储、监听本地 IPC。</td><td>桌面设备后台或无界面服务器</td></tr><tr><td><code>p2p-node.exe</code></td><td>管理 CLI；通过 IPC 查询和控制 Agent；亦提供初始化、离线配置、迁移与可选 Web 网关入口。</td><td>与 Agent 相同机器、相同用户上下文</td></tr><tr><td><code>p2p_file</code></td><td>仓库保留的独立 CLI；含 <code>signal-server</code> 和可选 Relay 服务端，也保留历史发送、接收、隧道等入口。</td><td>基础设施服务器或显式历史使用场景；不在本次三程序精简桌面包内</td></tr></tbody></table></div></section>
+<div class="scroll-table"><table><thead><tr><th>可执行程序</th><th>职责与使用方式</th><th>部署位置</th></tr></thead><tbody><tr><td><code>p2p-desktop.exe</code></td><td>GPUI 原生界面。默认附着同目录 Agent；有现存配置且后台未运行时尝试启动同目录的 <code>p2p-agent</code>。首次初始化为显式动作。</td><td>有界面的 Windows / macOS / Linux 设备</td></tr><tr><td><code>p2p-agent.exe</code></td><td>无图形业务进程；装配节点核心、独占身份和存储、监听本地 IPC。</td><td>桌面设备后台或无界面服务器</td></tr><tr><td><code>p2p-node.exe</code></td><td>管理 CLI；通过 IPC 查询和控制 Agent；亦提供初始化、离线配置、迁移与可选 Web 网关入口。</td><td>与 Agent 相同机器、相同用户上下文</td></tr><tr><td><code>p2p_file</code></td><td>仓库保留的独立 CLI；含 <code>signal-server</code> 和可选 Relay 服务端，也保留历史发送、接收、隧道等入口。</td><td>基础设施服务器或显式历史使用场景；不在本次三程序精简桌面包内</td></tr><tr><td><code>Sub2API.exe</code></td><td>sub2api-client 专用构建；BAT 启动、固定 18081、独立设备身份。</td><td>朋友的 Windows x64</td></tr><tr><td><code>p2p-sub2api-gateway</code></td><td>sub2api-gateway 专用构建；隔离身份与凭证，只发布 Sub2API。</td><td>Ubuntu 独立 systemd 用户服务</td></tr></tbody></table></div></section>
 
-<section id="desktop"><div class="section-title"><span class="index">03</span><h2>主界面、独立窗口与托盘</h2></div><div class="panel"><h3>保留文件传输主界面，接入新的 Agent</h3><p>主窗口呈现设备连接、本机 ID、接收目录、文件传输列表、队列与任务操作。新的节点管理界面成为二级入口。这里的“原界面”是展示与交互层的保留，业务动作实际发送到 Agent。</p><div class="window-map"><div class="window">设置<span>本机偏好、密码等配置入口</span></div><div class="window">节点管理<span>后台、信令、授权、TCP 服务和规则</span></div><div class="window">连接诊断<span>节点快照与诊断信息</span></div><div class="window">速度测试<span>测速参数与状态</span></div><div class="window">任务详情<span>选中任务的状态与操作</span></div><div class="window">目录预览<span>增量差异与确认发送</span></div></div><p class="small">六类二级页面各自打开原生窗口。同类窗口重复点击会激活已有窗口；关闭后可重建。它们共享一个 <code>AgentShell</code> 和一个 <code>ClientWorker</code>，不会为每个窗口启动新的节点。输入框的窗口布局与 IME 状态独立。</p></div>
+<section id="distribution"><div class="section-title"><span class="index">03</span><h2>Sub2API 专用发行版</h2></div><p class="small">专用入口、授权与配置单独维护；通信核心和统一节点协议共用。点击模块可查看源码。</p><div class="architecture"><div class="diagram">
+<div class="boundary special"><div class="boundary-title">朋友的 WINDOWS · 每台设备独立身份</div><div class="nodes"><button class="node" data-node="bat"><strong>BAT 启动</strong><span>固定入口 / 无配置参数</span></button><button class="node" data-node="fixedclient"><strong>Sub2API.exe</strong><span>身份 / 核心 / 自动恢复</span></button><button class="node" data-node="browser"><strong>浏览器</strong><span>127.0.0.1:18081</span></button></div></div>
+<div class="flow-label"><b>↓ ↑</b> 数据面：浏览器 HTTP → 本机 TCP 监听 → QUIC Service 流</div>
+<div class="flow-label"><b>↓ ↑</b> 两端直接传输：QUIC + Ed25519 身份绑定 + 专用密码认证<br>OpenTcp("sub2api") · 服务端再次检查 ACL</div>
+<div class="boundary special"><div class="boundary-title">UBUNTU · 与通用 AGENT 分开的身份和状态</div><button class="node full" data-node="fixedgateway"><strong>p2p-sub2api-gateway</strong><span>仅向当前密码认证成功的设备发布一个服务</span></button><div class="flow-label">↓  sub2api → 127.0.0.1:8080</div><button class="node full" data-node="backend"><strong>Sub2API 应用</strong><span>账号 / API 权限仍由应用控制</span></button></div>
+<div class="flow-label">⇠ 控制面：Windows 和网关分别登记 / 交换候选 ⇢<br>信令配对完成后，业务数据不经信令服务器</div><div class="boundary"><div class="boundary-title">公共基础设施 · 发现与可选转发</div><div class="nodes two"><button class="node" data-node="signal"><strong>信令 / STUN</strong><span>登记、候选、地址探测</span></button><button class="node" data-node="relay"><strong>可选 Relay</strong><span>当前专用配置未启用</span></button></div><p class="caption">当前直连业务数据在两端之间传输；信令服务器不代理浏览器请求。</p></div>
+</div><aside class="panel detail" id="distribution-detail" aria-live="polite"></aside></div>
+<div class="scroll-table"><table><thead><tr><th>边界</th><th>专用版行为</th></tr></thead><tbody><tr><td>分发包</td><td>仅 EXE、BAT、说明和许可证。私有构建 profile 将目标网关和访问凭证编译进 EXE；不分发身份私钥或运行时配置 JSON。</td></tr><tr><td>每台设备</td><td>首次生成独立 Ed25519 身份，更新程序时保留。多人共用访问凭证，不共用设备身份。</td></tr><tr><td>专用权限</td><td>网关只发布 sub2api，文件与测速关闭，不启用管理 HTTP / IPC。隐藏配置不是授权措施，最终授权在网关检查。</td></tr><tr><td>凭证撤销</td><td>凭证可提取、可转发。持有者可创建新身份；单独封禁旧 NodeId 不能可靠撤销其接入。批次撤销需轮换凭证并重新分发。</td></tr><tr><td>启动与退出</td><td>BAT 窗口保持运行；Ctrl+C / 关闭窗口停止映射。朋友版没有安装开机启动项；窗口运行期间负责自动重连。</td></tr><tr><td>连接预算</td><td>专用网关构建的 peer 上限 128；普通构建 16。待握手仍为 8；上限不代表完成了 128 台吞吐压测。</td></tr></tbody></table></div></section>
+
+<section id="deployment"><div class="section-title"><span class="index">04</span><h2>配置与部署关系 · 历史快照</h2></div><div class="lane-grid"><article class="panel lane"><div class="boundary-title">本人使用 · 通用节点路径</div><strong>Mac 浏览器 / Finder / 桌面</strong><div class="flow-label">↓ loopback 监听</div><strong>Mac Agent ↔ Ubuntu 主 Agent</strong><div class="flow-label">↓ 认证 QUIC / 服务 ID</div><strong>Web 管理 / Sub2API / Samba / StreamDesk</strong><p class="small">Mac 的 Web 管理进程单独运行在 7789；Ubuntu 管理 Web 在 8787，再由 P2P 映射到 Mac 的 7788。</p></article><article class="panel lane special"><div class="boundary-title">朋友使用 · 专用接入路径</div><strong>Windows 浏览器 → 18081</strong><div class="flow-label">↓ 本机专用客户端</div><strong>Windows ↔ Ubuntu 专用网关</strong><div class="flow-label">↓ 只准 sub2api</div><strong>Ubuntu Sub2API → 8080</strong><p class="small">同一台 Ubuntu 上独立进程、独立身份和校验值。朋友侧 18081 与 Mac 侧 18081 分属不同电脑。</p></article></div><div class="callout"><strong>2026-10-21 核对：</strong>读取两端 JSON 后确认下面 5 个入口；Ubuntu 主 Agent、管理 Web、专用网关服务均为 active，专用网关信令为 online。这是检查时的快照，页面不做实时在线探测。专用配置当前未启用 Relay 或信令 TLS；协议支持情况与实际启用情况分别看待。</div><div class="scroll-table"><table><thead><tr><th>Mac 入口</th><th>本机访问地址</th><th>服务端目标</th></tr></thead><tbody><tr><td>配置 Ubuntu</td><td><code>http://127.0.0.1:7788/</code></td><td><code>127.0.0.1:8787</code></td></tr><tr><td>使用 Sub2API</td><td><code>http://127.0.0.1:18081/</code></td><td><code>127.0.0.1:8080</code></td></tr><tr><td>打开 StreamDesk</td><td><code>https://localhost:18443/login</code></td><td><code>192.168.3.192:18443</code></td></tr><tr><td>Samba 文件共享</td><td><code>smb://127.0.0.1:1445</code></td><td><code>127.0.0.1:445</code></td></tr><tr><td>配置本机 Mac</td><td><code>http://127.0.0.1:7789/</code></td><td><code>本机 P2P Web 管理</code></td></tr></tbody></table></div><p class="small">入口来自 <a href="../service-navigation.html">本机服务导航</a>，映射变动后运行 <code>python3 scripts/update-service-navigation.py --ssh-host ubuntu</code> 同步导航。本架构图只记录本次配置快照。普通节点现有安装版本与专用网关独立升级，共享源码改进不会自动替换已安装的程序。</p></section>
+
+<section id="desktop"><div class="section-title"><span class="index">05</span><h2>主界面、独立窗口与托盘</h2></div><div class="panel"><h3>保留文件传输主界面，接入新的 Agent</h3><p>主窗口呈现设备连接、本机 ID、接收目录、文件传输列表、队列与任务操作。新的节点管理界面成为二级入口。这里的“原界面”是展示与交互层的保留，业务动作实际发送到 Agent。</p><div class="window-map"><div class="window">设置<span>本机偏好、密码等配置入口</span></div><div class="window">节点管理<span>后台、信令、授权、TCP 服务和规则</span></div><div class="window">连接诊断<span>节点快照与诊断信息</span></div><div class="window">速度测试<span>测速参数与状态</span></div><div class="window">任务详情<span>选中任务的状态与操作</span></div><div class="window">目录预览<span>增量差异与确认发送</span></div></div><p class="small">六类二级页面各自打开原生窗口。同类窗口重复点击会激活已有窗口；关闭后可重建。它们共享一个 <code>AgentShell</code> 和一个 <code>ClientWorker</code>，不会为每个窗口启动新的节点。输入框的窗口布局与 IME 状态独立。</p></div>
 <div class="scroll-table"><table><thead><tr><th>操作</th><th>当前行为</th><th>Agent / 传输</th></tr></thead><tbody><tr><td>点击主窗口 ×</td><td>隐藏主窗口及已打开的二级窗口，保留托盘；托盘恢复原窗口。</td><td>继续运行</td></tr><tr><td>点击二级窗口 ×</td><td>仅关闭该二级窗口，主窗口和其他窗口保留。</td><td>继续运行</td></tr><tr><td>托盘恢复 / 打开</td><td>重新显示并激活已保留的窗口，共享状态不丢失。</td><td>继续运行</td></tr><tr><td>托盘“退出”</td><td>向 Agent 发出停止请求，等待数据目录、身份和任务所有权释放后退出前端；失败时保留可见错误。</td><td>有序停止；不直接强杀</td></tr><tr><td>托盘不可用</td><td>主窗口关闭动作退为最小化到任务栏，避免隐藏后无法恢复。</td><td>继续运行</td></tr></tbody></table></div><p class="caption">桌面是可独立退出的管理进程，Agent 由独立进程承载。当前产品的“托盘退出”会显式停止 Agent；主窗口 × 不会触发停止。<code>--background</code> 是仅启动已有 Agent 的入口，不等同于显示托盘前端。</p></section>
 
-<section id="core"><div class="section-title"><span class="index">04</span><h2>核心模块与依赖方向</h2></div><div class="callout"><strong>物理结构：</strong>目前是一个 Rust crate 内的分层模块，并未拆成多个服务或多个独立核心 crate。默认启用 <code>node</code>；<code>gui</code> 依赖 <code>node</code> 并增加 GPUI、托盘等图形依赖。无界面核心不依赖桌面窗口。</div><div class="scroll-table"><table><thead><tr><th>层 / 模块</th><th>负责什么</th><th>关键源码</th></tr></thead><tbody>
+<section id="core"><div class="section-title"><span class="index">06</span><h2>核心模块与依赖方向</h2></div><div class="callout"><strong>物理结构：</strong>当前是一个 Rust crate 内的分层模块。默认 <code>node</code> 提供无 GUI 核心；<code>gui</code> 增加 GPUI / 托盘。<code>sub2api-client</code> 和 <code>sub2api-gateway</code> 均依赖 <code>node</code>，分别启用专用二进制。专用宿主直接调用核心，不经过通用 Agent 的管理 IPC。</div><div class="scroll-table"><table><thead><tr><th>层 / 模块</th><th>负责什么</th><th>关键源码</th></tr></thead><tbody>
 <tr><td>展示与平台</td><td>界面、表单草稿、窗口注册、文件选择、托盘、输入法、状态展示。</td><td><a href="../src/desktop/agent_shell.rs">desktop/agent_shell.rs</a><br><a href="../src/desktop/agent_shell/workbench.rs">workbench.rs</a> / <a href="../src/desktop/agent_shell/windows.rs">windows.rs</a> / <a href="../src/desktop/agent_shell/tray_host.rs">tray_host.rs</a></td></tr>
-<tr><td>管理客户端与 IPC</td><td>统一命令 DTO、请求 ID、超时、错误码、本地认证通道；CLI / 桌面 / Web 调用同一协议。</td><td><a href="../src/node/agent_client.rs">agent_client.rs</a> / <a href="../src/node/ipc.rs">ipc.rs</a> / <a href="../src/node/ipc_transport.rs">ipc_transport.rs</a></td></tr>
-<tr><td>Agent 宿主</td><td>实例锁、启动退出、IPC 服务、变更串行化、请求去重、配置协调、事件日志和转发监听。</td><td><a href="../src/node/agent.rs">agent.rs</a> / <a href="../src/node/agent_state.rs">agent_state.rs</a> / <a href="../src/node/agent_forward.rs">agent_forward.rs</a></td></tr>
-<tr><td>控制与会话</td><td><code>NodeControl</code> 提供命令和快照；会话循环维护多 peer、连接代际、认证、重连和业务分发。</td><td><a href="../src/node/control.rs">control.rs</a> / <a href="../src/node/session.rs">session.rs</a> / <a href="../src/node/dispatch.rs">dispatch.rs</a></td></tr>
-<tr><td>文件领域</td><td>文件 / 目录任务、增量预览、并发队列、暂停续传、限速、空间预算、持久回执和安全发布。</td><td><a href="../src/node/transfer.rs">transfer.rs</a> / <a href="../src/node/incremental.rs">incremental.rs</a> / <a href="../src/node/queue.rs">queue.rs</a> / <a href="../src/node/publish.rs">publish.rs</a></td></tr>
-<tr><td>TCP 与测速</td><td>服务 ID 目录、资源白名单、本地 loopback 监听、QUIC 流搬运；测速在独立流上执行。</td><td><a href="../src/node/services.rs">services.rs</a> / <a href="../src/node/tunnel.rs">tunnel.rs</a> / <a href="../src/node/speed.rs">speed.rs</a></td></tr>
-<tr><td>身份与授权</td><td>Ed25519 身份、NodeId、密码认证、可信设备、授权来源、方向 / 资源权限与撤销。</td><td><a href="../src/identity.rs">identity.rs</a> / <a href="../src/node/remote_auth.rs">remote_auth.rs</a> / <a href="../src/node/authorization.rs">authorization.rs</a></td></tr>
+<tr><td>管理客户端与 IPC</td><td>统一命令 DTO、请求 ID、超时、错误码、本地认证通道；CLI / 桌面 / Web 调用同一协议。</td><td><a href="../src/node/api/client.rs">client.rs</a> / <a href="../src/node/api/protocol.rs">protocol.rs</a> / <a href="../src/node/local/transport.rs">transport.rs</a></td></tr>
+<tr><td>专用宿主与恢复</td><td>固定客户端与隔离网关，内存 ACL、阶段日志、HTTP 就绪探测和进程内核心恢复。</td><td><a href="../src/node/products/sub2api.rs">sub2api.rs</a> / <a href="../src/node/products/recovery.rs">recovery.rs</a> / <a href="../src/node/host/recovery.rs">recovery.rs</a></td></tr><tr><td>Agent 宿主</td><td>实例锁、启动退出、IPC 服务、变更串行化、请求去重、配置协调、事件日志和转发监听。</td><td><a href="../src/node/host/agent.rs">agent.rs</a> / <a href="../src/node/host/configuration.rs">configuration.rs</a> / <a href="../src/node/host/forwarding.rs">forwarding.rs</a></td></tr>
+<tr><td>控制与会话</td><td><code>NodeControl</code> 提供命令和快照；会话循环维护多 peer、连接代际、认证、重连和业务分发。</td><td><a href="../src/node/core/control.rs">control.rs</a> / <a href="../src/node/core/session.rs">session.rs</a> / <a href="../src/node/core/dispatch.rs">dispatch.rs</a></td></tr>
+<tr><td>文件领域</td><td>文件 / 目录任务、增量预览、并发队列、暂停续传、限速、空间预算、持久回执和安全发布。</td><td><a href="../src/node/core/transfer.rs">transfer.rs</a> / <a href="../src/node/core/incremental.rs">incremental.rs</a> / <a href="../src/node/core/queue.rs">queue.rs</a> / <a href="../src/node/core/publish.rs">publish.rs</a></td></tr>
+<tr><td>TCP 与测速</td><td>服务 ID 目录、资源白名单、本地 loopback 监听、QUIC 流搬运；测速在独立流上执行。</td><td><a href="../src/node/core/services.rs">services.rs</a> / <a href="../src/node/core/tunnel.rs">tunnel.rs</a> / <a href="../src/node/core/speed.rs">speed.rs</a></td></tr>
+<tr><td>身份与授权</td><td>Ed25519 身份、NodeId、密码认证、可信设备、授权来源、方向 / 资源权限与撤销。</td><td><a href="../src/identity.rs">identity.rs</a> / <a href="../src/node/core/remote_auth.rs">remote_auth.rs</a> / <a href="../src/node/core/authorization.rs">authorization.rs</a></td></tr>
 <tr><td>网络与存储基础</td><td>信令、短 ID、STUN / 打洞、双栈路径、Relay、QUIC 握手，以及原子写和恢复基础。</td><td><a href="../src/net/mod.rs">net/</a> / <a href="../src/discovery/signal.rs">discovery/</a> / <a href="../src/transport/handshake.rs">transport/</a> / <a href="../src/storage/atomic.rs">storage/</a></td></tr>
 </tbody></table></div><div class="grid two"><article class="panel card"><h3>控制流与数据流分离</h3><p>IPC 传递“连接某设备、发送这些本机路径、暂停任务”等命令和有界快照。文件字节、TCP 负载、测速数据由 Agent 经 QUIC 传输，不经桌面 IPC 或 Web 网关搬运。</p></article><article class="panel card"><h3>一个连接，多种独立业务流</h3><p>统一节点连接由一个入站双向流分发器接管，按 File / Service / Speed 路由，避免多个业务竞争 <code>accept_bi()</code>。业务层继续执行各自权限检查。</p></article></div></section>
 
-<section id="flows"><div class="section-title"><span class="index">05</span><h2>关键业务流程</h2></div><p class="small">选择场景后，点击步骤查看对应职责。下方同时给出完整流程，打印和离线浏览也能阅读。</p><div class="tabs" role="tablist" aria-label="业务场景"><button class="tab" role="tab" aria-selected="true" data-flow="connect">连接设备</button><button class="tab" role="tab" aria-selected="false" data-flow="send">发送文件</button><button class="tab" role="tab" aria-selected="false" data-flow="directory">增量目录</button><button class="tab" role="tab" aria-selected="false" data-flow="tcp">TCP 转发</button><button class="tab" role="tab" aria-selected="false" data-flow="config">提交配置</button></div><div class="panel story" id="flow-view"><div class="steps" id="steps"></div><div class="step-detail" id="step-detail" aria-live="polite"></div></div><div id="flow-reference"></div></section>
+<section id="flows"><div class="section-title"><span class="index">07</span><h2>关键业务流程</h2></div><p class="small">选择场景后，点击步骤查看对应职责。下方同时给出完整流程，打印和离线浏览也能阅读。</p><div class="tabs" role="tablist" aria-label="业务场景"><button class="tab" role="tab" aria-selected="true" data-flow="connect">连接设备</button><button class="tab" role="tab" aria-selected="false" data-flow="send">发送文件</button><button class="tab" role="tab" aria-selected="false" data-flow="directory">增量目录</button><button class="tab" role="tab" aria-selected="false" data-flow="tcp">TCP 转发</button><button class="tab" role="tab" aria-selected="false" data-flow="config">提交配置</button><button class="tab" role="tab" data-flow="restricted" aria-selected="false">专用接入</button><button class="tab" role="tab" data-flow="recover" aria-selected="false">自动恢复</button></div><div class="panel story" id="flow-view"><div class="steps" id="steps"></div><div class="step-detail" id="step-detail" aria-live="polite"></div></div><div id="flow-reference"></div></section>
 
-<section id="protocol"><div class="section-title"><span class="index">06</span><h2>协议、认证与信任边界</h2></div><div class="scroll-table"><table><thead><tr><th>边界</th><th>实现</th><th>保证与限制</th></tr></thead><tbody><tr><td>本机管理 → Agent</td><td>Windows 当前用户私有 ACL 命名管道；Unix socket 权限 <code>0600</code>，校验对端 UID。</td><td>原生 IPC 不监听 TCP。保护边界是本机用户权限；不用于公开互联网管理。</td></tr><tr><td>浏览器 → Web 网关</td><td>Axum 仅监听 loopback；管理 API 校验 token、Host / Origin 等边界，令牌保存在 <code>admin.token</code>。</td><td>可选本地入口，随后桥接同一个 IPC；浏览器不运行 P2P 核心。</td></tr><tr><td>节点 → 信令</td><td>注册与查找、签名挑战、候选交换、九位短 ID；支持配置 TLS。</td><td>短 ID 便于寻址，最终身份以 NodeId / 密钥认证为准。TLS 需配置，不能假设所有信令部署均开启。</td></tr><tr><td>节点 → 节点</td><td>QUIC 加密 + Ed25519 身份与连接绑定校验，统一能力协商与远端密码 / 信任认证。</td><td>“支持某能力”和“被授权使用”分别检查。认证失败不触发自动降级。</td></tr><tr><td>业务 → 本机资源</td><td>文件方向权限、接收根目录约束、TCP 服务 ID 与允许设备、限额和撤销。</td><td>授权访问明确的资源，不等于任意远程文件系统或任意网络目标访问。</td></tr><tr><td>节点 → Relay</td><td>经配对认证与限额的 UDP 数据报转发，内层仍是设备间加密 QUIC。</td><td>Relay 转发密文，仍能观察连接元数据与流量规模；未配置时不提供中继兜底。</td></tr></tbody></table></div><div class="grid two"><article class="panel"><h3>本地管理协议</h3><ul><li><code>api_version = 1</code>；JSON 外层为 4 字节大端长度，帧上限 1 MiB。</li><li>请求带 <code>request_id</code>、<code>timeout_ms</code> 和有类型的命令；响应携带结果或错误。</li><li>变更请求以 ID + 命令摘要去重；同 ID 不同内容拒绝，结果未知时应以相同 ID 重试。</li><li>配置使用 <code>expected_revision</code> 防止多个入口相互覆盖；最近配置提交 ID 持久保存。</li><li>事件使用 epoch / sequence，断档需要重新读取快照。桌面当前主要轮询 Status / Tasks，而非持续事件流订阅。</li></ul></article><article class="panel"><h3>设备间统一协议</h3><ul><li>默认 <code>UnifiedV1</code>，协商 magic <code>P2PN\x01</code>；服务控制使用版本化、有界帧。</li><li>业务流类型为 File / Service / Speed；能力位决定是否支持，资源策略决定是否准入。</li><li>文件领域仍使用其专门控制消息、清单和分片数据，不把文件内容塞入节点服务目录消息。</li><li>文件完成以持久回执为准；管理命令返回 <code>accepted</code> 仅代表接纳。</li><li>业务流队列和帧头处理均有界，繁忙或非法请求显式拒绝。</li></ul></article></div></section>
+<section id="protocol"><div class="section-title"><span class="index">08</span><h2>协议、认证与信任边界</h2></div><div class="scroll-table"><table><thead><tr><th>边界</th><th>实现</th><th>保证与限制</th></tr></thead><tbody><tr><td>本机管理 → Agent</td><td>Windows 当前用户私有 ACL 命名管道；Unix socket 权限 <code>0600</code>，校验对端 UID。</td><td>原生 IPC 不监听 TCP。保护边界是本机用户权限；不用于公开互联网管理。</td></tr><tr><td>浏览器 → Web 网关</td><td>Axum 仅监听 loopback；管理 API 校验 token、Host / Origin 等边界，令牌保存在 <code>admin.token</code>。</td><td>可选本地入口，随后桥接同一个 IPC；浏览器不运行 P2P 核心。</td></tr><tr><td>节点 → 信令</td><td>注册与查找、签名挑战、候选交换、九位短 ID；支持配置 TLS。</td><td>短 ID 便于寻址，最终身份以 NodeId / 密钥认证为准。TLS 需配置，不能假设所有信令部署均开启。</td></tr><tr><td>节点 → 节点</td><td>QUIC 加密 + Ed25519 身份与连接绑定校验，统一能力协商与远端密码 / 信任认证。</td><td>“支持某能力”和“被授权使用”分别检查。认证失败不触发自动降级。</td></tr><tr><td>业务 → 本机资源</td><td>文件方向权限、接收根目录约束、TCP 服务 ID 与允许设备、限额和撤销。</td><td>授权访问明确的资源，不等于任意远程文件系统或任意网络目标访问。</td></tr><tr><td>节点 → Relay</td><td>经配对认证与限额的 UDP 数据报转发，内层仍是设备间加密 QUIC。</td><td>Relay 转发密文，仍能观察连接元数据与流量规模；未配置时不提供中继兜底。</td></tr></tbody></table></div><div class="grid two"><article class="panel"><h3>本地管理协议</h3><ul><li><code>api_version = 1</code>；JSON 外层为 4 字节大端长度，帧上限 1 MiB。</li><li>请求带 <code>request_id</code>、<code>timeout_ms</code> 和有类型的命令；响应携带结果或错误。</li><li>变更请求以 ID + 命令摘要去重；同 ID 不同内容拒绝，结果未知时应以相同 ID 重试。</li><li>配置使用 <code>expected_revision</code> 防止多个入口相互覆盖；最近配置提交 ID 持久保存。</li><li>事件使用 epoch / sequence，断档需要重新读取快照。桌面当前主要轮询 Status / Tasks，而非持续事件流订阅。</li></ul></article><article class="panel"><h3>设备间统一协议</h3><ul><li>默认 <code>UnifiedV1</code>，协商 magic <code>P2PN\x01</code>；服务控制使用版本化、有界帧。</li><li>业务流类型为 File / Service / Speed；能力位决定是否支持，资源策略决定是否准入。</li><li>文件领域仍使用其专门控制消息、清单和分片数据，不把文件内容塞入节点服务目录消息。</li><li>文件完成以持久回执为准；管理命令返回 <code>accepted</code> 仅代表接纳。</li><li>业务流队列和帧头处理均有界，繁忙或非法请求显式拒绝。</li></ul></article></div></section>
 
-<section id="storage"><div class="section-title"><span class="index">07</span><h2>配置、持久状态与数据所有权</h2></div><p>Windows 新 Agent 默认数据根为 <code>%LOCALAPPDATA%\p2p-file\node</code>，可用 <code>--data-dir</code> 指定。业务接收目录由 <code>receive_root</code> 独立配置，不必位于 Agent 数据根下。</p><div class="scroll-table"><table><thead><tr><th>文件 / 状态</th><th>内容</th><th>所有权与恢复规则</th></tr></thead><tbody><tr><td><code>identity.key</code></td><td>稳定设备私钥；NodeId 由身份派生。</td><td>Agent 持有身份租约；同身份不能靠更换目录绕开重复运行保护。</td></tr><tr><td><code>node.json</code></td><td>schema、revision、最近配置请求、信令 / Relay、接收根、信任 / 资源、服务 / 规则、限速等。</td><td>在线经 Agent 提交；先校验并原子持久化，再发布生效状态。通用配置查询移除密码验证器。</td></tr><tr><td><code>tasks.json</code> + 任务锁</td><td>文件任务、状态、绑定身份 / 路径、恢复和完成信息。</td><td>Agent 的任务服务写入，管理入口不直接编辑。恢复依赖检查点和重新认证。</td></tr><tr><td><code>agent.lock</code> + 身份租约</td><td>目录独占、同身份独占；任务库还有独立锁。</td><td>启动、退出、离线编辑和迁移均要尊重实际持有者。</td></tr><tr><td>业务临时文件 / 位图 / 最终文件</td><td>文件内容、分片确认和发布所需状态，绑定任务接收位置。</td><td>校验后安全发布；路径约束与目录 capability 防止越界。修改接收根只影响新任务。</td></tr><tr><td><code>admin.token</code>（可选）</td><td>本机 Web 管理令牌。</td><td>仅 Web 网关启用时需要，作为私有文件保存。</td></tr><tr><td><code>migration.pending.json</code>（导入中）</td><td>离线迁移恢复标记。</td><td>未完成导入时 Agent 拒绝启动，要求先执行迁移恢复。</td></tr><tr><td>内存快照 / 事件 / 预览</td><td>peer 状态、epoch、事件日志、队列、限时目录预览、界面草稿。</td><td>均不是持久任务完成证据；Agent 重启后客户端需重新同步。</td></tr></tbody></table></div>
+<section id="storage"><div class="section-title"><span class="index">09</span><h2>配置、持久状态与数据所有权</h2></div><p>通用 Agent 默认数据根：Windows 为 <code>%LOCALAPPDATA%\p2p-file\node</code>，Mac 为 <code>~/Library/Application Support/p2p-file/node</code>，Linux 通常为 <code>~/.local/share/p2p-file/node</code>（遵循 XDG）；可用 <code>--data-dir</code> 指定。业务接收根 <code>receive_root</code> 独立配置。专用版使用下表中的独立目录，不读取通用节点的身份或配置。</p><div class="scroll-table"><table><thead><tr><th>文件 / 状态</th><th>内容</th><th>所有权与恢复规则</th></tr></thead><tbody><tr><td><code>identity.key</code></td><td>稳定设备私钥；NodeId 由身份派生。</td><td>Agent 持有身份租约；同身份不能靠更换目录绕开重复运行保护。</td></tr><tr><td><code>node.json</code></td><td>schema、revision、最近配置请求、信令 / Relay、接收根、信任 / 资源、服务 / 规则、限速等。</td><td>在线经 Agent 提交；先校验并原子持久化，再发布生效状态。通用配置查询移除密码验证器。</td></tr><tr><td><code>tasks.json</code> + 任务锁</td><td>文件任务、状态、绑定身份 / 路径、恢复和完成信息。</td><td>Agent 的任务服务写入，管理入口不直接编辑。恢复依赖检查点和重新认证。</td></tr><tr><td><code>agent.lock</code> + 身份租约</td><td>目录独占、同身份独占；任务库还有独立锁。</td><td>启动、退出、离线编辑和迁移均要尊重实际持有者。</td></tr><tr><td>业务临时文件 / 位图 / 最终文件</td><td>文件内容、分片确认和发布所需状态，绑定任务接收位置。</td><td>校验后安全发布；路径约束与目录 capability 防止越界。修改接收根只影响新任务。</td></tr><tr><td><code>admin.token</code>（可选）</td><td>本机 Web 管理令牌。</td><td>仅 Web 网关启用时需要，作为私有文件保存。</td></tr><tr><td><code>migration.pending.json</code>（导入中）</td><td>离线迁移恢复标记。</td><td>未完成导入时 Agent 拒绝启动，要求先执行迁移恢复。</td></tr><tr><td>专用客户端目录</td><td><code>%LOCALAPPDATA%\Sub2API-Client</code>：<code>identity.key</code> 和 <code>client.lock</code>。</td><td>每设备 / 当前 Windows 用户独立生成身份，不保存可编辑的运行时路由配置。锁避免重复实例。</td></tr><tr><td>专用网关目录</td><td>本次 Ubuntu 部署为 <code>~/.local/share/p2p-sub2api-gateway</code>：<code>identity.key</code>、<code>gateway.json</code>、<code>gateway.lock</code>、<code>runtime.json</code>。</td><td>gateway.json 保存密码校验值；runtime.json 为代次与恢复状态快照，不是管理 API。升级和恢复不覆盖身份 / 校验值。</td></tr><tr><td>发行者构建 profile</td><td><code>P2P_SUB2API_PROFILE_FILE</code> 指定私有 JSON：网关、信令、专用访问凭证等。</td><td>私有构建输入不提交仓库、不放入 ZIP；凭证嵌入 EXE 后可由持有者提取。</td></tr><tr><td>内存快照 / 事件 / 预览</td><td>peer 状态、epoch、事件日志、队列、限时目录预览、界面草稿。</td><td>均不是持久任务完成证据；Agent 重启后客户端需重新同步。</td></tr></tbody></table></div>
 <div class="grid two"><article class="panel"><h3>可在线应用</h3><p class="small">资源权限、可信设备及来源、服务和转发规则映射、发送并发、自动恢复、接收安全余量、文件限速、接收根目录。密码通过专用命令更新。</p><p class="small">接收根先验证可写；既有任务保留原绑定位置。规则监听先准备，配置提交失败不发布新权限。</p></article><article class="panel"><h3>需要停止并重新启动</h3><p class="small">信令地址 / TLS、Relay、peer 协议模式和业务能力开关等网络运行时配置。使用显式重启配置流程，提交后进入 restart pending 并停止，不承诺透明热切换。</p><p class="small">各管理入口共享 revision；冲突时重新读取并处理草稿，不直接覆盖其他入口的更新。</p></article></div></section>
 
-<section id="operations"><div class="section-title"><span class="index">08</span><h2>生命周期、并发与故障恢复</h2></div><div class="scroll-table"><table><thead><tr><th>场景</th><th>当前设计</th></tr></thead><tbody><tr><td>首次运行</td><td>明确初始化或离线导入。默认桌面先附着，检测到现有配置才自动尝试拉起 Agent；不会为缺失配置静默创建另一身份。</td></tr><tr><td>Agent 启动</td><td>取得目录 / 身份所有权 → 检查迁移标记 → 加载配置、私钥和任务 → 启动会话核心 → 建立 IPC 和规则监听 → 对外提供管理状态。</td></tr><tr><td>断线与恢复</td><td>会话维护代际、候选和 peer 状态。任务恢复受认证、能力、权限、检查点和显式暂停意图约束；不会仅因重连成功就伪造完成。</td></tr><tr><td>文件调度</td><td>FIFO 接纳、发送并发 1–3；传输控制、限速、空间预算和队列有界。文件、测速和 TCP 使用独立业务流，但共享底层网络带宽。</td></tr><tr><td>管理请求超时</td><td>超时不等于操作未执行。客户端保留未确认请求 ID，查询或重试相同请求；配置提交由 revision 和最近提交信息辅助恢复。</td></tr><tr><td>配置写入失败</td><td>避免先发布授权后写盘；有恢复风险时关闭核心并报告恢复要求，保留可审计状态。</td></tr><tr><td>有序退出</td><td>显式 Stop → 停止业务 / 监听 → 等待核心关闭并释放目录、身份与任务锁。桌面托盘退出等待所有权释放。</td></tr><tr><td>服务器常驻</td><td>仓库包含 systemd 用户 / 系统服务模板、macOS LaunchAgent 模板。Windows 当前桌面拉起用户级独立 Agent；并非已经安装为 Windows 系统服务。</td></tr></tbody></table></div><div class="grid two"><article class="panel card"><h3>状态展示的来源</h3><p>Agent 提供网络与文件任务快照，桌面工作线程空闲时约每 2 秒轮询 Status / 当前 Tasks 页，界面定时消费更新。所有窗口共享同一投影；Task API 每页最多 128 项。</p></article><article class="panel card"><h3>运行预算</h3><p>Agent Status 公布 peer 16、待连接 8、TCP 总流 256 / 每规则 32、管理并发 32 等预算。入站三类业务队列各 32，防止控制和流接纳无限增长。</p></article></div><p class="caption">这些数字是当前代码中的控制预算，不代表吞吐基准，也不等于已完成所有规模与网络组合的压测。</p></section>
+<section id="operations"><div class="section-title"><span class="index">10</span><h2>生命周期、并发与自动恢复</h2></div><div class="panel recovery-map"><div class="lane-grid"><div class="lane"><div class="boundary-title">外部宿主管理 · 进程退出兜底</div><strong>Mac launchd / Ubuntu systemd</strong><p class="small">登录 / 开机启动，异常退出后重启。通用 Mac Agent 的 <code>--managed</code> 检测恢复条件后优雅退出，交由 launchd 拉起。</p></div><div class="lane special"><div class="boundary-title">专用进程内部 · 不替换身份</div><strong>宿主监测 + Client / GatewayRecovery</strong><p class="small">采样接口、停顿、核心、通道和服务状态 → 有界决策 → 停止旧核心 → 等待 2 秒 → 新核心重新登记和连接。</p></div></div><div class="flow-label">↓ 保持身份、配置、授权边界  ·  重新收集候选 ↓</div><div class="core-strip"><strong>共享 Session / QUIC 网络层</strong><span>信令重连保留健康 peer · 已连接 QUIC keepalive · IPv4 STUN 映射 15 秒保活</span></div></div>
+<div class="scroll-table"><table><thead><tr><th>范围 / 触发</th><th>恢复动作与保护条件</th></tr></thead><tbody><tr><td>宿主采样</td><td>每 5 秒观察一次。停顿 ≥30 秒、接口变化连续确认或核心连续 3 次停止触发恢复。通用 Mac managed 模式退出等待 launchd；专用版在进程内重建核心。</td></tr><tr><td>共享 NAT 映射保活</td><td>每 15 秒向产生 IPv4 公网映射的 STUN 地址发送 Binding Indication，使用原 QUIC UDP socket；无需响应，由 Quinn 独占接收。网络重配置时替换保活任务。</td></tr><tr><td>专用客户端通道缺失</td><td>无设备通道持续 60 秒后重建网络；健康 QUIC 通道不在每次就绪轮询时重复请求信令配对。</td></tr><tr><td>专用客户端业务卡住</td><td>HTTP 未就绪时，每 15 秒探测服务目录，超时 3 秒；连续 3 次失败触发恢复。目录健康而后端 HTTP 异常时等待 Sub2API，不拆除健康通道。</td></tr><tr><td>专用网关空闲</td><td>无人连接且没有待连接时，实际空闲 300 秒刷新候选。存在已连接用户时，不触发空闲 / 失败刷新。</td></tr><tr><td>专用网关失败 / 停滞</td><td>核心至少运行 60 秒；90 秒内 3 次传输失败、待连接阶段 45 秒无进展，或信令 150 秒未确认时重建。密码失败不算传输失败；健康用户优先保留。</td></tr><tr><td>长 TCP 流控制配额</td><td>TcpReady 协商结束立即释放每 peer 的服务控制槽位；HTTP keep-alive、WebSocket、SMB 持续流改由 TCP 总预算持有，不再占满 8 个控制槽导致新请求 RESET_BUSY。</td></tr></tbody></table></div><div class="callout warn"><strong>恢复语义：</strong>重建后接受新的 TCP 请求；已断开的 TCP 字节流不能透明续接。朋友版窗口关闭后需再次启动 BAT；自动重连不等于开机自启，也不会绕过凭证撤销或持续网络阻断。</div>
+<details><summary>2026-10-21 的验证记录与边界</summary><p>本地 10 项专用权限、恢复、保活与容量测试及 Clippy 已通过。隔离 Ubuntu 故障实验覆盖 302 秒闲置刷新、网关 / 客户端各断网 75 秒、客户端暂停 / 恢复 70 秒；均自动恢复，身份和网关配置不变。该记录对应已交付自动恢复包的源码；本次更新文档未重做故障注入。</p><p>Windows x64 已交叉构建；BAT、浏览器、真实休眠、物理断网和跨日运行仍需最新包的实机验收。Linux 暂停进程实验不是 Windows 真实休眠；128 peer 为代码上限，不是压测承诺。</p></details><div class="scroll-table"><table><thead><tr><th>场景</th><th>当前设计</th></tr></thead><tbody><tr><td>首次运行</td><td>明确初始化或离线导入。默认桌面先附着，检测到现有配置才自动尝试拉起 Agent；不会为缺失配置静默创建另一身份。</td></tr><tr><td>Agent 启动</td><td>取得目录 / 身份所有权 → 检查迁移标记 → 加载配置、私钥和任务 → 启动会话核心 → 建立 IPC 和规则监听 → 对外提供管理状态。</td></tr><tr><td>断线与恢复</td><td>会话维护代际、候选和 peer 状态。任务恢复受认证、能力、权限、检查点和显式暂停意图约束；不会仅因重连成功就伪造完成。</td></tr><tr><td>文件调度</td><td>FIFO 接纳、发送并发 1–3；传输控制、限速、空间预算和队列有界。文件、测速和 TCP 使用独立业务流，但共享底层网络带宽。</td></tr><tr><td>管理请求超时</td><td>超时不等于操作未执行。客户端保留未确认请求 ID，查询或重试相同请求；配置提交由 revision 和最近提交信息辅助恢复。</td></tr><tr><td>配置写入失败</td><td>避免先发布授权后写盘；有恢复风险时关闭核心并报告恢复要求，保留可审计状态。</td></tr><tr><td>有序退出</td><td>显式 Stop → 停止业务 / 监听 → 等待核心关闭并释放目录、身份与任务锁。桌面托盘退出等待所有权释放。</td></tr><tr><td>服务器常驻</td><td>仓库包含 systemd 用户 / 系统服务模板、macOS LaunchAgent 模板。Windows 当前桌面拉起用户级独立 Agent；并非已经安装为 Windows 系统服务。</td></tr></tbody></table></div><div class="grid two"><article class="panel card"><h3>状态展示的来源</h3><p>Agent 提供网络与文件任务快照，桌面工作线程空闲时约每 2 秒轮询 Status / 当前 Tasks 页，界面定时消费更新。所有窗口共享同一投影；Task API 每页最多 128 项。</p></article><article class="panel card"><h3>运行预算</h3><p>普通构建 peer 上限 16；开启 sub2api-gateway 的专用网关构建上限 128。待连接 8、TCP 总流 256 / 每规则 32，通用 Web 管理并发 32 等预算仍有界。入站三类业务队列各 32，防止控制和流接纳无限增长。</p></article></div><p class="caption">这些数字是当前代码中的控制预算，不代表吞吐基准，也不等于已完成所有规模与网络组合的压测。</p></section>
 
-<section id="boundaries"><div class="section-title"><span class="index">09</span><h2>兼容边界与当前状态</h2></div><div class="scroll-table"><table><thead><tr><th>路径 / 能力</th><th>当前实现口径</th></tr></thead><tbody><tr><td>默认桌面 → Agent</td><td>主界面通过 IPC 接入新核心。原文件传输布局、二级独立窗口、主窗口关闭到托盘属于当前工作区改动。</td></tr><tr><td>新 Agent ↔ 新 Agent</td><td>默认统一节点 v1，承载文件、目录、服务与测速。具体部署的 NAT / 防火墙 / 跨平台组合仍需对应环境验证。</td></tr><tr><td>新 Agent ↔ 旧桌面</td><td>保留逐 peer 显式 <code>LegacyDesktopV1</code> 适配和受限资源策略。它是远端线协议兼容，与前端是否使用原布局无关。</td></tr><tr><td>新 Agent ↔ 旧 CLI v3</td><td>Agent 内明确不支持该 peer 模式，不自动降级。旧 CLI 自身的历史入口仍保留。</td></tr><tr><td><code>p2p-desktop --legacy</code></td><td>源码保留的显式内嵌旧运行入口。它不是当前默认主界面的后端，也不是本次主界面接 Agent 的方式。</td></tr><tr><td>旧数据迁移</td><td>显式预览、指纹校验、停机、备份与可恢复导入；不等于启动时直接复用旧配置，更不搬动业务文件。默认新旧数据目录不同。</td></tr></tbody></table></div><details><summary>已经有源码实现，不等于每种环境都验收完成</summary><p>本文以当前代码为准。仓库内的早期目标设计与发布草案带有各自基线，不能覆盖此快照。代码具备单元、进程及原生窗口测试；实际跨平台、真实旧二进制、不同 NAT 和长时间运行的覆盖应结合对应测试证据判断。本文不作新的全面验收声明。</p></details><details><summary>功能范围</summary><p>当前核心围绕设备连接、文件 / 目录传输、增量预览、TCP 服务和转发、测速、诊断、授权与本机管理。Web 是本机管理入口；没有把浏览器变成 P2P 节点。当前不应理解为全网段 VPN、通用远程桌面、任意远程文件浏览器或云账号平台。</p></details><details><summary>开发时应继续守住的边界</summary><p>新业务进入无 GUI 核心，由 Agent 统一持有状态；所有管理入口使用同一控制契约。不要在新窗口复制网络运行时、直接编辑在线任务库，或为方便界面展示绕过授权和配置 revision。历史适配与默认路径分别管理，协议变更需要版本和兼容证据。</p></details></section>
+<section id="boundaries"><div class="section-title"><span class="index">11</span><h2>兼容边界与当前状态</h2></div><div class="scroll-table"><table><thead><tr><th>路径 / 能力</th><th>当前实现口径</th></tr></thead><tbody><tr><td>默认桌面 → Agent</td><td>主界面通过 IPC 接入新核心；文件传输工作台、二级独立窗口和托盘已包含在源码基线中。</td></tr><tr><td>新 Agent ↔ 新 Agent</td><td>默认统一节点 v1，承载文件、目录、服务与测速。具体部署的 NAT / 防火墙 / 跨平台组合仍需对应环境验证。</td></tr><tr><td>新 Agent ↔ 旧桌面</td><td>保留逐 peer 显式 <code>LegacyDesktopV1</code> 适配和受限资源策略。它是远端线协议兼容，与前端是否使用原布局无关。</td></tr><tr><td>新 Agent ↔ 旧 CLI v3</td><td>Agent 内明确不支持该 peer 模式，不自动降级。旧 CLI 自身的历史入口仍保留。</td></tr><tr><td><code>p2p-desktop --legacy</code></td><td>源码保留的显式内嵌旧运行入口。它不是当前默认主界面的后端，也不是本次主界面接 Agent 的方式。</td></tr><tr><td>旧数据迁移</td><td>显式预览、指纹校验、停机、备份与可恢复导入；不等于启动时直接复用旧配置，更不搬动业务文件。默认新旧数据目录不同。</td></tr></tbody></table></div><details><summary>已经有源码实现，不等于每种环境都验收完成</summary><p>本文按 2026-10-21 分层整理后的源码更新。仓库内的早期目标设计与发布草案带有各自基线，不能覆盖此快照。代码具备单元、进程及原生窗口测试；实际跨平台、真实旧二进制、不同 NAT 和长时间运行的覆盖应结合对应测试证据判断。本文不作新的全面验收声明。</p></details><details><summary>功能范围</summary><p>当前核心围绕设备连接、文件 / 目录传输、增量预览、TCP 服务和转发、测速、诊断、授权与本机管理。Web 是本机管理入口；没有把浏览器变成 P2P 节点。当前不应理解为全网段 VPN、通用远程桌面、任意远程文件浏览器或云账号平台。</p></details><details><summary>开发时应继续守住的边界</summary><p>新业务进入无 GUI 核心；通用节点由 Agent 统一持有状态，专用模式由隔离宿主持有自己的核心。所有通用管理入口使用同一控制契约。不要在新窗口复制网络运行时、直接编辑在线任务库，或为方便界面展示绕过授权和配置 revision。历史适配与默认路径分别管理，协议变更需要版本和兼容证据。</p></details></section>
 
-<section id="sources"><div class="section-title"><span class="index">10</span><h2>源码与文档索引</h2></div><p class="small">源码链接相对于本 HTML，保留在仓库的 docs 目录即可点击定位。单独复制 HTML 后，正文与交互仍可离线使用，源码链接需原仓库目录配合。</p><div class="source-groups"><article class="panel"><h3>程序入口与桌面</h3><ul><li><a href="../Cargo.toml"><code>Cargo.toml</code></a> — 特性、依赖和二进制</li><li><a href="../src/bin/p2p-desktop.rs"><code>src/bin/p2p-desktop.rs</code></a> — 默认与显式兼容入口</li><li><a href="../src/bin/p2p-agent.rs"><code>src/bin/p2p-agent.rs</code></a> — Agent 主程序</li><li><a href="../src/bin/p2p-node.rs"><code>src/bin/p2p-node.rs</code></a> — 新管理 CLI</li><li><a href="../src/desktop/agent_shell.rs"><code>desktop/agent_shell.rs</code></a> — 共享模型与 IPC worker</li><li><a href="../src/desktop/agent_shell/workbench.rs"><code>agent_shell/workbench.rs</code></a> — 文件传输工作台</li><li><a href="../src/desktop/agent_shell/windows.rs"><code>agent_shell/windows.rs</code></a> — 独立子窗口</li><li><a href="../src/desktop/agent_shell/tray_host.rs"><code>agent_shell/tray_host.rs</code></a> — 托盘生命周期</li></ul></article><article class="panel"><h3>节点与持久化</h3><ul><li><a href="../src/node/agent.rs"><code>node/agent.rs</code></a> — 唯一宿主与 IPC</li><li><a href="../src/node/agent_state.rs"><code>node/agent_state.rs</code></a> — 配置协调</li><li><a href="../src/node/control.rs"><code>node/control.rs</code></a> — 命令与快照</li><li><a href="../src/node/session.rs"><code>node/session.rs</code></a> — 会话编排</li><li><a href="../src/node/agent_config.rs"><code>node/agent_config.rs</code></a> — 配置 schema</li><li><a href="../src/node/agent_paths.rs"><code>node/agent_paths.rs</code></a> — 目录与 IPC 寻址</li><li><a href="../src/node/task_store.rs"><code>node/task_store.rs</code></a> — 任务存储</li><li><a href="../src/node/migration.rs"><code>node/migration.rs</code></a> — 离线导入</li></ul></article><article class="panel"><h3>网络、业务与安全</h3><ul><li><a href="../src/node/wire.rs"><code>node/wire.rs</code></a> / <a href="../src/node/dispatch.rs"><code>dispatch.rs</code></a></li><li><a href="../src/node/transfer.rs"><code>node/transfer.rs</code></a> / <a href="../src/node/publish.rs"><code>publish.rs</code></a></li><li><a href="../src/node/incremental.rs"><code>node/incremental.rs</code></a> / <a href="../src/node/services.rs"><code>services.rs</code></a></li><li><a href="../src/node/authorization.rs"><code>node/authorization.rs</code></a> / <a href="../src/node/remote_auth.rs"><code>remote_auth.rs</code></a></li><li><a href="../src/net/mod.rs"><code>net/mod.rs</code></a> / <a href="../src/discovery/signal.rs"><code>discovery/signal.rs</code></a></li><li><a href="../src/transport/handshake.rs"><code>transport/handshake.rs</code></a> / <a href="../src/relay/client.rs"><code>relay/client.rs</code></a></li><li><a href="../src/node/agent_web.rs"><code>node/agent_web.rs</code></a> — 本机 Web 桥接</li></ul></article><article class="panel"><h3>规格与运行资料</h3><ul><li><a href="specs/NODE_AGENT_API.md">Agent API 规格</a></li><li><a href="specs/NODE_WIRE.md">统一节点协议规格</a></li><li><a href="specs/NODE_AUTHORIZATION.md">资源与授权模型</a></li><li><a href="specs/NODE_STATE_RECOVERY.md">状态恢复规格</a></li><li><a href="specs/NODE_MIGRATION_IMPORT.md">旧数据导入规格</a></li><li><a href="../packaging/RUNNING.md">运行说明</a> / <a href="../packaging/node/README.md">Agent 托管说明</a></li><li><a href="NODE_ARCHITECTURE.md">早期目标架构设计</a> — 历史目标，注意其状态与基线</li></ul></article></div></section>
-<footer class="footer">P2P File · 当前整体架构说明 / 2026-10-20<br>依据 F:\git\p2p_file 当前工作区整理。纯本地静态文档，不读取身份、配置、令牌或实时节点状态；不向外部服务请求资源。</footer>
+<section id="sources"><div class="section-title"><span class="index">12</span><h2>源码与文档索引</h2></div><p class="small">源码链接相对于本 HTML，保留在仓库的 docs 目录即可点击定位。单独复制 HTML 后，正文与交互仍可离线使用，源码链接需原仓库目录配合。</p><div class="source-groups"><article class="panel"><h3>程序入口与桌面</h3><ul><li><a href="../Cargo.toml"><code>Cargo.toml</code></a> — 特性、依赖和二进制</li><li><a href="../src/bin/p2p-desktop.rs"><code>bin/p2p-desktop.rs</code></a> — 默认与显式兼容入口</li><li><a href="../src/bin/p2p-agent.rs"><code>bin/p2p-agent.rs</code></a> — Agent 主程序</li><li><a href="../src/bin/p2p-node.rs"><code>bin/p2p-node.rs</code></a> — 新管理 CLI</li><li><a href="../src/desktop/agent_shell.rs"><code>desktop/agent_shell.rs</code></a> — 共享模型与 IPC worker</li><li><a href="../src/desktop/agent_shell/workbench.rs"><code>desktop/agent_shell/workbench.rs</code></a> — 文件传输工作台</li><li><a href="../src/desktop/agent_shell/windows.rs"><code>desktop/agent_shell/windows.rs</code></a> — 独立子窗口</li><li><a href="../src/desktop/agent_shell/tray_host.rs"><code>desktop/agent_shell/tray_host.rs</code></a> — 托盘生命周期</li></ul></article><article class="panel"><h3>节点与持久化</h3><ul><li><a href="../src/node/host/agent.rs"><code>node/host/agent.rs</code></a> — 唯一宿主与 IPC</li><li><a href="../src/node/host/configuration.rs"><code>node/host/configuration.rs</code></a> — 配置协调</li><li><a href="../src/node/core/control.rs"><code>node/core/control.rs</code></a> — 命令与快照</li><li><a href="../src/node/core/session.rs"><code>node/core/session.rs</code></a> — 会话编排</li><li><a href="../src/node/core/settings.rs"><code>node/core/settings.rs</code></a> — 配置 schema</li><li><a href="../src/node/local/paths.rs"><code>node/local/paths.rs</code></a> — 目录与 IPC 寻址</li><li><a href="../src/node/core/task_store.rs"><code>node/core/task_store.rs</code></a> — 任务存储</li><li><a href="../src/node/adapters/migration.rs"><code>node/adapters/migration.rs</code></a> — 离线导入</li></ul></article><article class="panel"><h3>网络、业务与安全</h3><ul><li><a href="../src/node/core/wire.rs"><code>node/core/wire.rs</code></a> / <a href="../src/node/core/dispatch.rs"><code>node/core/dispatch.rs</code></a></li><li><a href="../src/node/core/transfer.rs"><code>node/core/transfer.rs</code></a> / <a href="../src/node/core/publish.rs"><code>node/core/publish.rs</code></a></li><li><a href="../src/node/core/incremental.rs"><code>node/core/incremental.rs</code></a> / <a href="../src/node/core/services.rs"><code>node/core/services.rs</code></a></li><li><a href="../src/node/core/authorization.rs"><code>node/core/authorization.rs</code></a> / <a href="../src/node/core/remote_auth.rs"><code>node/core/remote_auth.rs</code></a></li><li><a href="../src/net/mod.rs"><code>net/mod.rs</code></a> / <a href="../src/discovery/signal.rs"><code>discovery/signal.rs</code></a></li><li><a href="../src/transport/handshake.rs"><code>transport/handshake.rs</code></a> / <a href="../src/relay/client.rs"><code>relay/client.rs</code></a></li><li><a href="../src/node/adapters/web.rs"><code>node/adapters/web.rs</code></a> — 本机 Web 桥接</li></ul></article><article class="panel"><h3>专用版、恢复与本机导航</h3><ul><li><a href="../src/bin/sub2api-client.rs">Windows 专用入口</a> / <a href="../src/bin/p2p-sub2api-gateway.rs">网关入口</a></li><li><a href="../src/node/products/sub2api.rs">固定宿主、凭证与服务隔离</a></li><li><a href="../src/node/products/recovery.rs">有界恢复策略</a> / <a href="../src/node/host/recovery.rs">宿主采样</a></li><li><a href="../src/transport/quic.rs">QUIC socket 与 STUN 保活</a></li><li><a href="../scripts/node-host.py">通用节点安装与启动</a></li><li><a href="../packaging/sub2api-windows/README.md">专用版构建与授权说明</a></li><li><a href="../scripts/package-sub2api-windows.py">Windows 打包脚本</a></li><li><a href="../service-navigation.html">服务导航</a> / <a href="../scripts/update-service-navigation.py">导航同步脚本</a></li></ul></article><article class="panel"><h3>规格与运行资料</h3><ul><li><a href="specs/NODE_AGENT_API.md">Agent API 规格</a></li><li><a href="specs/NODE_WIRE.md">统一节点协议规格</a></li><li><a href="specs/NODE_AUTHORIZATION.md">资源与授权模型</a></li><li><a href="specs/NODE_STATE_RECOVERY.md">状态恢复规格</a></li><li><a href="specs/NODE_MIGRATION_IMPORT.md">旧数据导入规格</a></li><li><a href="../packaging/RUNNING.md">运行说明</a> / <a href="../packaging/node/README.md">Agent 托管说明</a></li><li><a href="NODE_ARCHITECTURE.md">早期目标架构设计</a> — 历史目标，注意其状态与基线</li></ul></article></div></section>
+<footer class="footer">P2P File · 当前整体架构说明 / 2026-10-21<br>源码视图对应 2026-10-21 分层整理；部署章节保留此前核对的历史快照。页面离线运行，不读取私钥、令牌或实时节点状态，不请求外部资源。</footer>
 </main></div>
 <script>
 'use strict';
 const nodes={
+"bat":{"tag": "WINDOWS / ENTRY", "title": "BAT 一键启动", "text": "Start-Sub2API.bat 在程序目录运行 Sub2API.exe，不传入用户配置参数。", "items": ["ZIP 解压后运行，无额外解释器。", "保持窗口运行；退出后不继续映射。", "不安装朋友侧开机启动项。"], "sources": [["../packaging/sub2api-windows/Start-Sub2API.bat", "BAT"], ["../scripts/package-sub2api-windows.py", "打包白名单"]]},"fixedclient":{"tag": "WINDOWS / FIXED CLIENT", "title": "专用客户端宿主", "text": "独立身份、嵌入式访问凭证、固定 loopback 监听；直接装配 NodeControl 和 ForwardManager。", "items": ["不启动通用管理 IPC 或 Web。", "只请求 sub2api 服务，不允许改远端目标。", "缺失通道 / 目录无响应 / 接口变化时重建网络。"], "sources": [["../src/bin/sub2api-client.rs", "无配置参数入口"], ["../src/node/products/sub2api.rs", "专用宿主"], ["../src/node/products/recovery.rs", "恢复策略"]]},"browser":{"tag": "LOCAL / HTTP APPLICATION", "title": "浏览器使用 Sub2API", "text": "HTTP 访问 127.0.0.1:18081，客户端将它搬运为 QUIC Service 流。浏览器本身不参与 P2P 协议。", "items": ["后端有 HTTP 响应后尝试打开默认浏览器。", "应用账号权限由 Sub2API 决定。", "HTTP 健康检查与服务目录健康检查分开处理。"], "sources": [["../src/node/products/sub2api.rs", "就绪检测"], ["../src/node/host/forwarding.rs", "本地监听"]]},"fixedgateway":{"tag": "UBUNTU / ISOLATED GATEWAY", "title": "独立专用网关", "text": "复用节点核心，持有独立身份和密码校验值；仅当前密码认证成功的设备进入内存 ACL。", "items": ["只发布 sub2api → 127.0.0.1:8080。", "无文件 / 测速 / 通用管理 API。", "同一进程重建核心，目录锁与身份保持。"], "sources": [["../src/bin/p2p-sub2api-gateway.rs", "初始化 / 启动"], ["../src/node/products/sub2api.rs", "网关与内存 ACL"], ["../src/node/products/recovery.rs", "网关恢复"]]},"backend":{"tag": "UBUNTU / APPLICATION", "title": "Sub2API 后端服务", "text": "网关只在授权检查后建立到固定 127.0.0.1:8080 的 TCP 连接，不允许客户端选择任意远端地址。", "items": ["多个设备可访问同一后端。", "服务目录仅表示 P2P 授权，不代表应用账号已登录。", "轮换专用接入凭证与应用账号管理是不同动作。"], "sources": [["../src/node/core/services.rs", "按服务 ID 授权开流"], ["../src/node/products/sub2api.rs", "固定目标"]]},
 desktop:{tag:'LOCAL / PRESENTATION',title:'桌面管理前端',text:'GPUI 绘制原文件传输工作台。多个原生窗口共享 AgentShell；ClientWorker 在后台线程中调用 AgentClient。',items:['负责用户输入、草稿、过滤与状态展示。','窗口操作不启动额外 P2P 会话。','主窗口关闭到托盘；显式退出才停止 Agent。'],sources:[['../src/desktop/agent_shell.rs','AgentShell / ClientWorker'],['../src/desktop/agent_shell/workbench.rs','工作台'],['../src/desktop/agent_shell/windows.rs','独立窗口']]},
-cli:{tag:'LOCAL / MANAGEMENT',title:'管理命令行',text:'p2p-node 管理同一个 Agent，在线命令经 IPC 进入统一协调器。',items:['查询状态、配置、任务和服务。','连接、传输、规则、密码与授权操作共用命令契约。','初始化、离线编辑和迁移检查所有权。'],sources:[['../src/bin/p2p-node.rs','CLI 入口'],['../src/node/management_cli.rs','管理动作']]},
-web:{tag:'LOCAL / OPTIONAL',title:'可选 Web 网关',text:'p2p-node web 提供本地管理页，HTTP 请求通过 AgentClient 桥接 IPC。',items:['仅绑定 loopback，管理 API 需私有 token。','不拥有身份、任务库或 peer 连接。','浏览器关闭不等于停止 Agent。'],sources:[['../src/node/agent_web.rs','Web 网关'],['../src/node/agent_web.html','管理页面']]},
-agent:{tag:'LOCAL / SINGLE OWNER',title:'唯一后台宿主',text:'p2p-agent 是当前正式后台形态，独占一个数据目录及身份，装配无 GUI 的节点核心。',items:['启动、IPC、配置 revision、幂等请求与事件日志。','协调资源策略、文件任务与转发监听。','管理端可附着或重开，业务状态由后台负责。'],sources:[['../src/node/agent.rs','Agent 宿主'],['../src/node/agent_state.rs','配置协调'],['../src/node/control.rs','NodeControl']]},
-session:{tag:'CORE / CONNECTION',title:'会话与流分发',text:'Session 管理多 peer、认证、代际、候选和重连。统一连接只有一个入站双向流接纳者。',items:['NodeId 身份认证与密码 / 信任证明。','统一能力协商，再进行资源权限检查。','File / Service / Speed 分流，接纳队列有界。'],sources:[['../src/node/session.rs','会话循环'],['../src/node/wire.rs','统一协议'],['../src/node/dispatch.rs','流分发']]},
-business:{tag:'CORE / DOMAIN',title:'三类核心业务',text:'文件 / 目录、TCP 转发与测速共享认证连接，使用独立业务流和领域状态机。',items:['文件：清单、分片、续传、队列、限速、安全发布。','TCP：按服务 ID 开流，本地 loopback 监听。','测速：独立流统计传输率与 RTT。'],sources:[['../src/node/transfer.rs','文件服务'],['../src/node/services.rs','TCP 服务'],['../src/node/speed.rs','测速']]},
-state:{tag:'LOCAL / PERSISTENCE',title:'配置与任务状态',text:'node.json、identity.key、tasks.json 由后台及离线生命周期工具按锁保护操作。',items:['revision 比较防止多个入口覆盖。','原子写、检查点和持久完成回执。','目录锁 + 身份租约 + 任务库锁约束单一所有权。'],sources:[['../src/node/agent_paths.rs','路径'],['../src/node/agent_config.rs','配置'],['../src/node/task_store.rs','任务库']]},
-peer:{tag:'REMOTE / SYMMETRIC',title:'远端节点',text:'远端运行同一套 Agent 核心。可以无界面常驻，也可以通过自己的桌面 / CLI 管理。',items:['一个节点可主动连接，也可接受授权连接。','远端声明服务，访问方按服务 ID 使用。','本机权限与远端权限分别生效。'],sources:[['../src/node/authorization.rs','资源策略'],['../src/node/services.rs','服务目录']]},
+cli:{tag:'LOCAL / MANAGEMENT',title:'管理命令行',text:'p2p-node 管理同一个 Agent，在线命令经 IPC 进入统一协调器。',items:['查询状态、配置、任务和服务。','连接、传输、规则、密码与授权操作共用命令契约。','初始化、离线编辑和迁移检查所有权。'],sources:[['../src/bin/p2p-node.rs','CLI 入口'],['../src/node/adapters/cli.rs','管理动作']]},
+web:{tag:'LOCAL / OPTIONAL',title:'可选 Web 网关',text:'p2p-node web 提供本地管理页，HTTP 请求通过 AgentClient 桥接 IPC。',items:['仅绑定 loopback，管理 API 需私有 token。','不拥有身份、任务库或 peer 连接。','浏览器关闭不等于停止 Agent。'],sources:[['../src/node/adapters/web.rs','Web 网关'],['../src/node/adapters/web.html','管理页面']]},
+agent:{tag:'LOCAL / SINGLE OWNER',title:'唯一后台宿主',text:'p2p-agent 是当前正式后台形态，独占一个数据目录及身份，装配无 GUI 的节点核心。',items:['启动、IPC、配置 revision、幂等请求与事件日志。','协调资源策略、文件任务与转发监听。','管理端可附着或重开，业务状态由后台负责。'],sources:[['../src/node/host/agent.rs','Agent 宿主'],['../src/node/host/configuration.rs','配置协调'],['../src/node/core/control.rs','NodeControl']]},
+session:{tag:'CORE / CONNECTION',title:'会话与流分发',text:'Session 管理多 peer、认证、代际、候选和重连。统一连接只有一个入站双向流接纳者。',items:['NodeId 身份认证与密码 / 信任证明。','统一能力协商，再进行资源权限检查。','File / Service / Speed 分流，接纳队列有界。'],sources:[['../src/node/core/session.rs','会话循环'],['../src/node/core/wire.rs','统一协议'],['../src/node/core/dispatch.rs','流分发']]},
+business:{tag:'CORE / DOMAIN',title:'三类核心业务',text:'文件 / 目录、TCP 转发与测速共享认证连接，使用独立业务流和领域状态机。',items:['文件：清单、分片、续传、队列、限速、安全发布。','TCP：按服务 ID 开流，本地 loopback 监听。','测速：独立流统计传输率与 RTT。'],sources:[['../src/node/core/transfer.rs','文件服务'],['../src/node/core/services.rs','TCP 服务'],['../src/node/core/speed.rs','测速']]},
+state:{tag:'LOCAL / PERSISTENCE',title:'配置与任务状态',text:'node.json、identity.key、tasks.json 由后台及离线生命周期工具按锁保护操作。',items:['revision 比较防止多个入口覆盖。','原子写、检查点和持久完成回执。','目录锁 + 身份租约 + 任务库锁约束单一所有权。'],sources:[['../src/node/local/paths.rs','路径'],['../src/node/core/settings.rs','配置'],['../src/node/core/task_store.rs','任务库']]},
+peer:{tag:'REMOTE / SYMMETRIC',title:'远端节点',text:'远端运行同一套 Agent 核心。可以无界面常驻，也可以通过自己的桌面 / CLI 管理。',items:['一个节点可主动连接，也可接受授权连接。','远端声明服务，访问方按服务 ID 使用。','本机权限与远端权限分别生效。'],sources:[['../src/node/core/authorization.rs','资源策略'],['../src/node/core/services.rs','服务目录']]},
 signal:{tag:'INFRASTRUCTURE / DISCOVERY',title:'信令与地址探测',text:'信令负责节点登记、九位短 ID 查找和候选交换；STUN 负责探测 UDP 公网映射。',items:['设备仍需自行完成身份认证。','双栈候选、同端口探测与打洞服务于直连。','信令地址可以配置 TLS；短 ID 不是访问凭据。'],sources:[['../src/discovery/signal.rs','信令'],['../src/discovery/short_id.rs','短 ID'],['../src/net/mod.rs','网络路径']]},
 relay:{tag:'INFRASTRUCTURE / OPTIONAL',title:'UDP Relay 兜底',text:'配置 Relay 后，Direct 未及时认证成功时，可延迟尝试中继。',items:['转发设备间端到端加密 QUIC 数据报。','票据、配对、超时及资源额度约束中继使用。','与信令基础设施可共同部署，业务授权仍在节点。'],sources:[['../src/relay/client.rs','Relay 客户端'],['../src/relay/server.rs','Relay 服务端'],['../src/cli.rs','部署参数']]}
 };
 const flows={
-connect:{name:'连接设备',steps:[['输入设备 ID','桌面 / CLI → 本地 IPC','输入完整 NodeId 或九位短 ID，可附带访问密码。前端只提交 Connect 命令，不直接拨号。','../src/node/ipc.rs'],['查找与打洞','Agent → 信令 / STUN → 对端','短 ID 解析到节点身份，交换候选。每个地址族路径复用探测、打洞和 QUIC 所需的本地 socket；优先建立可认证直连，已配置时允许 Relay 兜底。','../src/net/mod.rs'],['身份与权限','双方 Agent → 认证 / 能力 / 策略','校验目标身份与连接绑定，协商统一能力；执行密码或可信设备认证，并按资源策略授予方向与服务权限。','../src/node/session.rs'],['呈现状态','NodeSnapshot → IPC → 所有窗口','Agent 更新 peer 快照；前端读取状态并刷新共享模型。短 ID、信令在线、链路连通和业务授权是不同状态。','../src/node/control.rs']]},
-send:{name:'发送文件',steps:[['选择与提交','主工作台 → Send(peer, paths)','选择文件或目录，前端向 Agent 提交本机绝对路径。accepted 仅代表任务被接纳。','../src/desktop/agent_shell/workbench.rs'],['调度与校验','TransferService → 队列 → 认证连接','后台扫描并形成任务，按 FIFO 和发送并发额度调度；校验 peer 身份、连接代际、能力及文件方向权限。','../src/node/transfer.rs'],['分片与落盘','发送端 → QUIC 文件流 → 接收端','交换清单和分片状态，BLAKE3 校验，写入接收临时位置并维护检查点；限速与可用空间预算持续约束传输。','../src/node/transfer_files.rs'],['发布与回执','接收端安全发布 → 持久收据 → 状态','接收端验证完整数据并安全发布；任务完成由持久回执推动，窗口根据任务快照显示结果。暂停续传保留已确认进度。','../src/node/publish.rs']]},
-directory:{name:'增量目录',steps:[['请求预览','工作台 → PreviewDirectory','Agent 扫描指定目录，并与授权对端生成差异预览；目录源路径留在本机。','../src/node/incremental.rs'],['展示差异','Agent Tasks → 独立目录预览窗口','列出新增、变更和不变项。预览有存活期限，是需要确认的候选计划。','../src/desktop/agent_shell/workbench.rs'],['确认并复核','ConfirmDirectory → Agent','用户确认后，后台复核源内容与当前权限，再接纳实际发送任务，避免预览后变化直接绕过校验。','../src/node/incremental.rs'],['差量传输','文件任务 → 对端接收根','复用文件服务，只发送需要的内容，跳过不变项；不会因此删除接收端额外文件。','../src/node/transfer.rs']]},
-tcp:{name:'TCP 转发',steps:[['远端发布服务','远端配置 → services / resources','服务端明确配置服务 ID、目标地址和允许设备；连接通过认证并不自动获得所有 TCP 目标权限。','../src/node/authorization.rs'],['本机创建规则','管理入口 → 配置协调 → ForwardManager','本机规则将 loopback 监听地址映射到 peer + service ID；监听准备成功后随配置提交启用。','../src/node/agent_forward.rs'],['请求业务流','本地 TCP 连接 → QUIC Service 流','应用连接本机监听，节点发起 OpenTcp(service_id)。远端校验服务和权限后建立目标 TCP 连接。','../src/node/services.rs'],['双向转发','本地应用 ↔ QUIC ↔ 远端服务','字节在 TCP 与加密 QUIC 流之间双向搬运，受总流数、规则额度和撤销策略约束。','../src/node/tunnel.rs']]},
-config:{name:'提交配置',steps:[['读取基线','Config → revision + settings','各管理入口读取同一 Agent 配置并保留草稿基线。通用读取移除远端密码验证器，密码由专用命令设置。','../src/node/agent_config.rs'],['提交与校验','ApplyConfig(expected_revision)','Agent 串行协调变更，比对 revision，校验 schema、授权来源、资源和规则。冲突不覆盖；网络运行时变化转入显式重启流程。','../src/node/agent_state.rs'],['准备和持久化','准备监听 → 原子写配置 → 发布策略','先准备监听和接收根等资源；核心在同一协调轮次写入提交记录，再发布权限。磁盘失败时不发布新授权。','../src/node/agent_state.rs'],['同步生效状态','新 revision / 错误 → 管理入口','在线字段生效后返回 revision。需要重启的变更通过 ConfigureRestart 提交并停止，随后显式启动；结果未知时用相同请求 ID 恢复确认。','../src/node/agent.rs']]}
+"restricted":{"name": "专用接入", "steps": [["BAT 启动", "Windows → 专用进程", "首次生成当前用户的设备身份并持锁。读取编译期嵌入 profile，只监听 127.0.0.1:18081，不提供配置入口。", "../src/bin/sub2api-client.rs"], ["信令与直连", "客户端 ↔ 信令 / STUN ↔ 专用网关", "登记设备并交换候选，完成同端口打洞与 QUIC 身份绑定。当前分发配置未启用 Relay。", "../src/node/core/session.rs"], ["专用凭证授权", "网关 → 当前连接的内存 ACL", "完成专用密码认证后，才将该设备加入 sub2api 的授权名单；认证断开后回收。", "../src/node/products/sub2api.rs"], ["应用请求", "浏览器 → 18081 → Service 流 → 8080", "网关按 sub2api 服务 ID 再次检查权限并连接固定目标；Sub2API 自身继续检查应用账号。", "../src/node/core/services.rs"]]},"recover":{"name": "自动恢复", "steps": [["观察故障", "宿主监测 + 业务就绪探测", "区分信令、设备通道、服务目录、HTTP 后端；健康用户与健康通道优先保留。", "../src/node/products/sub2api.rs"], ["有界决策", "ClientRecovery / GatewayRecovery", "客户端通道持续缺失或目录探测连续失败；网关无人在线时闲置刷新或连接失败刷新。认证失败不计入传输失败。", "../src/node/products/recovery.rs"], ["停止旧核心", "停止监听 / 会话 → 等待回收", "专用进程保留目录锁和设备身份，优雅收尾核心；等待 2 秒后重建。通用 Mac managed 模式由 launchd 拉起进程。", "../src/node/host/recovery.rs"], ["重新登记与服务恢复", "新候选 → 信令 → 授权 → 本地入口", "复用身份与凭证重新连接，恢复新业务请求；不透明续接已断开的 TCP 字节流，不改写持久配置。", "../src/node/products/sub2api.rs"]]},
+connect:{name:'连接设备',steps:[['输入设备 ID','桌面 / CLI → 本地 IPC','输入完整 NodeId 或九位短 ID，可附带访问密码。前端只提交 Connect 命令，不直接拨号。','../src/node/api/protocol.rs'],['查找与打洞','Agent → 信令 / STUN → 对端','短 ID 解析到节点身份，交换候选。每个地址族路径复用探测、打洞和 QUIC 所需的本地 socket；优先建立可认证直连，已配置时允许 Relay 兜底。','../src/net/mod.rs'],['身份与权限','双方 Agent → 认证 / 能力 / 策略','校验目标身份与连接绑定，协商统一能力；执行密码或可信设备认证，并按资源策略授予方向与服务权限。','../src/node/core/session.rs'],['呈现状态','NodeSnapshot → IPC → 所有窗口','Agent 更新 peer 快照；前端读取状态并刷新共享模型。短 ID、信令在线、链路连通和业务授权是不同状态。','../src/node/core/control.rs']]},
+send:{name:'发送文件',steps:[['选择与提交','主工作台 → Send(peer, paths)','选择文件或目录，前端向 Agent 提交本机绝对路径。accepted 仅代表任务被接纳。','../src/desktop/agent_shell/workbench.rs'],['调度与校验','TransferService → 队列 → 认证连接','后台扫描并形成任务，按 FIFO 和发送并发额度调度；校验 peer 身份、连接代际、能力及文件方向权限。','../src/node/core/transfer.rs'],['分片与落盘','发送端 → QUIC 文件流 → 接收端','交换清单和分片状态，BLAKE3 校验，写入接收临时位置并维护检查点；限速与可用空间预算持续约束传输。','../src/node/core/transfer_files.rs'],['发布与回执','接收端安全发布 → 持久收据 → 状态','接收端验证完整数据并安全发布；任务完成由持久回执推动，窗口根据任务快照显示结果。暂停续传保留已确认进度。','../src/node/core/publish.rs']]},
+directory:{name:'增量目录',steps:[['请求预览','工作台 → PreviewDirectory','Agent 扫描指定目录，并与授权对端生成差异预览；目录源路径留在本机。','../src/node/core/incremental.rs'],['展示差异','Agent Tasks → 独立目录预览窗口','列出新增、变更和不变项。预览有存活期限，是需要确认的候选计划。','../src/desktop/agent_shell/workbench.rs'],['确认并复核','ConfirmDirectory → Agent','用户确认后，后台复核源内容与当前权限，再接纳实际发送任务，避免预览后变化直接绕过校验。','../src/node/core/incremental.rs'],['差量传输','文件任务 → 对端接收根','复用文件服务，只发送需要的内容，跳过不变项；不会因此删除接收端额外文件。','../src/node/core/transfer.rs']]},
+tcp:{name:'TCP 转发',steps:[['远端发布服务','远端配置 → services / resources','服务端明确配置服务 ID、目标地址和允许设备；连接通过认证并不自动获得所有 TCP 目标权限。','../src/node/core/authorization.rs'],['本机创建规则','管理入口 → 配置协调 → ForwardManager','本机规则将 loopback 监听地址映射到 peer + service ID；监听准备成功后随配置提交启用。','../src/node/host/forwarding.rs'],['请求业务流','本地 TCP 连接 → QUIC Service 流','应用连接本机监听，节点发起 OpenTcp(service_id)。远端校验服务和权限后建立目标 TCP 连接。','../src/node/core/services.rs'],['双向转发','本地应用 ↔ QUIC ↔ 远端服务','字节在 TCP 与加密 QUIC 流之间双向搬运，受总流数、规则额度和撤销策略约束。','../src/node/core/tunnel.rs']]},
+config:{name:'提交配置',steps:[['读取基线','Config → revision + settings','各管理入口读取同一 Agent 配置并保留草稿基线。通用读取移除远端密码验证器，密码由专用命令设置。','../src/node/core/settings.rs'],['提交与校验','ApplyConfig(expected_revision)','Agent 串行协调变更，比对 revision，校验 schema、授权来源、资源和规则。冲突不覆盖；网络运行时变化转入显式重启流程。','../src/node/host/configuration.rs'],['准备和持久化','准备监听 → 原子写配置 → 发布策略','先准备监听和接收根等资源；核心在同一协调轮次写入提交记录，再发布权限。磁盘失败时不发布新授权。','../src/node/host/configuration.rs'],['同步生效状态','新 revision / 错误 → 管理入口','在线字段生效后返回 revision。需要重启的变更通过 ConfigureRestart 提交并停止，随后显式启动；结果未知时用相同请求 ID 恢复确认。','../src/node/host/agent.rs']]}
 };
-function showNode(key){const d=nodes[key];document.querySelectorAll('[data-node]').forEach(b=>{b.classList.toggle('selected',b.dataset.node===key);b.setAttribute('aria-pressed',String(b.dataset.node===key));});document.getElementById('node-detail').innerHTML='<div class="detail-tag">'+d.tag+'</div><h3>'+d.title+'</h3><p>'+d.text+'</p><ul>'+d.items.map(s=>'<li>'+s+'</li>').join('')+'</ul><hr><div class="small">源码入口</div>'+d.sources.map(s=>'<a href="'+s[0]+'">'+s[1]+' ↗</a>').join('<br>');}
-document.querySelectorAll('[data-node]').forEach(b=>b.addEventListener('click',()=>showNode(b.dataset.node)));showNode('agent');
+function showNode(key,container=document.querySelector("#topology .architecture")){const d=nodes[key];container.querySelectorAll('[data-node]').forEach(b=>{b.classList.toggle('selected',b.dataset.node===key);b.setAttribute('aria-pressed',String(b.dataset.node===key));});container.querySelector('.detail').innerHTML='<div class="detail-tag">'+d.tag+'</div><h3>'+d.title+'</h3><p>'+d.text+'</p><ul>'+d.items.map(s=>'<li>'+s+'</li>').join('')+'</ul><hr><div class="small">源码入口</div>'+d.sources.map(s=>'<a href="'+s[0]+'">'+s[1]+' ↗</a>').join('<br>');}
+document.querySelectorAll('[data-node]').forEach(b=>b.addEventListener('click',()=>showNode(b.dataset.node,b.closest('.architecture'))));showNode('agent');showNode('fixedclient',document.querySelector('#distribution .architecture'));
 let currentFlow='connect',currentStep=0;
 function showFlow(key,step=0){currentFlow=key;currentStep=step;const f=flows[key];document.querySelectorAll('[data-flow]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.flow===key)));document.getElementById('steps').innerHTML=f.steps.map((s,i)=>'<button class="step" aria-current="'+(i===step?'step':'false')+'" data-step="'+i+'"><i>0'+(i+1)+'</i>'+s[0]+'</button>').join('');const s=f.steps[step];document.getElementById('step-detail').innerHTML='<div class="route">'+s[1]+'</div><h3>'+s[0]+'</h3><p>'+s[2]+'</p><a href="'+s[3]+'" class="small">查看对应源码 ↗</a><div class="flow-buttons"><button class="btn" id="previous" '+(step===0?'disabled':'')+'>上一步</button><span class="small">'+(step+1)+' / '+f.steps.length+'</span><button class="btn" id="next" '+(step===f.steps.length-1?'disabled':'')+'>下一步</button></div>';document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>showFlow(currentFlow,Number(b.dataset.step))));document.getElementById('previous').onclick=()=>showFlow(currentFlow,Math.max(0,currentStep-1));document.getElementById('next').onclick=()=>showFlow(currentFlow,Math.min(f.steps.length-1,currentStep+1));}
 document.querySelectorAll('[data-flow]').forEach(b=>b.addEventListener('click',()=>showFlow(b.dataset.flow)));showFlow('connect');
 document.getElementById('flow-reference').innerHTML=Object.values(flows).map(f=>'<details><summary>'+f.name+' · 完整流程</summary><ol>'+f.steps.map(s=>'<li><strong>'+s[0]+'</strong> <span class="small">'+s[1]+'</span><p>'+s[2]+'</p></li>').join('')+'</ol></details>').join('');
 const themeButton=document.getElementById('theme');themeButton.addEventListener('click',()=>{const dark=document.documentElement.dataset.theme!=='dark';document.documentElement.dataset.theme=dark?'dark':'light';themeButton.textContent=dark?'切换浅色':'切换深色';});document.getElementById('print').addEventListener('click',()=>{document.querySelectorAll('#flow-reference details').forEach(d=>d.open=true);window.print();});
 if('IntersectionObserver' in window){const observer=new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting)document.querySelectorAll('.sidebar nav a').forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+e.target.id));});},{rootMargin:'-5% 0px -70% 0px'});document.querySelectorAll('main section').forEach(s=>observer.observe(s));}
+</script>
+<script id="architecture-map-data" type="application/json">
+{
+  "version": 1,
+  "date": "2026-10-21",
+  "modules": [
+    {
+      "id": "desktop",
+      "title": "桌面工作台",
+      "tag": "PRESENTATION",
+      "path": "src/desktop/agent_shell.rs",
+      "summary": "默认 GPUI 桌面通过 IPC 管理已有 Agent，多个窗口共享一个模型。",
+      "rules": [
+        "不持有私钥、任务库或 P2P 连接。",
+        "关闭窗口与停止后台是独立操作。"
+      ],
+      "parts": [
+        {
+          "name": "工作台",
+          "path": "src/desktop/agent_shell/workbench.rs",
+          "detail": "文件任务、配置、诊断与服务入口。"
+        },
+        {
+          "name": "窗口注册",
+          "path": "src/desktop/agent_shell/windows.rs",
+          "detail": "二级原生窗口共用 AgentShell。"
+        },
+        {
+          "name": "托盘宿主",
+          "path": "src/desktop/agent_shell/tray_host.rs",
+          "detail": "通过管理 API 投影后台状态。"
+        }
+      ],
+      "section": "desktop",
+      "drill": "desktop"
+    },
+    {
+      "id": "cli",
+      "title": "管理 CLI",
+      "tag": "ENTRY POINT",
+      "path": "src/bin/p2p-node.rs",
+      "summary": "p2p-node 提供状态查询、配置和离线生命周期入口。",
+      "rules": [
+        "在线动作使用统一管理契约。",
+        "离线迁移必须检查所有权和预览指纹。"
+      ],
+      "parts": [
+        {
+          "name": "CLI 适配",
+          "path": "src/node/adapters/cli.rs",
+          "detail": "解析命令并调用管理客户端。"
+        },
+        {
+          "name": "迁移",
+          "path": "src/node/adapters/migration.rs",
+          "detail": "停机后导入身份、配置和任务。"
+        }
+      ],
+      "section": "topology"
+    },
+    {
+      "id": "web",
+      "title": "Web 管理网关",
+      "tag": "HTTP ADAPTER",
+      "path": "src/node/adapters/web.rs",
+      "summary": "浏览器发来的管理请求经 AgentClient 转为本地 IPC。",
+      "rules": [
+        "仅监听 loopback，API 需要管理令牌。",
+        "文件字节和 TCP 负载不经过管理 HTTP。"
+      ],
+      "parts": [
+        {
+          "name": "HTTP 桥接",
+          "path": "src/node/adapters/web.rs",
+          "detail": "校验请求并转发到 Agent。"
+        },
+        {
+          "name": "内嵌管理页",
+          "path": "src/node/adapters/web.html",
+          "detail": "草稿、配置提交与节点身份展示。"
+        }
+      ],
+      "section": "topology"
+    },
+    {
+      "id": "products",
+      "title": "Sub2API 专用版",
+      "tag": "PRODUCT COMPOSITION",
+      "path": "src/node/products/sub2api.rs",
+      "summary": "固定客户端和隔离网关直接装配核心，使用独立身份目录。",
+      "rules": [
+        "不经过通用 Agent 管理 IPC。",
+        "固定服务目标，连接授权与应用账号分开。"
+      ],
+      "parts": [
+        {
+          "name": "专用组合",
+          "path": "src/node/products/sub2api.rs",
+          "detail": "客户端监听、网关内存 ACL 和服务就绪探测。"
+        },
+        {
+          "name": "恢复策略",
+          "path": "src/node/products/recovery.rs",
+          "detail": "有界重试、通道健康与重建决策。"
+        },
+        {
+          "name": "专用入口",
+          "path": "src/bin/sub2api-client.rs",
+          "detail": "无配置参数启动。"
+        }
+      ],
+      "section": "distribution"
+    },
+    {
+      "id": "api",
+      "title": "管理 API / 客户端",
+      "tag": "CONTRACT + CLIENT",
+      "path": "src/node/api/mod.rs",
+      "summary": "所有在线管理入口共用请求、响应、超时与认证客户端。",
+      "rules": [
+        "API 不依赖 Agent 的运行实现。",
+        "命令 accepted 不等于文件已完成。"
+      ],
+      "parts": [
+        {
+          "name": "协议 DTO",
+          "path": "src/node/api/protocol.rs",
+          "detail": "Command、Request、Response 与帧限制。"
+        },
+        {
+          "name": "AgentClient",
+          "path": "src/node/api/client.rs",
+          "detail": "经 local transport 执行请求。"
+        },
+        {
+          "name": "构建信息",
+          "path": "src/node/api/build_info.rs",
+          "detail": "统一版本和源码状态元数据。"
+        }
+      ],
+      "section": "protocol"
+    },
+    {
+      "id": "local",
+      "title": "本地 IPC 与路径",
+      "tag": "OS BOUNDARY",
+      "path": "src/node/local/mod.rs",
+      "summary": "定位当前用户的数据目录并建立受本机身份保护的 socket / named pipe。",
+      "rules": [
+        "本地管理令牌与远端访问密码不同。",
+        "不包含核心业务或前端窗口。"
+      ],
+      "parts": [
+        {
+          "name": "节点路径",
+          "path": "src/node/local/paths.rs",
+          "detail": "配置、令牌与 IPC 地址。"
+        },
+        {
+          "name": "本地传输",
+          "path": "src/node/local/transport.rs",
+          "detail": "Unix socket / Windows named pipe。"
+        },
+        {
+          "name": "私有目录权限",
+          "path": "src/storage/permissions.rs",
+          "detail": "当前 OS 用户权限与 Windows DACL。"
+        }
+      ],
+      "section": "storage"
+    },
+    {
+      "id": "host",
+      "title": "Agent 唯一宿主",
+      "tag": "SINGLE OWNER",
+      "path": "src/node/host/agent.rs",
+      "summary": "一个 Agent 独占一个节点目录与身份，协调业务核心和管理请求。",
+      "rules": [
+        "配置按 revision 协调，不允许多入口覆盖。",
+        "先准备资源，再提交配置和运行策略。"
+      ],
+      "parts": [
+        {
+          "name": "进程宿主",
+          "path": "src/node/host/agent.rs",
+          "detail": "启动、所有权、命令执行和请求去重。"
+        },
+        {
+          "name": "配置协调",
+          "path": "src/node/host/configuration.rs",
+          "detail": "幂等配置事务与运行状态发布。"
+        },
+        {
+          "name": "转发监听",
+          "path": "src/node/host/forwarding.rs",
+          "detail": "准备、切换与回收 TCP listener。"
+        },
+        {
+          "name": "托管恢复",
+          "path": "src/node/host/recovery.rs",
+          "detail": "Mac managed 模式恢复信号。"
+        }
+      ],
+      "section": "operations"
+    },
+    {
+      "id": "core",
+      "title": "共享节点核心",
+      "tag": "HEADLESS CORE",
+      "path": "src/node/core/mod.rs",
+      "summary": "唯一业务运行时：会话、授权、文件、服务、测速和持久任务模型。",
+      "rules": [
+        "不反向依赖 host、api、local、adapters、products 或 desktop。",
+        "通用 Agent 与专用版共享实现，各自持有运行时。"
+      ],
+      "parts": [
+        {
+          "name": "控制契约",
+          "path": "src/node/core/control.rs",
+          "detail": "NodeControl、事件与状态快照。"
+        },
+        {
+          "name": "当前配置",
+          "path": "src/node/core/settings.rs",
+          "detail": "NodeSettings、ConfigRecord 和 CommitOptions。"
+        },
+        {
+          "name": "会话编排",
+          "path": "src/node/core/session.rs",
+          "detail": "连接代际、重连、授权与流分发。"
+        }
+      ],
+      "section": "core",
+      "drill": "core"
+    },
+    {
+      "id": "network",
+      "title": "直连网络 / QUIC",
+      "tag": "TRANSPORT",
+      "path": "src/net/mod.rs",
+      "summary": "发现候选后进行双栈竞速、打洞和身份绑定，业务数据使用加密 QUIC。",
+      "rules": [
+        "信令断流不等于既有业务流立即失效。",
+        "UPnP / NAT-PMP / PCP 仍未实现，占位代码已删除。"
+      ],
+      "parts": [
+        {
+          "name": "路径竞速",
+          "path": "src/net/race.rs",
+          "detail": "代际与竞速结果的发布门禁。"
+        },
+        {
+          "name": "QUIC",
+          "path": "src/transport/quic.rs",
+          "detail": "连接和加密数据通道。"
+        },
+        {
+          "name": "身份握手",
+          "path": "src/transport/handshake.rs",
+          "detail": "签名绑定当前会话。"
+        },
+        {
+          "name": "STUN / 打洞",
+          "path": "src/nat/mod.rs",
+          "detail": "地址探测与 UDP 同端口穿透。"
+        }
+      ],
+      "section": "protocol"
+    },
+    {
+      "id": "peer",
+      "title": "远端对等节点",
+      "tag": "REMOTE NODE",
+      "path": "src/node/core/services.rs",
+      "summary": "远端运行同一业务核心，在接收业务流时独立检查当前授权。",
+      "rules": [
+        "连接通过认证不等于获得所有服务。",
+        "远端只开放明确配置的目标与资源。"
+      ],
+      "parts": [
+        {
+          "name": "资源授权",
+          "path": "src/node/core/authorization.rs",
+          "detail": "按 peer 区分文件、测速与服务权限。"
+        },
+        {
+          "name": "服务目录",
+          "path": "src/node/core/services.rs",
+          "detail": "用 service ID 查询并申请 TCP 流。"
+        }
+      ],
+      "section": "topology"
+    },
+    {
+      "id": "signal",
+      "title": "信令 / 短 ID",
+      "tag": "DISCOVERY",
+      "path": "src/discovery/signal.rs",
+      "summary": "负责节点登记、短 ID 查找和候选交换，帮助设备找到彼此。",
+      "rules": [
+        "直连成功时不承载文件或 TCP 业务字节。",
+        "短 ID 是寻址工具，不是访问凭据。"
+      ],
+      "parts": [
+        {
+          "name": "信令",
+          "path": "src/discovery/signal.rs",
+          "detail": "登记、心跳、查找与交换候选。"
+        },
+        {
+          "name": "短 ID",
+          "path": "src/discovery/short_id.rs",
+          "detail": "短 ID 分配和查找。"
+        }
+      ],
+      "section": "protocol"
+    },
+    {
+      "id": "relay",
+      "title": "可选 UDP Relay",
+      "tag": "ENCRYPTED FALLBACK",
+      "path": "src/relay/mod.rs",
+      "summary": "配置 Relay 后，直连未及时认证成功时允许延迟尝试中继。",
+      "rules": [
+        "仅转发端到端加密数据报。",
+        "Relay 票据不替代节点业务授权。"
+      ],
+      "parts": [
+        {
+          "name": "客户端",
+          "path": "src/relay/client.rs",
+          "detail": "Relay admission 与直连竞速配合。"
+        },
+        {
+          "name": "服务端",
+          "path": "src/relay/server.rs",
+          "detail": "配对、额度和超时。"
+        }
+      ],
+      "section": "protocol"
+    },
+    {
+      "id": "storage",
+      "title": "安全存储与身份",
+      "tag": "FOUNDATION",
+      "path": "src/storage/mod.rs",
+      "summary": "持久化、目录权限和安全路径规则下沉到通用基础设施。",
+      "rules": [
+        "不反向依赖 node 或 desktop。",
+        "身份与任务所有权在上层通过锁保护。"
+      ],
+      "parts": [
+        {
+          "name": "原子替换",
+          "path": "src/storage/atomic.rs",
+          "detail": "区分提交前失败与提交后持久化警告。"
+        },
+        {
+          "name": "句柄相对访问",
+          "path": "src/storage/secure_fs.rs",
+          "detail": "阻止路径逃逸和链接替换。"
+        },
+        {
+          "name": "路径约束",
+          "path": "src/storage/relative_path.rs",
+          "detail": "统一跨平台相对路径拒绝规则。"
+        },
+        {
+          "name": "身份与租约",
+          "path": "src/identity.rs",
+          "detail": "Ed25519 身份和跨入口身份租约。"
+        }
+      ],
+      "section": "storage"
+    },
+    {
+      "id": "legacy",
+      "title": "显式旧桌面",
+      "tag": "COMPATIBILITY",
+      "path": "src/desktop/legacy/mod.rs",
+      "summary": "只有 --legacy 进入内嵌旧运行时，默认桌面不再借用这个大窗口。",
+      "rules": [
+        "保留仍在用的功能和协议回归。",
+        "已移除 29 个领域转发包装文件，直接使用 core。"
+      ],
+      "parts": [
+        {
+          "name": "旧窗口",
+          "path": "src/desktop/legacy/mod.rs",
+          "detail": "显式旧入口。"
+        },
+        {
+          "name": "旧后台所有权",
+          "path": "src/desktop/legacy/background.rs",
+          "detail": "旧窗口生命周期与后台协作。"
+        },
+        {
+          "name": "旧进程回归",
+          "path": "src/desktop/legacy/e2e.rs",
+          "detail": "传输、暂停、目录和崩溃恢复。"
+        }
+      ],
+      "section": "boundaries"
+    },
+    {
+      "id": "adapters",
+      "title": "CLI / HTTP / 迁移",
+      "tag": "APPLICATION ADAPTERS",
+      "path": "src/node/adapters/mod.rs",
+      "summary": "面向用户的管理协议适配与显式离线导入。",
+      "rules": [
+        "在线入口使用统一客户端。",
+        "离线操作与在线配置协调的所有权边界分开。"
+      ],
+      "parts": [
+        {
+          "name": "管理 CLI",
+          "path": "src/node/adapters/cli.rs",
+          "detail": "命令行适配。"
+        },
+        {
+          "name": "Web",
+          "path": "src/node/adapters/web.rs",
+          "detail": "HTTP 管理桥。"
+        },
+        {
+          "name": "迁移",
+          "path": "src/node/adapters/migration.rs",
+          "detail": "预览、校验与导入。"
+        }
+      ],
+      "section": "topology"
+    },
+    {
+      "id": "session",
+      "title": "控制与会话",
+      "tag": "CORE / ORCHESTRATION",
+      "path": "src/node/core/session.rs",
+      "summary": "维护多 peer 代际、连接状态、认证和唯一入站业务流分发。",
+      "rules": [
+        "一个入站接纳者分派 File / Service / Speed。",
+        "旧代际结果不得覆盖当前连接。"
+      ],
+      "parts": [
+        {
+          "name": "控制门面",
+          "path": "src/node/core/control.rs",
+          "detail": "命令、事件与有界快照。"
+        },
+        {
+          "name": "会话循环",
+          "path": "src/node/core/session.rs",
+          "detail": "信令与 QUIC 生命周期。"
+        },
+        {
+          "name": "统一协议",
+          "path": "src/node/core/wire.rs",
+          "detail": "能力协商和流前缀。"
+        },
+        {
+          "name": "流分发",
+          "path": "src/node/core/dispatch.rs",
+          "detail": "按业务类型进入处理器。"
+        }
+      ],
+      "section": "core"
+    },
+    {
+      "id": "auth",
+      "title": "身份与资源授权",
+      "tag": "CORE / SECURITY",
+      "path": "src/node/core/authorization.rs",
+      "summary": "身份握手、密码证明、可信设备、方向与资源授权共同构成业务门禁。",
+      "rules": [
+        "认证、发送/接收权限、服务权限分层判断。",
+        "撤销后继续检查存量连接上的新业务流。"
+      ],
+      "parts": [
+        {
+          "name": "密码认证",
+          "path": "src/node/core/remote_auth.rs",
+          "detail": "连接绑定的访问证明。"
+        },
+        {
+          "name": "资源策略",
+          "path": "src/node/core/authorization.rs",
+          "detail": "文件、测速和服务权限。"
+        },
+        {
+          "name": "可信设备",
+          "path": "src/node/core/trusted_devices.rs",
+          "detail": "持久设备记录与授权来源。"
+        }
+      ],
+      "section": "protocol"
+    },
+    {
+      "id": "files",
+      "title": "文件与目录任务",
+      "tag": "CORE / FILES",
+      "path": "src/node/core/transfer.rs",
+      "summary": "持久任务、并发调度、增量预览、暂停续传与安全发布。",
+      "rules": [
+        "完成以接收端持久回执为准。",
+        "预览结果和 accepted 均不是完成证明。"
+      ],
+      "parts": [
+        {
+          "name": "传输执行",
+          "path": "src/node/core/transfer.rs",
+          "detail": "文件流与任务状态机。"
+        },
+        {
+          "name": "增量预览",
+          "path": "src/node/core/incremental.rs",
+          "detail": "比较目录并在执行时再次校验。"
+        },
+        {
+          "name": "任务队列",
+          "path": "src/node/core/queue.rs",
+          "detail": "并发、公平性与限流。"
+        },
+        {
+          "name": "安全发布",
+          "path": "src/node/core/publish.rs",
+          "detail": "目录事务、碰撞备份和回执。"
+        }
+      ],
+      "section": "flows"
+    },
+    {
+      "id": "services",
+      "title": "TCP 服务与转发",
+      "tag": "CORE / SERVICES",
+      "path": "src/node/core/services.rs",
+      "summary": "根据 service ID 和当前 peer 权限，将 QUIC 业务流接入固定 TCP 目标。",
+      "rules": [
+        "长连接不持续占用服务协商配额。",
+        "TCP 断开后需要新连接，不透明续接字节流。"
+      ],
+      "parts": [
+        {
+          "name": "服务控制",
+          "path": "src/node/core/services.rs",
+          "detail": "目录与开流授权。"
+        },
+        {
+          "name": "TCP 搬运",
+          "path": "src/node/core/tunnel.rs",
+          "detail": "双向字节传输和资源限制。"
+        }
+      ],
+      "section": "flows"
+    },
+    {
+      "id": "speed",
+      "title": "测速业务",
+      "tag": "CORE / SPEED",
+      "path": "src/node/core/speed.rs",
+      "summary": "在授权后的独立流测量传输率、RTT 和双向结果。",
+      "rules": [
+        "测速与文件限速分别管理。",
+        "业务通道可用不代表全部公网场景验收完成。"
+      ],
+      "parts": [
+        {
+          "name": "测速运行",
+          "path": "src/node/core/speed.rs",
+          "detail": "所有权、取消和结果快照。"
+        }
+      ],
+      "section": "flows"
+    },
+    {
+      "id": "state",
+      "title": "配置与任务模型",
+      "tag": "CORE / STATE",
+      "path": "src/node/core/settings.rs",
+      "summary": "配置、任务模型和恢复状态属于核心契约，不依赖宿主协调器。",
+      "rules": [
+        "CommitOptions 已下沉到核心。",
+        "历史 DesktopConfig 仍由旧桌面和迁移读取。"
+      ],
+      "parts": [
+        {
+          "name": "节点设置",
+          "path": "src/node/core/settings.rs",
+          "detail": "node.json 的 schema 和提交记录。"
+        },
+        {
+          "name": "旧配置兼容",
+          "path": "src/node/core/config.rs",
+          "detail": "旧偏好和共享规则校验。"
+        },
+        {
+          "name": "任务存储",
+          "path": "src/node/core/task_store.rs",
+          "detail": "任务、检查点和回执。"
+        },
+        {
+          "name": "投影",
+          "path": "src/node/core/snapshot.rs",
+          "detail": "权威状态的轻量展示模型。"
+        }
+      ],
+      "section": "storage"
+    },
+    {
+      "id": "ui",
+      "title": "共享界面组件",
+      "tag": "DESKTOP / UI",
+      "path": "src/desktop/ui/mod.rs",
+      "summary": "新旧桌面共用的输入、主题、按钮、品牌和格式化。",
+      "rules": [
+        "不引用 AgentShell 或旧 DesktopShell。",
+        "组件不拥有业务运行时。"
+      ],
+      "parts": [
+        {
+          "name": "输入与 IME",
+          "path": "src/desktop/ui/text_field.rs",
+          "detail": "光标、UTF-16、密码与粘贴。"
+        },
+        {
+          "name": "组件与主题",
+          "path": "src/desktop/ui/components.rs",
+          "detail": "统一视觉组件。"
+        },
+        {
+          "name": "品牌",
+          "path": "src/desktop/ui/branding.rs",
+          "detail": "新旧窗口共用图标与标题。"
+        }
+      ],
+      "section": "desktop"
+    },
+    {
+      "id": "platform",
+      "title": "原生窗口与托盘",
+      "tag": "DESKTOP / PLATFORM",
+      "path": "src/desktop/platform/mod.rs",
+      "summary": "跨桌面入口共享窗口显隐、系统托盘和展示状态。",
+      "rules": [
+        "平台工具不反向引用窗口所有者。",
+        "后台所有权继续留在对应宿主。"
+      ],
+      "parts": [
+        {
+          "name": "窗口操作",
+          "path": "src/desktop/platform/window.rs",
+          "detail": "macOS、Windows、X11 可见性控制。"
+        },
+        {
+          "name": "托盘",
+          "path": "src/desktop/platform/tray.rs",
+          "detail": "原生菜单和事件。"
+        },
+        {
+          "name": "展示状态",
+          "path": "src/desktop/platform/status.rs",
+          "detail": "无运行时所有权的状态投影。"
+        }
+      ],
+      "section": "desktop"
+    }
+  ],
+  "views": [
+    {
+      "id": "system",
+      "title": "系统全景",
+      "description": "管理请求进入唯一宿主；业务数据经核心与 QUIC 到达远端。图中只呈现主要关系，箭头不表示部署是否在线。",
+      "nodes": [
+        {
+          "id": "desktop",
+          "x": 40,
+          "y": 65
+        },
+        {
+          "id": "cli",
+          "x": 330,
+          "y": 65
+        },
+        {
+          "id": "web",
+          "x": 620,
+          "y": 65
+        },
+        {
+          "id": "products",
+          "x": 910,
+          "y": 65
+        },
+        {
+          "id": "local",
+          "x": 40,
+          "y": 245
+        },
+        {
+          "id": "api",
+          "x": 330,
+          "y": 245
+        },
+        {
+          "id": "signal",
+          "x": 620,
+          "y": 245
+        },
+        {
+          "id": "relay",
+          "x": 910,
+          "y": 245
+        },
+        {
+          "id": "legacy",
+          "x": 40,
+          "y": 425
+        },
+        {
+          "id": "host",
+          "x": 330,
+          "y": 425
+        },
+        {
+          "id": "network",
+          "x": 620,
+          "y": 425
+        },
+        {
+          "id": "peer",
+          "x": 910,
+          "y": 425
+        },
+        {
+          "id": "storage",
+          "x": 40,
+          "y": 605
+        },
+        {
+          "id": "core",
+          "x": 330,
+          "y": 605
+        }
+      ],
+      "edges": [
+        {
+          "source": "desktop",
+          "target": "api",
+          "kind": "control"
+        },
+        {
+          "source": "cli",
+          "target": "api",
+          "kind": "control"
+        },
+        {
+          "source": "web",
+          "target": "api",
+          "kind": "control"
+        },
+        {
+          "source": "api",
+          "target": "host",
+          "kind": "control"
+        },
+        {
+          "source": "api",
+          "target": "local",
+          "kind": "dependency"
+        },
+        {
+          "source": "host",
+          "target": "core",
+          "kind": "dependency"
+        },
+        {
+          "source": "legacy",
+          "target": "core",
+          "kind": "dependency"
+        },
+        {
+          "source": "core",
+          "target": "storage",
+          "kind": "store"
+        },
+        {
+          "source": "core",
+          "target": "network",
+          "kind": "data"
+        },
+        {
+          "source": "network",
+          "target": "peer",
+          "kind": "data"
+        },
+        {
+          "source": "signal",
+          "target": "network",
+          "kind": "control"
+        },
+        {
+          "source": "relay",
+          "target": "peer",
+          "kind": "data"
+        },
+        {
+          "source": "products",
+          "target": "core",
+          "kind": "dependency"
+        }
+      ]
+    },
+    {
+      "id": "layers",
+      "title": "节点分层",
+      "description": "箭头表示代码依赖：入口与宿主依赖核心契约；核心不会反向依赖宿主、IPC 客户端或界面。",
+      "nodes": [
+        {
+          "id": "adapters",
+          "x": 40,
+          "y": 95
+        },
+        {
+          "id": "products",
+          "x": 910,
+          "y": 95
+        },
+        {
+          "id": "api",
+          "x": 330,
+          "y": 275
+        },
+        {
+          "id": "host",
+          "x": 620,
+          "y": 275
+        },
+        {
+          "id": "local",
+          "x": 40,
+          "y": 455
+        },
+        {
+          "id": "core",
+          "x": 620,
+          "y": 455
+        },
+        {
+          "id": "storage",
+          "x": 330,
+          "y": 635
+        },
+        {
+          "id": "network",
+          "x": 910,
+          "y": 635
+        }
+      ],
+      "edges": [
+        {
+          "source": "adapters",
+          "target": "api",
+          "kind": "dependency"
+        },
+        {
+          "source": "adapters",
+          "target": "host",
+          "kind": "dependency"
+        },
+        {
+          "source": "products",
+          "target": "host",
+          "kind": "dependency"
+        },
+        {
+          "source": "products",
+          "target": "core",
+          "kind": "dependency"
+        },
+        {
+          "source": "api",
+          "target": "local",
+          "kind": "dependency"
+        },
+        {
+          "source": "api",
+          "target": "core",
+          "kind": "dependency"
+        },
+        {
+          "source": "host",
+          "target": "api",
+          "kind": "dependency"
+        },
+        {
+          "source": "host",
+          "target": "core",
+          "kind": "dependency"
+        },
+        {
+          "source": "host",
+          "target": "local",
+          "kind": "dependency"
+        },
+        {
+          "source": "core",
+          "target": "storage",
+          "kind": "store"
+        },
+        {
+          "source": "core",
+          "target": "network",
+          "kind": "dependency"
+        },
+        {
+          "source": "local",
+          "target": "storage",
+          "kind": "store"
+        }
+      ]
+    },
+    {
+      "id": "core",
+      "title": "核心内部",
+      "description": "会话协调认证、状态和业务分派；文件、TCP、测速使用独立业务流。这里展示职责流，不声称核心内部完全无相互依赖。",
+      "nodes": [
+        {
+          "id": "host",
+          "x": 40,
+          "y": 85
+        },
+        {
+          "id": "products",
+          "x": 910,
+          "y": 85
+        },
+        {
+          "id": "session",
+          "x": 475,
+          "y": 85
+        },
+        {
+          "id": "auth",
+          "x": 40,
+          "y": 295
+        },
+        {
+          "id": "state",
+          "x": 910,
+          "y": 295
+        },
+        {
+          "id": "files",
+          "x": 330,
+          "y": 475
+        },
+        {
+          "id": "services",
+          "x": 620,
+          "y": 475
+        },
+        {
+          "id": "speed",
+          "x": 910,
+          "y": 475
+        },
+        {
+          "id": "storage",
+          "x": 330,
+          "y": 655
+        },
+        {
+          "id": "network",
+          "x": 620,
+          "y": 655
+        }
+      ],
+      "edges": [
+        {
+          "source": "host",
+          "target": "session",
+          "kind": "control"
+        },
+        {
+          "source": "products",
+          "target": "session",
+          "kind": "control"
+        },
+        {
+          "source": "session",
+          "target": "auth",
+          "kind": "control"
+        },
+        {
+          "source": "session",
+          "target": "state",
+          "kind": "control"
+        },
+        {
+          "source": "session",
+          "target": "files",
+          "kind": "data"
+        },
+        {
+          "source": "session",
+          "target": "services",
+          "kind": "data"
+        },
+        {
+          "source": "session",
+          "target": "speed",
+          "kind": "data"
+        },
+        {
+          "source": "files",
+          "target": "storage",
+          "kind": "store"
+        },
+        {
+          "source": "files",
+          "target": "network",
+          "kind": "data"
+        },
+        {
+          "source": "services",
+          "target": "network",
+          "kind": "data"
+        },
+        {
+          "source": "speed",
+          "target": "network",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "id": "desktop",
+      "title": "桌面边界",
+      "description": "默认桌面通过管理 API 操作 Agent，显式旧桌面直接使用 core；两者只共享 UI 与平台工具。",
+      "nodes": [
+        {
+          "id": "desktop",
+          "x": 185,
+          "y": 100
+        },
+        {
+          "id": "legacy",
+          "x": 765,
+          "y": 100
+        },
+        {
+          "id": "ui",
+          "x": 330,
+          "y": 320
+        },
+        {
+          "id": "platform",
+          "x": 620,
+          "y": 320
+        },
+        {
+          "id": "api",
+          "x": 185,
+          "y": 560
+        },
+        {
+          "id": "core",
+          "x": 765,
+          "y": 560
+        }
+      ],
+      "edges": [
+        {
+          "source": "desktop",
+          "target": "ui",
+          "kind": "dependency"
+        },
+        {
+          "source": "desktop",
+          "target": "platform",
+          "kind": "dependency"
+        },
+        {
+          "source": "legacy",
+          "target": "ui",
+          "kind": "dependency"
+        },
+        {
+          "source": "legacy",
+          "target": "platform",
+          "kind": "dependency"
+        },
+        {
+          "source": "desktop",
+          "target": "api",
+          "kind": "control"
+        },
+        {
+          "source": "legacy",
+          "target": "core",
+          "kind": "dependency"
+        }
+      ]
+    }
+  ]
+}
+</script>
+<script>
+(() => {
+  'use strict';
+  const data=JSON.parse(document.getElementById('architecture-map-data').textContent);
+  const modules=new Map(data.modules.map(m=>[m.id,m])), views=new Map(data.views.map(v=>[v.id,v]));
+  const get=id=>document.getElementById(id), escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  let activeView='system', activeModule='host';
+  const canvas=get('arch-canvas'), panel=get('arch-detail');
+  const source=p=>`../${p.split('/').map(encodeURIComponent).join('/')}`;
+  function saveHash(){history.replaceState(null,'',`#map=${activeView}:${activeModule}`)}
+  function edgePath(edge,positions){
+    const a=positions.get(edge.source),b=positions.get(edge.target),w=230,h=86;
+    if(activeView==='system'&&edge.source==='products')return `M ${a.x+w} ${a.y+h/2} H 1170 V 745 H ${b.x+w/2} V ${b.y+h}`;
+    if(activeView==='layers'&&edge.source==='adapters'&&edge.target==='host')return `M ${a.x+w} ${a.y+h/2} H 735 V ${b.y}`;
+    if(activeView==='layers'&&edge.source==='products'&&edge.target==='core')return `M ${a.x+w/2} ${a.y+h} V ${b.y+h/2} H ${b.x+w}`;
+    if(activeView==='layers'&&edge.source==='host'&&edge.target==='local')return `M ${a.x+w/2} ${a.y+h} V 405 H ${b.x+w/2} V ${b.y}`;
+    if(activeView==='core'&&edge.source==='session'&&edge.target==='speed')return `M ${a.x+w} ${a.y+h/2} H 870 V 430 H ${b.x+w/2} V ${b.y}`;
+    const dx=b.x-a.x,dy=b.y-a.y;
+    if(Math.abs(dx)>Math.abs(dy)){
+      const x1=a.x+(dx>0?w:0),y1=a.y+h/2,x2=b.x+(dx>0?0:w),y2=b.y+h/2;
+      return `M ${x1} ${y1} C ${(x1+x2)/2} ${y1}, ${(x1+x2)/2} ${y2}, ${x2} ${y2}`;
+    }
+    const x1=a.x+w/2,y1=a.y+(dy>0?h:0),x2=b.x+w/2,y2=b.y+(dy>0?0:h);
+    return `M ${x1} ${y1} C ${x1} ${(y1+y2)/2}, ${x2} ${(y1+y2)/2}, ${x2} ${y2}`;
+  }
+  function draw(){
+    const view=views.get(activeView),positions=new Map(view.nodes.map(n=>[n.id,n]));
+    const related=new Set([activeModule]);view.edges.filter(e=>e.source===activeModule||e.target===activeModule).forEach(e=>{related.add(e.source);related.add(e.target)});
+    document.querySelectorAll('[data-arch-view]').forEach(b=>{const selected=b.dataset.archView===activeView;b.setAttribute('aria-selected',String(selected));b.tabIndex=selected?0:-1});
+    get('arch-description').textContent=view.description;
+    let svg='<svg viewBox="0 0 1190 780" xmlns="http://www.w3.org/2000/svg" role="group" aria-labelledby="arch-map-title arch-map-desc"><title id="arch-map-title">'+escape(view.title)+'</title><desc id="arch-map-desc">'+escape(view.description)+'</desc><defs>';
+    for(const [kind,color] of Object.entries({control:'var(--blue)',data:'var(--green)',store:'var(--amber)',dependency:'var(--muted)'}))svg+=`<marker id="arch-arrow-${kind}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="${color}"/></marker>`;
+    svg+='</defs>';
+    for(const e of view.edges){const selected=e.source===activeModule||e.target===activeModule;svg+=`<path class="arch-edge ${e.kind} ${selected?'related':''}" d="${edgePath(e,positions)}" marker-end="url(#arch-arrow-${e.kind})"><title>${escape(modules.get(e.source).title)} → ${escape(modules.get(e.target).title)}</title></path>`}
+    for(const n of view.nodes){const m=modules.get(n.id),selected=n.id===activeModule;svg+=`<g class="arch-node ${selected?'selected':related.has(n.id)?'related':'muted'}" transform="translate(${n.x} ${n.y})" data-arch-module="${n.id}" role="button" tabindex="0" aria-pressed="${selected}" aria-label="${escape(m.title)}：${escape(m.summary)}"><rect width="230" height="86" rx="12"/><text class="arch-tag" x="16" y="21">${escape(m.tag)}</text><text x="16" y="47">${escape(m.title)}</text><text class="arch-path" x="16" y="69">${escape(m.path.replace('src/',''))}</text></g>`}
+    canvas.innerHTML=svg+'</svg>';
+  }
+  function detail(){
+    const m=modules.get(activeModule),view=views.get(activeView),relations=view.edges.filter(e=>e.source===m.id||e.target===m.id),ids=[...new Set(relations.map(e=>e.source===m.id?e.target:e.source))];
+    panel.innerHTML=`<div class="arch-intro"><div class="arch-label">${escape(m.tag)}</div><h3>${escape(m.title)}</h3><a href="${source(m.path)}"><code>${escape(m.path)}</code></a><p>${escape(m.summary)}</p><h4>边界与约束</h4><ul>${m.rules.map(r=>`<li>${escape(r)}</li>`).join('')}</ul>${m.drill?`<button type="button" class="arch-drill" data-arch-drill="${m.drill}">进入内部架构 →</button>`:''}</div><div class="arch-internals"><h4>内部职责 · 点击展开源码</h4>${m.parts.map((p,i)=>`<details ${i===0?'open':''}><summary>${escape(p.name)}</summary><p>${escape(p.detail)}</p><a href="${source(p.path)}">${escape(p.path)} ↗</a></details>`).join('')}</div><div class="arch-links"><h4>图中相关模块</h4><div class="arch-related">${ids.map(id=>`<button class="arch-chip" type="button" data-arch-module="${id}">${escape(modules.get(id).title)}</button>`).join('')||'<span class="small">切换全景查看其他关系</span>'}</div><a class="arch-doc-link" href="#${m.section}">阅读完整设计说明 ↓</a></div>`;
+  }
+  function select(id,write=true){if(!modules.has(id))return;if(!views.get(activeView).nodes.some(n=>n.id===id))activeView=data.views.find(v=>v.nodes.some(n=>n.id===id)).id;activeModule=id;draw();detail();if(write)saveHash()}
+  function changeView(id,write=true){if(!views.has(id))return;activeView=id;if(!views.get(id).nodes.some(n=>n.id===activeModule))activeModule=({system:'host',layers:'core',core:'session',desktop:'desktop'})[id];draw();detail();if(write)saveHash()}
+  document.querySelector('.arch-tabs').innerHTML=data.views.map((v,i)=>`<button type="button" role="tab" aria-controls="arch-canvas" data-arch-view="${v.id}" aria-selected="${i===0}" tabindex="${i===0?0:-1}">${escape(v.title)}</button>`).join('');
+  document.getElementById('overview').addEventListener('click',e=>{
+    const m=e.target.closest('[data-arch-module]'),v=e.target.closest('[data-arch-view]'),d=e.target.closest('[data-arch-drill]');
+    if(m)select(m.dataset.archModule);if(v)changeView(v.dataset.archView);if(d)changeView(d.dataset.archDrill);
+  });
+  canvas.addEventListener('keydown',e=>{const n=e.target.closest('[data-arch-module]');if(n&&['Enter',' '].includes(e.key)){e.preventDefault();const id=n.dataset.archModule;select(id);canvas.querySelector(`[data-arch-module="${id}"]`).focus({preventScroll:true})}});
+  document.querySelector('.arch-tabs').addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const tabs=[...document.querySelectorAll('[data-arch-view]')],i=tabs.findIndex(t=>t.dataset.archView===activeView);const next=e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;changeView(tabs[next].dataset.archView);tabs[next].focus()});
+  get('arch-search').addEventListener('input',()=>{const q=get('arch-search').value.trim().toLowerCase();get('arch-results').hidden=!q;if(!q)return;const matches=data.modules.filter(m=>[m.title,m.path,m.summary,...m.parts.flatMap(p=>[p.name,p.path,p.detail])].join(' ').toLowerCase().includes(q));get('arch-results').innerHTML=matches.map(m=>`<button class="arch-chip" type="button" data-arch-module="${m.id}">${escape(m.title)}</button>`).join('')||'<p class="small">没有匹配模块，可尝试“配置”“传输”或“core”。</p>'});
+  get('arch-fit').onclick=()=>{const zoom=canvas.classList.toggle('zoom');get('arch-fit').setAttribute('aria-pressed',String(zoom));get('arch-fit').textContent=zoom?'适合宽度':'放大阅读'};
+  function restore(){const match=location.hash.match(/^#map=([\w-]+):([\w-]+)$/);if(match&&views.has(match[1])&&modules.has(match[2])){activeView=match[1];select(match[2],false)}else{draw();detail()}}
+  window.addEventListener('hashchange',restore);restore();
+})();
+
 </script>
 </body>
 </html>

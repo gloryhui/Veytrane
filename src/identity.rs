@@ -363,7 +363,7 @@ pub fn acquire_identity_lease(id: NodeId) -> Result<crate::instance_lock::Instan
         .ok_or_else(|| Error::Identity("没有当前用户主目录，无法取得身份锁".into()))?;
     let root = home.join(".p2p-file").join("identity-locks");
     #[cfg(feature = "node")]
-    crate::node::private_access::ensure_directory(&root)?;
+    crate::storage::permissions::ensure_directory(&root)?;
     crate::instance_lock::InstanceLock::acquire(&root.join(format!("{id}.lock")))
         .map_err(|e| Error::Identity(e.to_string()))
 }

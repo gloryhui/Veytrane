@@ -73,12 +73,12 @@ pub(crate) fn regular_file(metadata: &std::fs::Metadata) -> bool {
 }
 
 #[cfg(not(windows))]
-fn is_reparse(_metadata: &std::fs::Metadata) -> bool {
+pub(crate) fn is_reparse(_metadata: &std::fs::Metadata) -> bool {
     false
 }
 
 #[cfg(windows)]
-fn is_reparse(metadata: &std::fs::Metadata) -> bool {
+pub(crate) fn is_reparse(metadata: &std::fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt;
     metadata.file_attributes() & 0x400 != 0
 }

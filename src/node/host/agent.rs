@@ -1,0 +1,680 @@
+//! Single local owner for identity, network, files and management state.
+use crate::identity::{Identity, NodeId};
+use crate::node::api::protocol::{self as ipc, Command, Request, Response};
+use crate::node::core::control::{self, NodeControl, SequencedEvent};
+use crate::node::core::settings::ConfigRecord;
+use crate::node::local::paths::AgentPaths;
+use serde_json::{Value, json};
+use std::{
+    collections::{HashMap, VecDeque},
+    io,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tokio::{
+    sync::{Mutex, Semaphore, watch},
+    task::JoinSet,
+};
+
+struct Cached {
+    digest: String,
+    created: Instant,
+    response: watch::Sender<Option<Response>>,
+}
+struct Journal {
+    events: VecDeque<SequencedEvent>,
+    floor: u64,
+}
+pub struct Agent {
+    pub(crate) control: NodeControl,
+    pub(crate) config: Mutex<ConfigRecord>,
+    pub(crate) paths: AgentPaths,
+    epoch: String,
+    journal: Mutex<Journal>,
+    cache: Mutex<HashMap<String, Cached>>,
+    pub(crate) mutations: Mutex<()>,
+    workers: Mutex<JoinSet<()>>,
+    mutation_slots: Arc<Semaphore>,
+    previews: Mutex<VecDeque<(Instant, crate::node::core::incremental::Preview)>>,
+    diagnostics: Mutex<VecDeque<String>>,
+    pub(crate) restart_pending: std::sync::atomic::AtomicBool,
+    pub(crate) last_error: Mutex<Option<String>>,
+    pub(crate) forwards: Mutex<crate::node::host::forwarding::ForwardManager>,
+}
+impl Agent {
+    async fn execute(&self, command: Command, id: &str, digest: &str) -> Result<Value, String> {
+        if self
+            .restart_pending
+            .load(std::sync::atomic::Ordering::Acquire)
+            && !command.is_query()
+            && !matches!(command, Command::Stop)
+        {
+            return Err("restart_required: 节点已提交重启配置，请停止后重新启动".into());
+        }
+        match command {
+            Command::Status => {
+                // Never retain temporary mutex guards across another lock in
+                // json!: use the same config-first order as the coordinator.
+                let configuration = self.config.lock().await;
+                let node = self.control.snapshot().map_err(|e| e.to_string())?;
+                let forwards = self.forwards.lock().await.snapshot();
+                let last_error = self.last_error.lock().await.clone();
+                let diagnostics = self.diagnostics.lock().await.clone();
+                Ok(
+                    json!({"core_running":self.control.is_running(),"build":crate::node::api::build_info::value("p2p-agent"),"diagnostics":diagnostics,"restart_pending":self.restart_pending.load(std::sync::atomic::Ordering::Acquire),"budgets":{"peers":16,"pending_peers":8,"tcp_streams":256,"tcp_per_rule":32,"management_connections":32,"service_controls_per_peer":8},"data_dir":self.paths.root,"epoch":self.epoch,"revision":configuration.revision,"node":node,"last_error":last_error,"forwards":forwards}),
+                )
+            }
+            Command::Config => {
+                let record = self.config.lock().await;
+                Ok(
+                    json!({"revision":record.revision,"settings":record.settings.redacted(),"password_configured":record.settings.remote_auth.is_some()}),
+                )
+            }
+            Command::Tasks { offset } => {
+                let snapshot = self.control.task_snapshot().map_err(|e| e.to_string())?;
+                let tasks=snapshot.as_ref().map(|s| s.tasks.iter().skip(offset).take(128).map(|t|json!({"id":t.id,"group":t.group,"peer":t.peer.to_hex(),"name":t.name.chars().take(256).collect::<String>(),"name_truncated":t.name.chars().count()>256,"state":t.state,"direction":t.direction,"total":t.total,"confirmed":t.confirmed,"rate":t.rate,"diagnostic":t.diagnostic,"retryable":t.retryable,"can_pause":t.can_pause(),"can_continue":t.can_continue(),"can_delete_file":t.can_delete_file()})).collect::<Vec<_>>()).unwrap_or_default();
+                let mut previews = self.previews.lock().await;
+                previews.retain(|(created, _)| created.elapsed() < Duration::from_secs(300));
+                let total = snapshot.as_ref().map_or(0, |s| s.tasks.len());
+                let speeds=snapshot.as_ref().map(|s|s.speeds.iter().map(|(peer,s)|json!({"peer":peer.to_hex(),"id":s.test_id,"direction":s.direction,"state":format!("{:?}",s.status),"bytes":s.bytes,"bytes_per_second":s.bytes_per_second,"elapsed_ms":s.elapsed.as_millis(),"rtt_ms":s.rtt.as_millis()})).collect::<Vec<_>>()).unwrap_or_default();
+                let queue = snapshot.as_ref().map(|s| json!({"pending":s.queue.pending,"active_files":s.queue.active_files,"limit":s.queue.limit,"converging":s.queue.converging}));
+                Ok(
+                    json!({"tasks":tasks,"queue":queue,"offset":offset,"next_offset":if offset.saturating_add(128)<total{Some(offset.saturating_add(128))}else{None},"total":total,"truncated":offset.saturating_add(128)<total,"directory_previews":previews.iter().map(|(_,preview)|{let mut value=serde_json::to_value(preview).expect("preview DTO");value["peer"]=json!(preview.peer.to_hex());value.as_object_mut().unwrap().remove("source");value["name"]=json!(preview.source.file_name().unwrap_or_default().to_string_lossy().chars().take(128).collect::<String>());value}).collect::<Vec<_>>(),"speeds":speeds}),
+                )
+            }
+            Command::Events { epoch, after } => {
+                let configuration = self.config.lock().await;
+                let revision = configuration.revision;
+                let forwards = self.forwards.lock().await.snapshot();
+                let journal = self.journal.lock().await;
+                let snapshot = self.control.snapshot().map_err(|e| e.to_string())?;
+                let lost = epoch != self.epoch
+                    || after < journal.floor
+                    || after > snapshot.sequence
+                    || journal
+                        .events
+                        .front()
+                        .is_some_and(|first| after.saturating_add(1) < first.sequence);
+                let events = if lost {
+                    vec![]
+                } else {
+                    journal
+                        .events
+                        .iter()
+                        .filter(|e| e.sequence > after)
+                        .take(128)
+                        .cloned()
+                        .collect()
+                };
+                Ok(
+                    json!({"epoch":self.epoch,"revision":revision,"forwards":forwards,"resync_required":lost,"snapshot":if lost {Some(snapshot)} else {None},"events":events}),
+                )
+            }
+            Command::Services { peer } => Ok(json!(
+                self.control
+                    .list_services(NodeId::from_hex(&peer).map_err(|e| e.to_string())?)
+                    .await?
+            )),
+            Command::Connect { peer, password } => {
+                let password = password
+                    .map(crate::node::core::remote_auth::SecretPassword::new)
+                    .transpose()
+                    .map_err(|e| e.to_string())?;
+                if let Ok(short) = crate::discovery::short_id::ShortId::normalize(&peer) {
+                    match password {
+                        Some(password) => self.control.connect_short_id(short, password)?,
+                        None => self.control.connect_short_id_trusted(short)?,
+                    }
+                    return Ok(json!({"accepted":true}));
+                }
+                let peer = NodeId::from_hex(&peer).map_err(|e| e.to_string())?;
+                if let Some(password) = password {
+                    self.control.connect_peer_with_password(peer, password)?;
+                } else {
+                    self.control.connect_peer_trusted(peer)?;
+                }
+                Ok(json!({"accepted":true}))
+            }
+            Command::Disconnect { peer } => {
+                self.control
+                    .disconnect_peer(NodeId::from_hex(&peer).map_err(|e| e.to_string())?)
+                    .await?;
+                Ok(json!({"disconnected":true}))
+            }
+            Command::Send { peer, paths } => {
+                if paths.is_empty() || paths.len() > 128 || paths.iter().any(|p| !p.is_absolute()) {
+                    return Err("发送路径必须是1..128个本机绝对路径".into());
+                }
+                self.control
+                    .send_paths(NodeId::from_hex(&peer).map_err(|e| e.to_string())?, paths)?;
+                Ok(json!({"accepted":true}))
+            }
+            Command::PreviewDirectory { peer, path } => {
+                crate::node::core::drop_send::validate_paths(std::slice::from_ref(&path))
+                    .map_err(|e| e.to_string())?;
+                let request = self
+                    .control
+                    .preview_directory(NodeId::from_hex(&peer).map_err(|e| e.to_string())?, path)?;
+                Ok(json!({"accepted":true,"request":request}))
+            }
+            Command::Pause { task } => {
+                self.control.pause_task(task)?;
+                Ok(json!({"accepted":true}))
+            }
+            Command::Resume { peer, task } => {
+                self.control
+                    .resume_task(NodeId::from_hex(&peer).map_err(|e| e.to_string())?, task)?;
+                Ok(json!({"accepted":true}))
+            }
+            Command::Cancel { task } => {
+                self.control
+                    .cancel_task(task)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok(json!({"cancelled":true}))
+            }
+            Command::RemoveHistory { tasks } => {
+                if tasks.is_empty() || tasks.len() > 128 {
+                    return Err("每次只能清理1..128个已完成任务".into());
+                }
+                let removed = self
+                    .control
+                    .remove_completed_history(tasks.into_iter().collect())
+                    .map_err(|e| e.to_string())?;
+                Ok(json!({"removed":removed}))
+            }
+            Command::DeleteReceivedFile { task } => {
+                self.control
+                    .delete_completed_receive_file(&task)
+                    .map_err(|e| e.to_string())?;
+                Ok(json!({"deleted":true}))
+            }
+            Command::TaskLocation { task } => {
+                let path = self
+                    .control
+                    .reveal_task(&crate::node::core::task_details::Selection::Task(task))
+                    .map_err(|e| e.to_string())?;
+                Ok(json!({"path":path}))
+            }
+            Command::ConfirmDirectory { peer, request } => {
+                self.control.confirm_directory(
+                    NodeId::from_hex(&peer).map_err(|e| e.to_string())?,
+                    request.clone(),
+                )?;
+                self.previews.lock().await.retain(|(_, p)| p.id != request);
+                Ok(json!({"accepted":true}))
+            }
+            Command::CancelDirectory { request } => {
+                self.control.cancel_directory_preview(request.clone())?;
+                self.previews.lock().await.retain(|(_, p)| p.id != request);
+                Ok(json!({"accepted":true}))
+            }
+            Command::StartSpeed {
+                peer,
+                direction,
+                seconds,
+            } => {
+                crate::node::core::config::validate_speedtest_seconds(seconds)
+                    .map_err(|e| e.to_string())?;
+                self.control.start_speed(
+                    NodeId::from_hex(&peer).map_err(|e| e.to_string())?,
+                    direction,
+                    seconds,
+                )?;
+                Ok(json!({"accepted":true}))
+            }
+            Command::StopSpeed { peer, task } => {
+                self.control
+                    .cancel_speed(NodeId::from_hex(&peer).map_err(|e| e.to_string())?, task)?;
+                Ok(json!({"accepted":true}))
+            }
+            Command::StartForward { rule } => {
+                let record = self.config.lock().await;
+                if !record
+                    .settings
+                    .forwards
+                    .iter()
+                    .any(|r| r.id == rule && r.enabled)
+                {
+                    return Err("转发规则不存在或已禁用".into());
+                }
+                let mut forwards = self.forwards.lock().await;
+                let plan = forwards
+                    .prepare(&record.settings, &self.control, Some(&rule))
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let retired = forwards.commit(plan);
+                drop(forwards);
+                for task in retired {
+                    let _ = task.await;
+                }
+                Ok(json!({"listening":true}))
+            }
+            Command::StopForward { rule } => {
+                let record = self.config.lock().await;
+                if !record.settings.forwards.iter().any(|r| r.id == rule) {
+                    return Err("转发规则不存在".into());
+                }
+                self.forwards
+                    .lock()
+                    .await
+                    .stop(&rule)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok(json!({"stopped":true}))
+            }
+            Command::ApplyConfig {
+                expected_revision,
+                settings,
+            } => {
+                self.apply_settings(expected_revision, settings, id, digest, false)
+                    .await
+            }
+            Command::ConfigureRestart {
+                expected_revision,
+                settings,
+            } => {
+                self.apply_settings(expected_revision, settings, id, digest, true)
+                    .await
+            }
+            Command::TrustVerified {
+                expected_revision,
+                peer,
+                generation,
+                name,
+            } => {
+                let peer = NodeId::from_hex(&peer).map_err(|e| e.to_string())?;
+                let mut record = self.config.lock().await;
+                if record
+                    .settings
+                    .trusted_devices
+                    .iter()
+                    .any(|d| d.node_id == peer.to_hex())
+                {
+                    return Err("设备已被信任".into());
+                }
+                let mut settings = record.settings.clone();
+                settings.trusted_devices.push(
+                    crate::node::core::trusted_devices::TrustedDevice::new(peer, name, None),
+                );
+                settings.trust_sources.insert(
+                    peer.to_hex(),
+                    crate::node::core::authorization::TrustSource::PasswordVerified,
+                );
+                self.commit_settings(
+                    &mut record,
+                    expected_revision,
+                    settings,
+                    id,
+                    digest,
+                    crate::node::core::settings::CommitOptions {
+                        verified: Some((peer, generation)),
+                        restart: false,
+                    },
+                )
+                .await
+            }
+            Command::SetPassword {
+                expected_revision,
+                password,
+            } => {
+                let verifier = tokio::task::spawn_blocking(move || {
+                    crate::node::core::remote_auth::SecretPassword::new(password)
+                        .and_then(|p| crate::node::core::remote_auth::RemoteVerifier::create(&p))
+                })
+                .await
+                .map_err(|e| e.to_string())?
+                .map_err(|e| e.to_string())?;
+                let mut record = self.config.lock().await;
+                let mut settings = record.settings.clone();
+                settings.remote_auth = Some(verifier);
+                self.commit_settings(
+                    &mut record,
+                    expected_revision,
+                    settings,
+                    id,
+                    digest,
+                    Default::default(),
+                )
+                .await
+            }
+            Command::Stop => Ok(json!({"stopping":true})),
+        }
+    }
+
+    async fn submit(self: &Arc<Self>, request: Request) -> Response {
+        if let Err(error) = request.validate() {
+            return Response::error(&request.request_id, "invalid_request", error);
+        }
+        if request.command.is_query() {
+            return match tokio::time::timeout(
+                Duration::from_millis(request.timeout_ms.into()),
+                self.execute(request.command, &request.request_id, ""),
+            )
+            .await
+            {
+                Ok(Ok(value)) => Response::ok(&request.request_id, value),
+                Ok(Err(error)) => Response::error(&request.request_id, "command_failed", error),
+                Err(_) => Response::error(&request.request_id, "timeout", "查询超时"),
+            };
+        }
+        let bytes = zeroize::Zeroizing::new(
+            serde_json::to_vec(&serde_json::to_value(&request.command).expect("command JSON"))
+                .expect("command bytes"),
+        );
+        let digest = blake3::hash(&bytes).to_hex().to_string();
+        {
+            let record = self.config.lock().await;
+            if let Some((last, hash)) = &record.last_request
+                && last == &request.request_id
+            {
+                return if hash == &digest {
+                    Response::ok(
+                        last,
+                        json!({"revision":record.revision,"already_committed":true}),
+                    )
+                } else {
+                    Response::error(last, "id_conflict", "已持久提交的请求ID包含不同命令")
+                };
+            }
+        }
+        let mut cache = self.cache.lock().await;
+        cache.retain(|_, entry| {
+            entry.created.elapsed() < Duration::from_secs(300) || entry.response.borrow().is_none()
+        });
+        let mut receiver = if let Some(entry) = cache.get(&request.request_id) {
+            if entry.digest != digest {
+                return Response::error(&request.request_id, "id_conflict", "相同ID包含不同命令");
+            }
+            entry.response.subscribe()
+        } else {
+            if cache.len() >= 1024 {
+                return Response::error(
+                    &request.request_id,
+                    "busy",
+                    "幂等请求缓存已满，请稍后重试",
+                );
+            }
+            let Ok(permit) = self.mutation_slots.clone().try_acquire_owned() else {
+                return Response::error(
+                    &request.request_id,
+                    "busy",
+                    "在途管理变更已满，请稍后重试",
+                );
+            };
+            let (response, receiver) = watch::channel(None);
+            cache.insert(
+                request.request_id.clone(),
+                Cached {
+                    digest: digest.clone(),
+                    created: Instant::now(),
+                    response: response.clone(),
+                },
+            );
+            let owner = self.clone();
+            let id = request.request_id.clone();
+            let command = request.command;
+            let mut workers = self.workers.lock().await;
+            while workers.try_join_next().is_some() {}
+            workers.spawn(async move {
+                let _permit = permit;
+                let _serial = owner.mutations.lock().await;
+                let result = match owner.execute(command, &id, &digest).await {
+                    Ok(v) => Response::ok(&id, v),
+                    Err(e) => {
+                        *owner.last_error.lock().await = Some(e.chars().take(4096).collect());
+                        Response::error(&id, error_code(&e), e)
+                    }
+                };
+                response.send_replace(Some(result));
+            });
+            receiver
+        };
+        drop(cache);
+        let response =
+            tokio::time::timeout(Duration::from_millis(request.timeout_ms.into()), async {
+                loop {
+                    if let Some(response) = receiver.borrow().clone() {
+                        return Some(response);
+                    }
+                    if receiver.changed().await.is_err() {
+                        return None;
+                    }
+                }
+            })
+            .await;
+        match response {
+            Ok(Some(response)) => response,
+            _ => Response::error(
+                &request.request_id,
+                "outcome_unknown",
+                "变更仍可能完成；使用相同请求ID重试或查询状态",
+            ),
+        }
+    }
+}
+
+/// The caller initializes node.json explicitly before running this host.
+pub async fn run(paths: AgentPaths) -> io::Result<()> {
+    run_with_recovery(paths, false).await
+}
+pub async fn run_managed(paths: AgentPaths) -> io::Result<()> {
+    run_with_recovery(paths, true).await
+}
+async fn run_with_recovery(paths: AgentPaths, managed: bool) -> io::Result<()> {
+    let _directory_lock =
+        crate::instance_lock::InstanceLock::acquire(&paths.lock()).map_err(io::Error::other)?;
+    if paths.root.join("migration.pending.json").try_exists()? {
+        return Err(io::Error::other("存在未完成导入，请migrate-resume后启动"));
+    }
+    let record = ConfigRecord::load(&paths.config()).map_err(io::Error::other)?;
+    let identity = Identity::load(&paths.identity()).map_err(io::Error::other)?;
+    let _identity_lock = AgentPaths::identity_lock(identity.node_id())?;
+    crate::storage::permissions::ensure_directory(&record.settings.receive_root)?;
+    let mut session = record.settings.session().map_err(io::Error::other)?;
+    session.tunnel_rules.clear();
+    let (control, mut raw) = control::spawn_with_storage(
+        identity,
+        session,
+        &paths.tasks(),
+        record.settings.receive_root.clone(),
+    )
+    .map_err(io::Error::other)?;
+    control
+        .set_auto_resume(record.settings.auto_resume)
+        .map_err(io::Error::other)?;
+    control
+        .set_send_limit(record.settings.send_concurrency)
+        .map_err(io::Error::other)?;
+    control
+        .set_file_limits(record.settings.file_limits)
+        .map_err(io::Error::other)?;
+    control
+        .set_receive_safety_mib(record.settings.receive_safety_mib)
+        .map_err(io::Error::other)?;
+    control
+        .configuration_committed(record.revision)
+        .map_err(io::Error::other)?;
+    let (_, mut events) = control.subscribe().map_err(io::Error::other)?;
+    let agent = Arc::new(Agent {
+        control,
+        config: Mutex::new(record),
+        paths: paths.clone(),
+        epoch: format!("{:032x}", rand::random::<u128>()),
+        journal: Mutex::new(Journal {
+            events: VecDeque::new(),
+            floor: 0,
+        }),
+        cache: Mutex::new(HashMap::new()),
+        mutations: Mutex::new(()),
+        workers: Mutex::new(JoinSet::new()),
+        mutation_slots: Arc::new(Semaphore::new(32)),
+        previews: Mutex::new(VecDeque::new()),
+        diagnostics: Mutex::new(VecDeque::new()),
+        restart_pending: std::sync::atomic::AtomicBool::new(false),
+        last_error: Mutex::new(None),
+        forwards: Mutex::new(crate::node::host::forwarding::ForwardManager::default()),
+    });
+    let mut listener = crate::node::local::transport::Listener::bind(&paths)?;
+    {
+        let record = agent.config.lock().await;
+        let mut forwards = agent.forwards.lock().await;
+        let plan = forwards
+            .prepare(&record.settings, &agent.control, None)
+            .await
+            .map_err(io::Error::other)?;
+        let _ = forwards.commit(plan);
+    }
+
+    let collector = agent.clone();
+    let drain = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                raw=raw.recv()=>{match raw {
+                    Some(control::SessionEvent::DirectoryPreview(preview))=>{let mut previews=collector.previews.lock().await;previews.retain(|(_,p)|p.id!=preview.id);if previews.len()==32{previews.pop_front();}previews.push_back((Instant::now(),preview));},
+                    Some(control::SessionEvent::DirectoryPreviewFailed(id))=>collector.previews.lock().await.retain(|(_,p)|p.id!=id),
+                    Some(control::SessionEvent::Diagnostic(message))=>{let mut lines=collector.diagnostics.lock().await;if lines.len()==32{lines.pop_front();}lines.push_back(message.chars().take(512).collect());},
+                    Some(control::SessionEvent::PeerState { peer, state: crate::node::core::network_state::PeerLifecycle::Failed(message), .. })=>{let mut lines=collector.diagnostics.lock().await;if lines.len()==32{lines.pop_front();}lines.push_back(format!("设备 {}：{}",peer.short(),message).chars().take(512).collect());},
+                    Some(_)=>{},None=>break,
+                }},
+                event=events.recv()=>{match event {
+                    Ok(event)=>{let mut journal=collector.journal.lock().await;if journal.events.len()==256{journal.events.pop_front();}journal.events.push_back(event);},
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_))=>{let mut journal=collector.journal.lock().await;journal.events.clear();journal.floor=collector.control.snapshot().map(|s|s.sequence).unwrap_or(u64::MAX);},
+                    Err(_)=>break,
+                }}
+            }
+        }
+    });
+    let (stop, mut stopping) = watch::channel(false);
+    let slots = Arc::new(Semaphore::new(32));
+    let mut connections = JoinSet::new();
+    let shutdown = shutdown_signal();
+    tokio::pin!(shutdown);
+    let reload = reload_signal();
+    tokio::pin!(reload);
+    let recovery = host_recovery(agent.control.clone(), managed);
+    tokio::pin!(recovery);
+    let outcome = loop {
+        tokio::select! {
+            _=stopping.changed()=>break Ok(()),
+            signal=&mut shutdown=>break signal,
+            error=&mut recovery=>break Err(error),
+            signal=&mut reload=>{
+                if let Err(error)=signal {break Err(error);}
+                reload.set(reload_signal());
+                if let Ok(permit)=slots.clone().try_acquire_owned() {
+                    let agent=agent.clone();
+                    connections.spawn(async move {
+                        let _permit=permit;
+                        match read_candidate(&agent.paths.root.join("node.pending.json")) {
+                            Ok(request)=>{let result=agent.submit(request).await;if let Some(error)=result.error{*agent.last_error.lock().await=Some(error.message);}},
+                            Err(error)=>{*agent.last_error.lock().await=Some(error.to_string());}
+                        }
+                    });
+                }
+            },
+            accepted=listener.accept()=>{
+                let mut stream=match accepted { Ok(stream)=>stream, Err(error)=>break Err(error) };
+                let Ok(permit)=slots.clone().try_acquire_owned() else {continue;};
+                let agent=agent.clone();let stop=stop.clone();
+                connections.spawn(async move {
+                    let _permit=permit;
+                    let request=tokio::time::timeout(Duration::from_secs(5),ipc::read::<Request>(&mut *stream)).await;
+                    if let Ok(Ok(request))=request {
+                        let stopping=matches!(request.command,Command::Stop|Command::ConfigureRestart{..});
+                        let response=agent.submit(request).await;
+                        let success=response.error.is_none();
+                        let _=tokio::time::timeout(Duration::from_secs(5),ipc::write(&mut *stream,&response)).await;
+                        if stopping && success {let _=stop.send(true);}
+                    }
+                });
+            },
+            _=connections.join_next(),if !connections.is_empty()=>{},
+        }
+    };
+    drop(listener);
+    connections.abort_all();
+    while connections.join_next().await.is_some() {}
+    let mut workers = agent.workers.lock().await;
+    workers.abort_all();
+    while workers.join_next().await.is_some() {}
+    drop(workers);
+    agent.forwards.lock().await.shutdown().await;
+    agent.control.shutdown();
+    let control = agent.control.clone();
+    tokio::task::spawn_blocking(move || control.shutdown_and_wait())
+        .await
+        .map_err(io::Error::other)?;
+    drain.abort();
+    let _ = drain.await;
+    outcome
+}
+async fn host_recovery(control: NodeControl, managed: bool) -> io::Error {
+    if !managed {
+        return std::future::pending().await;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        crate::node::host::recovery::wait(control).await
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = control;
+        std::future::pending().await
+    }
+}
+async fn shutdown_signal() -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {result=tokio::signal::ctrl_c()=>result,_=terminate.recv()=>Ok(())}
+    }
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await
+    }
+}
+
+async fn reload_signal() -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
+        signal.recv().await;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        std::future::pending().await
+    }
+}
+fn read_candidate(path: &std::path::Path) -> io::Result<Request> {
+    use std::io::Read;
+    let metadata = std::fs::symlink_metadata(path)?;
+    if !crate::storage::atomic::regular_file(&metadata) || metadata.len() > ipc::FRAME_LIMIT as u64
+    {
+        return Err(io::Error::other("候选必须是最大1MiB的普通文件"));
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(ipc::FRAME_LIMIT as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > ipc::FRAME_LIMIT {
+        return Err(io::Error::other("候选过大"));
+    }
+    let request: Request = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+    request.validate()?;
+    if !matches!(request.command, Command::ApplyConfig { .. }) {
+        return Err(io::Error::other("SIGHUP候选只能是apply_config请求"));
+    }
+    Ok(request)
+}
+
+fn error_code(message: &str) -> &'static str {
+    for code in ["revision_conflict", "restart_required", "recovery_required"] {
+        if message.starts_with(code) {
+            return code;
+        }
+    }
+    "command_failed"
+}

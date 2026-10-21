@@ -1,6 +1,7 @@
 //! p2p_file —— 点对点文件传输。
 //!
-//! 模块划分见 `docs/ARCHITECTURE.md`：
+//! 当前目录与依赖边界见 `docs/REPOSITORY_LAYOUT.md`。
+//! 历史网络协议设计见 `docs/ARCHITECTURE.md`：
 //!
 //! - [`identity`]   长期密钥与节点 ID
 //! - [`protocol`]   应用层消息、文件清单、帧编解码

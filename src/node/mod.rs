@@ -1,68 +1,43 @@
-//! Shared node services. No dependency on a GUI or command-line presentation.
-pub mod bandwidth;
-pub mod config;
-pub mod preferences;
-#[allow(dead_code)] // Preserve the existing staged model/recovery API allowance.
-pub mod protocol;
-pub mod receive_policy;
-pub mod remote_auth;
-#[allow(dead_code)] // Preserve the existing staged model/recovery API allowance.
-pub mod task_events;
-#[allow(dead_code)] // Preserve the existing staged model/recovery API allowance.
-pub mod task_model;
-#[allow(dead_code)] // Preserve the existing staged model/recovery API allowance.
-pub mod task_recovery;
-#[allow(dead_code)] // Preserve the existing staged model/recovery API allowance.
-pub mod task_store;
-pub mod trusted_devices;
+//! Unified node with a headless core, process host, local APIs and presentation adapters.
+//! New code should import the explicit layer paths below.
 
-pub(crate) mod activity;
-pub(crate) mod auto_resume;
-pub(crate) mod drop_send;
-pub(crate) mod files;
-pub(crate) mod frame_budget;
-pub(crate) mod incremental;
-pub mod instance_lock;
-pub(crate) mod network_state;
-pub(crate) mod publish;
-pub(crate) mod queue;
-pub(crate) mod secure_fs;
-pub mod snapshot;
-pub(crate) mod space_budget;
-pub(crate) mod speed;
-pub mod task_details;
-pub(crate) mod transfer;
-pub(crate) mod transfer_files;
-pub(crate) mod tunnel;
-pub(crate) use snapshot as ui_model;
-pub mod diagnostics;
-pub(crate) mod session;
+pub mod adapters;
+pub mod api;
+pub mod core;
+pub mod host;
+pub mod local;
+pub mod products;
 
-pub mod authorization;
-pub mod control;
-pub mod dispatch;
-pub mod services;
-pub mod wire;
-
-pub mod agent_paths;
-pub mod ipc_transport;
-pub mod private_access;
-
-pub mod agent;
-pub mod agent_client;
-pub mod agent_config;
-pub mod ipc;
-
-mod agent_forward;
-mod agent_recovery;
-mod agent_state;
-mod restricted_recovery;
-pub mod restricted_sub2api;
-
-pub mod management_cli;
-
-pub mod agent_web;
-
-pub mod migration;
-
-pub mod build_info;
+// Stable public paths retained for existing library consumers.
+pub use crate::instance_lock;
+pub use crate::node::adapters::cli as management_cli;
+pub use crate::node::adapters::migration;
+pub use crate::node::adapters::web as agent_web;
+pub use crate::node::api::build_info;
+pub use crate::node::api::client as agent_client;
+pub use crate::node::api::protocol as ipc;
+pub use crate::node::core::authorization;
+pub use crate::node::core::bandwidth;
+pub use crate::node::core::config;
+pub use crate::node::core::control;
+pub use crate::node::core::diagnostics;
+pub use crate::node::core::dispatch;
+pub use crate::node::core::preferences;
+pub use crate::node::core::protocol;
+pub use crate::node::core::receive_policy;
+pub use crate::node::core::remote_auth;
+pub use crate::node::core::services;
+pub use crate::node::core::settings as agent_config;
+pub use crate::node::core::snapshot;
+pub use crate::node::core::task_details;
+pub use crate::node::core::task_events;
+pub use crate::node::core::task_model;
+pub use crate::node::core::task_recovery;
+pub use crate::node::core::task_store;
+pub use crate::node::core::trusted_devices;
+pub use crate::node::core::wire;
+pub use crate::node::host::agent;
+pub use crate::node::local::paths as agent_paths;
+pub use crate::node::local::transport as ipc_transport;
+pub use crate::node::products::sub2api as restricted_sub2api;
+pub use crate::storage::permissions as private_access;

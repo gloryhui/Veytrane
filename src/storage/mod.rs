@@ -14,6 +14,12 @@
 //! 这些调用挪进 `tokio::task::spawn_blocking`（TODO）。
 
 pub(crate) mod atomic;
+#[cfg(feature = "node")]
+pub mod permissions;
+#[cfg(feature = "node")]
+pub mod relative_path;
+#[cfg(feature = "node")]
+pub(crate) mod secure_fs;
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -81,7 +87,7 @@ impl DownloadDirectory {
     fn open_part(&self, path: &Path) -> Result<File> {
         #[cfg(feature = "node")]
         if let Some(dir) = &self.capability {
-            return crate::node::secure_fs::open(
+            return crate::storage::secure_fs::open(
                 dir,
                 path.file_name().unwrap().to_str().unwrap(),
                 true,
@@ -98,7 +104,7 @@ impl DownloadDirectory {
     fn open_existing_part(&self, path: &Path) -> Result<Option<File>> {
         #[cfg(feature = "node")]
         if let Some(dir) = &self.capability {
-            return match crate::node::secure_fs::open(
+            return match crate::storage::secure_fs::open(
                 dir,
                 path.file_name().unwrap().to_str().unwrap(),
                 true,
@@ -119,7 +125,7 @@ impl DownloadDirectory {
         #[cfg(feature = "node")]
         if let Some(dir) = &self.capability {
             let name = path.file_name().unwrap().to_str().unwrap();
-            return match crate::node::secure_fs::open(dir, name, false, false) {
+            return match crate::storage::secure_fs::open(dir, name, false, false) {
                 Ok(file) => {
                     let mut bytes = Vec::new();
                     file.take(u64::from(chunks.div_ceil(8)) + 1)
@@ -153,7 +159,7 @@ impl DownloadDirectory {
             file.sync_all()?;
             drop(file);
             dir.rename(&temp, dir, name)?;
-            return crate::node::secure_fs::sync(dir);
+            return crate::storage::secure_fs::sync(dir);
         }
         save_bitmap(path, bitmap)
     }

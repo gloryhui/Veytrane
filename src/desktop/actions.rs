@@ -1,0 +1,41 @@
+//! Keyboard and command actions shared by both desktop entry points.
+use gpui::actions;
+
+actions!(
+    desktop_shell,
+    [
+        Backspace,
+        Delete,
+        Left,
+        Right,
+        SelectLeft,
+        SelectRight,
+        SelectAll,
+        Home,
+        End,
+        ShowCharacterPalette,
+        Paste,
+        Cut,
+        Copy,
+        ChooseFiles,
+        ChooseFolder,
+        ChooseReceiveDirectory,
+        Quit,
+        ConnectPeer,
+        SaveSettings,
+        StartSpeed,
+        CancelSpeed,
+        ToggleSettings,
+        PauseSelected,
+        ResumeSelected,
+        NextField,
+        PreviousField,
+        CopyIdentity,
+        NextTask,
+        PreviousTask,
+        ExpandGroups,
+        CycleDirection,
+        CycleDuration,
+        CycleConcurrency,
+    ]
+);

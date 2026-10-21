@@ -163,7 +163,7 @@ fn open_panel_window(shell: Entity<AgentShell>, page: Page, cx: &mut App) {
             return;
         }
         let _ = handle.update(cx, |_, window, cx| {
-            background::show_window(window);
+            native_window::show_window(window);
             window.activate_window();
             cx.activate(true);
         });

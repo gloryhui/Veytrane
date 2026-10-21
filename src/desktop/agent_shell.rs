@@ -1,11 +1,24 @@
 //! Native management window. This module holds no identity or business runtime.
-use super::*;
-use crate::node::{
-    agent_client::AgentClient,
-    agent_paths::AgentPaths,
-    ipc::{Command, Request, Response},
-    task_model::TaskId,
+use crate::desktop::actions::*;
+use crate::desktop::platform::{status, tray, window as native_window};
+use crate::desktop::ui::{components as ui_components, text_field::TextField, theme as ui_theme};
+use crate::{discovery::short_id::ShortId, identity::NodeId};
+use gpui::{
+    App, Application, Bounds, ClipboardItem, Context, CursorStyle, Entity, FocusHandle, Focusable,
+    KeyBinding, MouseButton, PathPromptOptions, PromptButton, PromptLevel, SharedString, Window,
+    WindowBounds, WindowOptions, div, prelude::*, px, relative, rgb, size, white,
 };
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    time::Duration,
+};
+use std::{net::SocketAddr, ops::Range};
+
+use crate::node::api::client::AgentClient;
+use crate::node::api::protocol::{Command, Request, Response};
+use crate::node::core::task_model::TaskId;
+use crate::node::local::paths::AgentPaths;
 use serde_json::{Value, json};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 mod tray_host;
@@ -381,7 +394,7 @@ impl AgentShell {
         let service = Self::text(&self.service, cx);
         let port = Self::text(&self.port, cx).parse::<u16>();
         if NodeId::from_hex(&peer).is_err()
-            || crate::node::wire::validate_service_id(&service).is_err()
+            || crate::node::core::wire::validate_service_id(&service).is_err()
             || port.as_ref().is_err()
             || port.as_ref().is_ok_and(|p| *p == 0)
         {
@@ -440,7 +453,7 @@ impl AgentShell {
             devices.retain(|d| d["node_id"].as_str() != Some(&peer));
             if grant {
                 devices.push(
-                    serde_json::to_value(crate::node::trusted_devices::TrustedDevice::new(
+                    serde_json::to_value(crate::node::core::trusted_devices::TrustedDevice::new(
                         node,
                         "管理员授权".into(),
                         None,
@@ -466,7 +479,7 @@ impl AgentShell {
         let service = Self::text(&self.service, cx);
         let target = Self::text(&self.target, cx);
         if NodeId::from_hex(&peer).is_err()
-            || crate::node::wire::validate_service_id(&service).is_err()
+            || crate::node::core::wire::validate_service_id(&service).is_err()
             || target.parse::<SocketAddr>().is_err()
         {
             self.message = "请填写完整被授权设备ID、服务ID和本机服务地址。".into();

@@ -161,7 +161,7 @@ async fn explicit_exit_stops_real_agent_and_preserves_identity() {
         rand::random::<u128>()
     ));
     let paths = AgentPaths::new(&root).unwrap();
-    crate::node::management_cli::initialize(&paths).unwrap();
+    crate::node::adapters::cli::initialize(&paths).unwrap();
     let identity = std::fs::read(paths.identity()).unwrap();
     let mut command = std::process::Command::new(binary);
     command

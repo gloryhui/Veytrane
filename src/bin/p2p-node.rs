@@ -2,10 +2,10 @@ use clap::Parser;
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     if std::env::args().skip(1).collect::<Vec<_>>() == ["--build-info"] {
-        println!("{}", p2p_file::node::build_info::value("p2p-node"));
+        println!("{}", p2p_file::node::api::build_info::value("p2p-node"));
         return std::process::ExitCode::SUCCESS;
     }
-    match p2p_file::node::management_cli::run(p2p_file::node::management_cli::Args::parse()).await {
+    match p2p_file::node::adapters::cli::run(p2p_file::node::adapters::cli::Args::parse()).await {
         Ok(response) => {
             println!(
                 "{}",
@@ -18,7 +18,8 @@ async fn main() -> std::process::ExitCode {
             }
         }
         Err(error) => {
-            let response = p2p_file::node::ipc::Response::error("local", "local_error", error);
+            let response =
+                p2p_file::node::api::protocol::Response::error("local", "local_error", error);
             println!("{}", serde_json::to_string(&response).expect("JSON error"));
             std::process::ExitCode::FAILURE
         }

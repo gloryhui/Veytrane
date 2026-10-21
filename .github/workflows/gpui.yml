@@ -51,6 +51,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Check repository architecture boundaries
+        run: python scripts/check-architecture.py
+      - name: Check offline architecture map and source links
+        run: python scripts/update-architecture-map.py --check
       - name: Check packaging validation boundaries
         run: python scripts/package-desktop-tests.py
       - name: Check Intel Mac native environment and prerequisite gates

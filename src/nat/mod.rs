@@ -1,7 +1,6 @@
-//! NAT 穿透：STUN 查询、类型判定、打洞、端口映射。
+//! NAT 穿透：STUN 查询、类型判定与打洞。主动网关端口映射尚未实现。
 
 pub mod classify;
-pub mod portmap;
 pub mod punch;
 pub mod stun;
 

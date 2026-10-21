@@ -5,6 +5,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nth(1)
         .ok_or("private test profile path required")?;
     let profile = std::fs::read_to_string(path)?;
-    p2p_file::node::restricted_sub2api::run_client(&profile).await?;
+    p2p_file::node::products::sub2api::run_client(&profile).await?;
     Ok(())
 }
