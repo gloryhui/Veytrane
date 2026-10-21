@@ -1,616 +1,236 @@
+<p align="center">
+  <img src="docs/assets/readme/veytrane-cover.svg" alt="Veytrane — Trusted devices. Connected. 通过信令发现，将可信设备连接为加密通信网络。" width="100%">
+</p>
+
+<p align="center">
+  <strong>可信设备，跨网络互联。</strong><br>
+  通过自己的信令服务发现设备，以经过认证的端到端连接访问远端服务、传输文件。
+</p>
+
+<p align="center">
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#系统架构">系统架构</a> ·
+  <a href="docs/architecture-current.html">可点击架构图</a> ·
+  <a href="#部署与平台">部署与平台</a> ·
+  <a href="#文档导航">文档导航</a>
+</p>
+
 # Veytrane
 
-**Trusted devices. Connected.**
+Veytrane 是用 Rust 构建的可信设备互联软件。设备可以位于不同家庭、办公室或云网络，通过信令交换连接信息，优先建立 QUIC 直连，再按身份和资源授权访问彼此。
 
-跨网络的可信设备互联软件。**Rust** 实现，通过信令发现设备、交换网络候选，优先建立经过身份认证与授权的端到端 QUIC 直连：
+你可以在 Mac 上访问远端 Ubuntu 授权的 Web 面板、SSH、文件共享等 TCP 服务，也可以在设备间发送文件和目录。桌面、命令行和 Web 管理同一个后台 Agent，共享身份、连接、配置和任务。
 
-- **可信设备连接** —— 稳定设备身份、远端认证、资源授权与撤销。
-- **服务访问与端口映射** —— 将远端授权服务接入本机，支持 Web、SSH、文件共享等 TCP 服务。
-- **文件与目录传输** —— 分片、BLAKE3 校验、断点续传。
-- **专用客户端与网关** —— 按用途提供受限的服务入口，例如 Veytrane for Sub2API。
+**Rust · QUIC / TLS 1.3 · Ed25519 · P2PN v2 · MIT**
 
-Direct 成功时服务器只负责信令，不承载业务数据。用户配置 Relay 且 Direct 无法
-及时建立 authenticated transport 时，Relay UDP 服务延迟转发**端到端加密的 QUIC
-datagram**。Relay 看不到业务明文，QUIC / Ed25519 身份认证仍然是设备间端到端。
+## 可以用它做什么
 
-产品名为 **Veytrane**，内部节点协议仍称 **P2PN v2**，协议版本与产品版本分别管理。工程包名 `p2p_file`、已有命令及节点数据路径维持当前标识，继续使用现有身份、授权、任务和服务安装。2026-10-21 已从干净提交 `ec72ed4` 更新 Mac 的 `Veytrane.app`、两端主节点及 Ubuntu 独立网关，并生成 Windows 专用新包；身份、授权、任务和 7 条映射保留。桌面交付 ZIP 为 `Veytrane-Sub2API-Windows-x64-P2PN-v2.zip`，详见[当前部署验收](docs/task-reports/VEYTRANE_DEPLOYMENT.md)。
+| 场景 | 使用方式 |
+| --- | --- |
+| 访问远端应用与管理面板 | 将远端发布的授权服务映射到本机端口，用浏览器或原有客户端访问。 |
+| 连接家中或办公室设备 | 通过自建信令发现设备，完成身份认证与远程访问认证，按资源授予权限。 |
+| 传输文件与目录 | 支持分片校验、暂停与继续、目录预览、增量发送、上传/下载限速及任务历史管理。 |
+| 在无桌面服务器上常驻 | Agent 由 systemd、launchd 或 Windows 当前用户登录任务托管；管理界面通过本地 IPC 接入。 |
+| 为特定用途分发客户端 | 使用 Veytrane for Sub2API 独立网关与 Windows 专用包，仅开放指定服务。 |
+| 排查连接问题 | 查看连接阶段、Direct / Relay 路径与授权状态，并使用设备间测速辅助定位问题。 |
 
-## 获取源码
+### 把远端服务接入本机
 
-GitHub 仓库为 [gloryhui/Veytrane](https://github.com/gloryhui/Veytrane)，源码目录统一使用 `Veytrane`：
+下面以访问远端 Web 服务为例。远端节点发布 `sub2api` 服务，并指定哪些设备可以使用；本地节点选择这个服务，将它绑定到回环端口。
+
+![服务端口映射：远端 Ubuntu 的 127.0.0.1:8080，经授权的加密设备通道映射到本地 Mac 的 127.0.0.1:18081。](docs/assets/readme/service-mapping.svg)
+
+浏览器访问 `http://127.0.0.1:18081/`，请求经本地 Agent 到达远端服务。远端图中的 `127.0.0.1` 指 **Ubuntu 自己的回环地址**；本地图中的 `127.0.0.1` 指 **Mac 自己的回环地址**。图中端口为说明示例，实际以各节点配置为准。
+
+TCP 转发按服务 ID 与授权目录开流。服务发布、设备白名单和本地映射分别控制“提供什么”“谁能访问”和“从哪里访问”；仅建立设备连接不会自动开放全部服务。详见[服务契约](docs/specs/NODE_SERVICES.md)与[授权模型](docs/specs/NODE_AUTHORIZATION.md)。
+
+## 设备如何连接
+
+1. **发现与牵线**：设备向信令服务器登记身份和网络候选，通过设备 ID 找到对端；STUN 辅助获取公网映射。
+2. **建立通道**：尝试可用的 IPv4 / IPv6 路径与打洞候选，优先建立 QUIC 直连。
+3. **验证身份与权限**：Ed25519 身份握手绑定当前 TLS 会话；远程密码或可信设备认证通过后，再检查相应资源权限。
+4. **承载业务**：在授权通道上进行文件传输、测速或指定 TCP 服务转发。
+
+Direct 连接成功时，业务数据在设备间传输，信令服务器负责发现和连接协调。配置可选 UDP Relay 后，直连无法及时建立时可回退到中继；Relay 转发端到端加密的 QUIC 数据报。是否能直连取决于双方网络和 NAT 条件。
+
+## 系统架构
+
+Veytrane 的常驻形态由**一个 Agent 持有节点状态，多个入口管理同一个节点**。关闭或重新打开管理界面，不需要重新建立另一套节点身份和业务会话。
+
+[![Veytrane 节点架构：桌面、管理 CLI 和 Web 经统一 API 与本地 IPC 接入 Agent，核心复用身份、QUIC、发现和存储基础设施。](docs/assets/readme/node-architecture.svg)](docs/architecture-current.html)
+
+| 层次 | 主要模块 | 职责 |
+| --- | --- | --- |
+| 管理入口 | `desktop/agent_shell`、`node/adapters` | 原生 GPUI 工作台、管理 CLI、回环 Web 管理页；呈现状态并提交操作。 |
+| 管理契约与本地连接 | `node/api`、`node/local` | 请求/响应、构建信息、本地 Unix socket / Windows named pipe、用户路径与锁。 |
+| Agent 宿主 | `node/host` | 独占身份和数据目录，执行管理命令，协调配置提交、本地转发与恢复。 |
+| 节点核心 | `node/core` | 设备会话、认证授权、服务目录、文件任务、测速、调度与恢复策略。 |
+| 共享基础设施 | `discovery`、`nat`、`net`、`transport`、`relay`、`storage` | 设备发现、候选收集、连接竞速、QUIC、可选中继及安全持久化。 |
+| 专用产品组合 | `node/products` | 复用核心能力，构建权限和功能受限的 Sub2API 客户端与网关。 |
+
+**架构资料：** [可点击架构图](docs/architecture-current.html)提供系统全景、节点分层、核心内部和桌面边界四个视图，可搜索模块、查看职责并跳转源码。GitHub 不直接运行仓库中的 HTML；下载仓库后用浏览器打开该文件即可离线查看。源码边界见[仓库分层说明](docs/REPOSITORY_LAYOUT.md)，管理契约见[Agent API](docs/specs/NODE_AGENT_API.md)，设备间协议见[P2PN v2](docs/specs/NODE_WIRE.md)。
+
+### 进程与入口
+
+| 入口 | 用途 |
+| --- | --- |
+| `p2p-agent` | 常驻无 GUI 节点，持有身份、连接、任务与监听。 |
+| `p2p-node` | 管理同一 Agent 的 CLI；也可启动只监听回环地址的 Web 管理网关。 |
+| `p2p-desktop` | 原生桌面工作台，通过 IPC 管理 Agent；需要 `gui` feature。 |
+| `p2p_file signal-server` | 自建信令服务器，负责发现和候选交换；可配置 TLS 与 UDP Relay。 |
+| `p2p-sub2api-gateway` / `sub2api-client` | 独立的 Sub2API 专用组合，使用独立身份和受限服务范围。 |
+
+产品与仓库名为 **Veytrane**。当前 Cargo 包名、可执行命令和数据路径仍沿用现有内部标识；源码目录更名不会迁移身份或配置。
+
+## 快速开始
+
+### 1. 获取源码与构建
+
+需要 Rust stable、Rust / Cargo **1.90.0 或更高版本**，以及目标平台的编译工具链。桌面构建还需要图形系统依赖，见下方各平台打包文档。
 
 ```sh
 git clone https://github.com/gloryhui/Veytrane.git
 cd Veytrane
+
+# 无 GUI 节点：构建后台 Agent 与管理入口
+cargo build --locked --release --bin p2p-agent --bin p2p-node
 ```
 
-仓库和源码目录更名不迁移节点数据；既有身份、配置、任务、端口映射及服务安装目录继续使用原路径。内部 Rust 包名和可执行命令仍使用现有标识。
+### 2. 初始化并运行新节点
 
-## 当前节点架构
-
-当前整体架构可直接打开[可点击架构图](docs/architecture-current.html)：提供系统全景、节点分层、核心内部、桌面边界四个视图，支持搜索模块、展开职责和跳转源码。图与 2026-10-21 分层后的源码对应；部署章节同步 Mac / Ubuntu 主节点的 P2PN v2 升级快照，详见[部署验收记录](docs/task-reports/P2PN_V2_DEPLOYMENT.md)。目录职责与维护方式见[仓库分层说明](docs/REPOSITORY_LAYOUT.md)。
-
-独立 Sub2API 网关已部署 P2PN v2，对应 Windows x64 新包已生成；实际接入、权限及恢复结果见[专用路径部署记录](docs/task-reports/SUB2API_P2PN_V2_DEPLOYMENT.md)。Windows 实机安装尚待执行。
-
-当前默认入口为无GUI的`p2p-agent`、共享IPC的`p2p-node`/Web和原生客户端。Agent统一持有身份、连接、文件任务与本机转发；Mac/Windows可分别从老家授权目录选择服务、设置本机端口，并继续传文件。
+以下命令用于**首次安装**。已有安装直接使用原数据目录与宿主服务，更新步骤见[节点安装与恢复](packaging/node/README.md)。
 
 ```sh
-cargo build --locked --release --bin p2p-agent --bin p2p-node
+# 首次初始化身份和配置；已有配置会拒绝覆盖
 target/release/p2p-node init
+
+# 终端一：运行后台节点，前台保持进程
 target/release/p2p-agent
 ```
 
-桌面默认保留文件传输工作台：连接设备、接收目录、任务列表、目录预览和测速均通过 IPC 操作独立 Agent。设置、节点管理、连接诊断、测速、任务详情及目录预览均在独立窗口打开，主界面保持显示；重复打开会激活已有窗口，关闭后可重新打开。节点管理、资源授权与端口转发从“设置 → 打开节点管理”进入，所有窗口共享同一个 IPC 状态与后台。启动桌面时先附着现有 Agent；已有节点配置但后台未运行时自动启动，不创建第二套业务会话。
+另开终端查看状态，或启动本地 Web 管理页：
 
-首次使用按[节点宿主说明](packaging/node/README.md)初始化；`init`不会覆盖现有配置。旧桌面导入和协议适配已删除，当前节点统一使用 P2PN v2，升级需同步两端程序并移除配置中的 `peer_modes` 字段。桌面包须包含同SHA的Agent和CLI。主窗口标题栏“×”会隐藏到系统托盘，传输和后台节点继续；点击托盘图标恢复原窗口，二级窗口仍单独关闭。只有托盘菜单“退出 Veytrane”会停止 Agent、确认状态已保存并退出。托盘不可用时保留任务栏入口；不会隐藏成无法恢复的进程。桌面仅保留 Agent 工作台，已移除内嵌旧桌面和 `--legacy` 参数。独立 CLI 的范围见[发布矩阵](docs/specs/NODE_RELEASE_DECISION.md)。
+```sh
+target/release/p2p-node status
 
-最新已部署版本与实机范围见[Veytrane 部署验收](docs/task-reports/VEYTRANE_DEPLOYMENT.md)，源码回归见[协议统一记录](docs/task-reports/NODE_PROTOCOL_UNIFICATION.md)。[任务台账](docs/task-reports/IMPLEMENTATION_STATUS.md)保留早期实施阶段记录；四设备的扩展验收范围见[验收计划](docs/FOUR_DEVICE_ACCEPTANCE.md)。
+# 终端二：运行本地管理网关
+target/release/p2p-node web --listen 127.0.0.1:8787
+```
 
-## 快速开始
+浏览器打开 `http://127.0.0.1:8787/`。Web 启动日志会显示管理 token 的文件位置，将该文件内容填入页面。**管理 token 用于本机管理，远程访问密码用于设备认证，两者用途不同。**
 
-以下为保留的旧CLI v3独立使用流程；统一Agent流程以[节点宿主说明](packaging/node/README.md)为准，不把两种协议视作自动互通。
+初始节点尚未填写信令地址。首次信令设置需要重启节点：有桌面时在设置中保存并停止节点，再启动；无桌面时按[节点宿主说明](packaging/node/README.md#构建和首次配置)导出配置草稿，在 Agent 停止后使用 `offline-apply`。新安装的初始 revision 为 `0`，后续修改以当前响应为准。
 
-整个流程你只需要提供 **3 个值**：
+### 3. 配置两端并建立连接
 
-| 值 | 是什么 | 怎么拿到 |
+1. 两端使用同一信令服务；在提供访问的一端设置远程访问密码。
+2. 用对端设备 ID 和远程访问密码建立连接，核对身份后按需要保存为可信设备。
+3. 远端发布服务，并填写允许访问的设备 ID；本地从授权服务目录配置监听端口。填写后点击保存，确认响应成功。
+4. 文件与测速能力单独授权；发送文件前确认接收目录、磁盘空间和对端权限。
+
+配置使用 revision 检查防止覆盖其他入口的修改。保存失败时先检查页面反馈；不要把尚未提交的草稿当成已经生效的配置。
+
+已完成连接和授权后，可通过 CLI 查询服务和发送文件：
+
+```sh
+# 将占位值替换为对端完整 NodeId；与桌面短设备 ID 的输入方式区分
+export PEER_NODE_ID="<REMOTE_NODE_ID>"
+
+target/release/p2p-node services "$PEER_NODE_ID"
+target/release/p2p-node send "$PEER_NODE_ID" /absolute/path/to/file.zip
+target/release/p2p-node tasks
+```
+
+### 4. 使用原生桌面
+
+```sh
+cargo build --locked --release --features gui   --bin p2p-desktop --bin p2p-agent --bin p2p-node
+
+target/release/p2p-desktop
+```
+
+桌面、Agent 和管理 CLI 应使用同一源码提交构建。文件任务在工作台管理；设置、节点管理、连接诊断、目录预览和任务详情使用独立窗口，并共享同一个后台。
+
+主窗口关闭按钮会收起到托盘，业务继续运行；托盘不可用时保留任务栏入口。托盘菜单“退出 Veytrane”会停止 Agent 并等待状态保存。正式应用包及平台依赖见[桌面构建与运行](packaging/RUNNING.md)。
+
+### 5. 自建信令服务器
+
+在可被双方访问的服务器上运行：
+
+```sh
+cargo build --locked --release --bin p2p_file
+
+# 在可写的专用工作目录运行；数据库保存短设备 ID 的长期映射
+target/release/p2p_file signal-server   --listen 0.0.0.0:8900   --short-id-db ./signal-device-ids.sqlite3
+```
+
+将可访问的信令 `HOST:PORT` 填入两端配置。默认信令使用 TCP；需要放行所选 TCP 端口。启用可选 UDP Relay 时，另行配置并放行相应 UDP 端口。信令 TLS 的证书与主机名校验、设备端配置见[信令 TLS](docs/SIGNALING_TLS.md)。
+
+## 部署与平台
+
+| 形态 | 目标环境 | 说明 |
 | --- | --- | --- |
-| 云主机地址 | 你那台有公网 IP 的机器的 `IP:端口` | 自己知道，例如 `203.0.113.7:7000` |
-| 家里的节点 ID | 家里那台机器的身份 | 在那台机器上跑 `p2p_file id` |
-| 外面的节点 ID | 外面那台机器的身份 | 在那台机器上跑 `p2p_file id` |
+| 通用 Agent + CLI / Web | macOS、Linux、Windows | 使用同一节点核心；当前 Mac / Ubuntu 部署已有连接、双向文件校验与服务入口验证记录。 |
+| 原生桌面 | macOS、Windows、Linux | GPUI 窗口与系统托盘；系统依赖、打包与签名按平台核验。 |
+| Sub2API 专用客户端 | Windows x64 | 分发包仅提供固定服务入口；已交叉构建并检查制品，Windows 实机验收尚未完成。 |
+| 信令 / 可选 Relay | 可公网访问的服务器 | 与设备业务分离，按实际启用的监听端口部署。 |
 
-下面每台机器的命令块，开头都把需要的值导出成变量，**填一次，后面的命令整段复制粘贴即可**。
-文中出现的 `203.0.113.7` 和那两个节点 ID 都是示例值。
+常驻安装由 [node-host.py](scripts/node-host.py) 与平台宿主管理。安装工具使用不可覆盖的版本目录；配置、身份和任务单独保存。数据目录默认位置如下，所有管理入口须指向同一个目录：
 
-### 编译
+| 平台 | 默认节点数据目录 |
+| --- | --- |
+| macOS | `~/Library/Application Support/p2p-file/node` |
+| Linux | `$XDG_DATA_HOME/p2p-file/node`，未设置时为 `~/.local/share/p2p-file/node` |
+| Windows | `%LOCALAPPDATA%\p2p-file\node` |
 
-使用 rustup stable，rustc/Cargo 最低 1.90.0（现代 macOS 通知后端要求）。
+自定义目录使用 `--data-dir`。持续升级时保留身份、授权、任务和映射，先备份再按宿主流程操作；具体命令与恢复边界见[节点安装、升级与恢复](packaging/node/README.md)。
 
-```bash
-cargo build --release
-export BIN=$PWD/target/release/p2p_file
+平台资料：[macOS Apple Silicon](packaging/macos-arm64/README.md) · [macOS Intel](packaging/macos-x86_64/README.md) · [Windows x64](packaging/windows-x64/README.md) · [Linux x86_64](packaging/linux-x86_64/README.md) · [Sub2API 专用包](packaging/sub2api-windows/README.md)。
+
+## 安全与访问边界
+
+- **设备身份**：每个节点拥有独立 Ed25519 身份；握手绑定当前 QUIC / TLS 会话，避免仅依赖自签证书识别设备。
+- **权限分开授予**：身份认证、远程访问认证、文件/测速资源和 TCP 服务授权是不同检查。对端支持某能力，不代表已获得使用权限。
+- **本机管理边界**：Web 仅允许回环监听，并要求管理 token。远程管理应通过已授权的服务映射或 SSH 隧道接入。
+- **文件完整性**：传输使用分片 BLAKE3 校验与接收路径校验，校验完成后发布文件；支持持久任务恢复。
+- **信令与中继可见性**：信令可观察设备地址与牵线关系，中继可观察包大小和时序；中继不解密业务载荷。默认明文信令可能被干扰连接协调，部署时可配置严格校验的 TLS。
+- **凭据管理**：私钥、管理 token、密码、完整私有配置和带嵌入凭据的专用包不应提交到源码仓库。Sub2API 专用包的共享凭证与撤销边界见[分发说明](packaging/sub2api-windows/README.md)。
+
+协议与认证细节：[远程认证](docs/REMOTE_AUTH.md) · [授权模型](docs/specs/NODE_AUTHORIZATION.md) · [节点协议](docs/specs/NODE_WIRE.md) · [信令 TLS](docs/SIGNALING_TLS.md)。
+
+## 开发与验证
+
+```sh
+# 架构依赖与图中源码链接
+python3 scripts/check-architecture.py
+python3 scripts/update-architecture-map.py --check
+
+# Rust 格式、编译与回归
+cargo fmt --all -- --check
+cargo check --locked --all-features --all-targets
+cargo test --locked --all-features --all-targets --no-fail-fast -- --test-threads=4
+
+# 安装宿主与桌面打包检查
+python3 scripts/node-host-tests.py
+python3 scripts/package-desktop-tests.py
 ```
 
-把 `$BIN` 拷到要用的机器上（`scp` 就行）：
-
-```bash
-scp target/release/p2p_file root@203.0.113.7:/usr/local/bin/p2p_file
-```
-
-`203.0.113.7` 就是你云主机的公网 IP，全文的示例都用它。
-
-### 第 1 步：云主机 —— 跑信令服务器
-
-```bash
-export SIGNAL=0.0.0.0:7000
-$BIN signal-server --listen $SIGNAL
-```
-
-直连模式在**云厂商的安全组**里放通 TCP 7000；启用 Relay 时还需放通对应 UDP 端口。
-
-以上命令仅启用 TCP 信令；Direct 成功时云主机不承载业务数据。若启用可选 Relay UDP
-服务，则需按实际转发流量准备带宽；Relay 只转发端到端加密的 QUIC datagram，
-看不到业务明文。开机自启见[部署](#部署为-systemd-服务)。
-
-### 第 2 步：两台机器各拿一次身份
-
-在**家里那台**和**外面那台**上分别跑：
-
-```bash
-$BIN id
-```
-
-输出形如：
-
-```
-节点 ID:  a1b2c3d4e5f60718293a4b5c6d7e8f90
-公钥:     3b99296d64377f91605631f89feb53aec6e432dd8b0a0e15a59267de106b04f9
-密钥文件: /home/you/.config/p2p_file/identity.key
-```
-
-要的就是 `节点 ID:` 后面那串 **32 位十六进制**。它是公钥摘要，可以随便公开。
-私钥自动生成在 `~/.config/p2p_file/identity.key`（权限 `0600`），**别外传**。
-两台机器的 ID 记下来，第 4、5 步要用。
-
-### 第 3 步：先确认打洞打得通
-
-```bash
-$BIN stun
-```
-
-输出形如：
-
-```
-本地端口 59744，向 3 个 STUN 服务器查询 ...
-
-  111.206.174.2:3478           看到的是 39.151.73.136:10281
-  74.125.250.129:19302         看到的是 39.151.73.136:10282
-  162.159.207.0:3478           看到的是 39.151.73.136:10282
-
-NAT 映射行为: 未知（证据不足）
-mapping 证据: 证据不足（服务器不支持 RFC 5780 行为发现或备用探测失败）
-Filtering behavior: 未测量（当前只测 mapping）
-证据不足时不能宣称 NAT 可以打洞。
-```
-
-程序会优先使用支持 RFC 5780 `OTHER-ADDRESS` 的 STUN 服务器，对同一个 socket
-按 RFC 5780 §4.3 先探测 primary IP+port，再探测 alternate IP+primary port；只有
-Test II 映射与 Test I 不同，才继续探测 alternate IP+alternate port。只有 RFC 5780
-行为发现证据充分时，才会区分 EIM / ADM / APDM；跨 IP 且每个 IP 只有一个样本时会保持未知。
-当前只测 mapping，不测 filtering，因此任何 mapping 结果都不能单独等同于最终 punchability。
-
-如果输出是 `地址端口相关/对称型（mapping 对打洞不利）`，请直接跳到
-[打不通的时候](#打不通的时候)第 3 条做端口映射。
-
-### 第 4 步：家里那台 —— 常驻等着被连
-
-```bash
-export SIGNAL=203.0.113.7:7000        # 换成你云主机的公网地址
-export LAPTOP_ID=0f1e2d3c4b5a69788796a5b4c3d2e1f0    # 换成"外面那台"的节点 ID
-
-$BIN serve \
-  --signal $SIGNAL \
-  --allow $LAPTOP_ID \
-  --forward 127.0.0.1:22 \
-  --recv-dir ~/下载 \
-  --port 9000
-```
-
-这条命令的含义：
-
-- `--allow` —— 只让这一个节点连进来，别人不行。
-- `--forward 127.0.0.1:22` —— 允许对端转发到本机的 ssh。可以重复指定多个。
-- `--recv-dir` —— 对端推过来的文件落在这里。目录不存在会自动创建。
-- `--port 9000` —— 打洞用的本地端口。
-
-它会**一直等**着对端上线（不超时），空闲一段时间后自动重新打洞，
-所以开着不用管。要做成开机自启见[部署](#部署为-systemd-服务)。
-
-### 第 5 步：外面那台 —— 开隧道或推文件
-
-```bash
-export SIGNAL=203.0.113.7:7000        # 换成你云主机的公网地址
-export HOME_ID=a1b2c3d4e5f60718293a4b5c6d7e8f90       # 换成"家里那台"的节点 ID
-```
-
-**开隧道**（把本机 2222 接到家里的 22）：
-
-```bash
-$BIN tunnel \
-  --signal $SIGNAL \
-  --peer $HOME_ID \
-  --listen 127.0.0.1:2222 \
-  --to 127.0.0.1:22
-
-# 另开一个终端：
-ssh -p 2222 127.0.0.1
-```
-
-（`ssh` 不带用户名时会用你当前的用户名。家里那台的登录名不一样的话，
-写成 `ssh -p 2222 那边的用户名@127.0.0.1`。）
-
-`--to` 指定的地址必须在家里那台的 `--forward` 白名单里，否则会被拒绝。
-
-**推文件**（落到家里的 `--recv-dir`）：
-
-```bash
-$BIN push --signal $SIGNAL --peer $HOME_ID ./大文件.mkv
-```
-
-### 原生桌面（GPUI）
-
-桌面连接使用信令分配的 9 位顺序设备 ID（如 `100 000 123`）和对端远程访问密码。
-首次启动在设置页显示随机生成的密码，复制保存后可隐藏；密码只保存 Argon2id
-派生密钥，重启后不能回显，仍可修改或重新生成。双方身份与当前 QUIC/TLS binding
-验证完成后，还须通过密码认证才开放文件、测速和 TCP Tunnel。
-信令服务器需升级并持久保存 `--short-id-db` 数据库；CLI 长 NodeId 流程继续可用。
-协议、迁移与安全边界见 [远程访问认证](docs/REMOTE_AUTH.md)。
-
-默认 Agent 桌面点击主窗口“×”会隐藏至托盘，传输、测速和后台节点保持运行；点击
-托盘图标可恢复原窗口。二级窗口单独关闭。托盘菜单“退出 Veytrane”才会停止后台、
-等待状态保存和所有权释放后退出。托盘不可用时，关闭按钮只最小化到任务栏。
-旧内嵌桌面的可选后台开关和登录项说明见 [后台运行](docs/DESKTOP_BACKGROUND.md)。
-设置页的 [断网自动恢复](docs/DESKTOP_AUTO_RESUME.md) 继续由 Agent 执行。
-
-- [桌面接收空间预检查与共享预算](docs/DESKTOP_RECEIVE_SPACE.md)
-- [桌面拖拽文件与目录发送](docs/DESKTOP_DROP_SEND.md)
-- [桌面任务详情与本机定位](docs/DESKTOP_TASK_DETAILS.md)
-
-“增量发送目录”提供确认前差异预览；发送时重新校验并跳过相同内容，新增/修改文件继续安全传输和备份，多余文件保留。详情显示实际跳过数量与节省字节；旧对端明确回退全量发送。见 [目录增量发送](docs/DESKTOP_INCREMENTAL_SEND.md)。
-
-```bash
-cargo run --locked --features gui --bin p2p-desktop
-```
-
-首次打开设置，填写自己的信令主机/IP 和端口、选择本机接收目录并保存。接收端上线后可以等待；发送端粘贴接收端完整 ID，身份认证成功后选择文件或目录直接入队。并发数 1/2/3 保存后应用，任务可暂停并按原 TaskID 继续。测速支持发送/接收、30 秒或 1–10 分钟；有文件活动时先暂停，不会自动暂停用户任务。
-
-接收边界由当前会话的身份和远程访问授权控制。接收目录修改只影响新任务，对端输入框修改不改变旧任务绑定。Linux 系统文件选择器需要可用的 desktop portal。原生窗口操作与截图见 [T010 验证证据](docs/gpui-mvp/evidence/t010-ui-validation.md)；跨物理平台、Wayland、中文 IME、双 NAT 和安装包验收仍在后续流水线中记录。
-
-节点核心进程恢复与故障验证：`python3 scripts/node-core-e2e.py --output /tmp/node-core-e2e-new-evidence`；仅需 node 特性，不依赖 GPUI；支持 Linux/Windows/macOS 的测试二进制，输出可审计矩阵。它验证真实 Session/OS 进程与 loopback，不代表物理设备或双 NAT；细节见 [T011 矩阵](docs/gpui-mvp/evidence/t011-process-matrix.md)。矩阵分别验证显式连接后手动继续，以及满足授权与恢复策略时的自动恢复。
-
-桌面原生候选包：Linux x86_64（Ubuntu24.04）、Windows x64（目标 Win10 22H2/Win11）、macOS13+ Apple Silicon arm64 / Intel x86_64（分别打包）。构建/安装/自建信令/恢复/许可证及签名状态见 [候选运行文档](packaging/RUNNING.md)，实测与下载记录见 [T012 证据](docs/gpui-mvp/evidence/t012-candidate-validation.md) 和 [Issue #24](https://github.com/gloryhui/Veytrane/issues/24)。三平台CI生成真实优化包、版本/完整源码SHA、SHA256、依赖材料；只产出候选，不创建正式Release标签。物理最低系统、真实IME/Wayland与跨真实双NAT/Apple互传仍是外部验收门禁，未满足时保持 FINAL_BLOCKED_EXTERNAL_VALIDATION。
-
-### P2P / QUIC 纯网络测速
-
-测速 CLI 默认仍为 10 秒，`--duration` 支持 1–600 秒。桌面测速业务支持 30 秒或 1–10 分钟，原生界面已接入文件/目录、暂停/继续和测速按钮。长时边界由可控时钟回归验证；真实 600 秒与双 NAT 证据以 [GPUI 总控 Issue #24](https://github.com/gloryhui/Veytrane/issues/24) 为准。
-
-想把网络链路和文件传输本身区分开时，在外面那台机器上运行：
-
-```bash
-$BIN speedtest \
-  --signal $SIGNAL \
-  --peer $HOME_ID
-```
-
-也可以指定时长、方向和固定内存 block：
-
-```bash
-$BIN speedtest \
-  --signal $SIGNAL \
-  --peer $HOME_ID \
-  --duration 15 \
-  --direction upload \
-  --block-size 1048576
-```
-
-`speedtest` 是经过现有信令、STUN/候选、UDP 打洞、QUIC 和 Ed25519 身份认证后的
-内存到内存测速。它不读写磁盘，不计算文件 hash，不使用 manifest、bitmap、fsync
-或文件分片协议；因此它不是 ISP 官方测速，而是用来和 `push` 速度做对照。
-`--direction both` 会先 upload、再 download，不做同时双向测速。
-
-- `speedtest` 快、`push` 慢：优先检查文件协议、磁盘和 fsync。
-- `speedtest` 慢、`push` 慢：优先检查 QUIC、UDP、RTT、丢包、流控或 ISP。
-- `speedtest` 快、`push` 快：当前链路和文件路径都正常。
-
-## 动态转发规则（CLI）
-
-需要长期访问多个目标时，不必把 `--forward` / `--listen` 写死在启动参数里：
-
-```bash
-# Ubuntu 常驻服务：授权与目标白名单放在 JSON 里
-$BIN serve --signal 203.0.113.7:7000 --config /etc/p2p_file/service.json
-
-# macOS/Linux 客户端：一个进程、多条本机转发、共享同一认证会话
-$BIN forward --signal 203.0.113.7:7000 --config ~/.config/p2p_file/client.json
-```
-
-修改配置后发送 `SIGHUP` 即热加载；非法配置或端口占用会保留原规则并报告错误。
-不启动网络可用 `$BIN rules <FILE>` 校验并查看规则。格式、撤销语义、重连修复和
-验收边界见 [CLI 动态 TCP 转发与共享会话](docs/CLI_DYNAMIC_TUNNEL.md)，
-示例见 [service.json](docs/examples/service.json) 与 [client.json](docs/examples/client.json)。
-
-### 本机 Web 管理页
-
-不想手改 JSON 时，可以只监听 loopback 打开管理页：
-
-```bash
-$BIN serve --signal 203.0.113.7:7000 --config /etc/p2p_file/service.json \
-  --admin-listen 127.0.0.1:7788
-$BIN forward --signal 203.0.113.7:7000 --config ~/.config/p2p_file/client.json \
-  --admin-listen 127.0.0.1:7789
-```
-
-终端会打印管理 token 文件；浏览器打开 `http://127.0.0.1:7788/` 后填入 token。
-远程访问请用 SSH 隧道。安全边界、API 和限制见 [Web 管理页](docs/WEB_ADMIN.md)。
-
-## 部署为 systemd 服务
-
-两个服务都用**用户级 unit**，这样路径里不用写死用户名。
-
-### 云主机上的信令服务器
-
-```ini
-# /etc/systemd/system/p2p-signal.service
-[Unit]
-Description=p2p_file 信令服务（可选端到端加密 UDP Relay 兜底）
-After=network-online.target
-
-[Service]
-ExecStart=/usr/local/bin/p2p_file signal-server --listen 0.0.0.0:7000
-Restart=always
-RestartSec=3
-StandardOutput=journal
-
-[Install]
-WantedBy=multi-user.target
-```
-
-该示例默认只启用 TCP 信令。启用 Relay 时按下文“可选认证 UDP Relay 兜底”添加
-`--relay-listen` 并放通对应 UDP 端口；Direct 优先，Relay 按需转发加密 QUIC datagram。
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now p2p-signal
-journalctl -u p2p-signal -f
-```
-
-### 家里那台的常驻服务
-
-```ini
-# ~/.config/systemd/user/p2p-serve.service
-[Unit]
-Description=p2p_file 常驻服务（等着被连）
-
-[Service]
-ExecStart=%h/bin/p2p_file serve \
-  --signal 203.0.113.7:7000 \
-  --allow 0f1e2d3c4b5a69788796a5b4c3d2e1f0 \
-  --forward 127.0.0.1:22 \
-  --recv-dir %h/下载 \
-  --port 9000
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-```
-
-`%h` 会自动展开成当前用户的家目录，所以路径不用改。启用：
-
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now p2p-serve
-# 让它在你不登录的时候也活着（关键，否则注销就停了）
-loginctl enable-linger $USER
-journalctl --user -u p2p-serve -f
-```
-
-程序同时处理 `SIGINT`（Ctrl-C）和 `SIGTERM`（`systemctl stop` 发的就是它），
-停止时会优雅关闭 QUIC 连接，对端立刻就能察觉，不用干等超时。
-
-## 打不通的时候
-
-按顺序排查：
-
-1. **先看 NAT mapping**：`$BIN stun`。只有报告明确显示 RFC 5780 行为发现证据充分时，
-   分类结果才有判别力；filtering 未测量，不能把 mapping 结果当成最终“可打洞”结论。
-
-2. **确认两边都在跑**。打洞是「同时开启」——只有一边发包是打不通的。
-   `serve` 那台常驻会自动重新打洞，不用管。
-
-3. **手工端口映射（万能兜底）**。在路由器上把 UDP 9000 映射到家里那台机器，
-   然后给它加 `--advertise`：
-
-   ```bash
-   --advertise 203.0.113.7:9000      # 填路由器上映射出来的那个「公网 IP:端口」
-   ```
-
-   这样连对称型 NAT 都能过。
-
-4. **两台机器用同一个 `--port`**。NAT 映射是按本地端口分配的，
-   两边都写 9000 最稳。
-
-日志是排查的主要依据，加 `--log info` 能看到打洞过程：
-
-```bash
-$BIN --log info tunnel --signal $SIGNAL --peer $HOME_ID --listen 127.0.0.1:2222 --to 127.0.0.1:22
-```
-
-## 验证到什么程度
-
-说清楚哪些是实测过的、哪些只是设计上应该成立：
-
-**实测过**（`./scripts/e2e.sh`，每次改代码都会跑）：
-
-- 真起进程跑完整链路：信令牵线 → 原生 IPv4/IPv6 QUIC 直连或认证 UDP Relay 兜底
-  → 隧道转发 → 文件落盘校验；Relay fixture 使用可控直连黑洞，不依赖公网服务器。
-- 隧道搬运 1MB 随机数据无损，支持多条并发连接。
-- 文件直推 2MB，sha256 一致。
-- 断开后 `serve` 重新打洞，再连一次仍然成功。
-- 测试覆盖 RFC 5780 mapping 状态机、证据不足、地址相关映射（ADM）样本、令牌一致性、
-  对端被强杀后的下线清理、信令注册认证与资源上限，以及畸形 `FileManifest` 的
-  完整校验（`chunk_size=0` / 越界 / 分片数不符 / 根哈希错 / 极端长度都不 panic）。
-
-**只在真机上验证了一半**：
-
-- 本机网络的 mapping 结论只有在 RFC 5780 行为发现证据充分时才会报告（EIM 可在
-  Test II 短路）；当前 CLI 不会
-  把 ADM 或 PunchToken 描述成必然可打洞。**两台真正处于不同 NAT 后面的机器之间的
-  打洞，我没有条件实测**（需要两个独立网络）。
-
-**没做**：
-
-- 完整 TURN / ICE、TCP/TLS Relay、Multipath QUIC、自动连接迁移。
-- UPnP / NAT-PMP 自动端口映射（`nat::portmap` 是空壳，暂时用 `--advertise` 手工替代）。
-
-## 可选认证 UDP Relay 兜底（M3）
-
-双方使用同一 signaling 服务签发的 pairing，配置其 Relay UDP 地址：
-
-```bash
-# 自建服务器：TCP 信令 + 固定 UDP Relay listener
-p2p_file signal-server --listen 0.0.0.0:7000 --relay-listen 0.0.0.0:7001
-# 可再加一个原生 IPv6 listener；不用 IPv4-mapped socket
-# --relay-listen '[::]:7001'
-
-# 双方在现有 serve / tunnel / push / speedtest 命令中加：
-# --relay relay.example.com:7001
-p2p_file serve --signal signal.example.com:7000 --relay relay.example.com:7001 \
-  --allow <PEER_NODE_ID> --forward 127.0.0.1:22
-p2p_file tunnel --signal signal.example.com:7000 --relay relay.example.com:7001 \
-  --peer <SERVER_NODE_ID> --listen 127.0.0.1:2222 --to 127.0.0.1:22
-```
-
-云安全组与主机防火墙放通 **TCP 7000 + UDP 7001**（端口可自选）。
-Relay 需要实际转发带宽；直连成功时仍不走服务器。GPUI 的“高级网络设置”增加
-**Relay Server**，填写 `HOST:UDP_PORT`、`IPv4:PORT` 或 `[IPv6]:PORT`，留空保持直连。
-保存按原有安全配置写入路径进行，网络设置变更会关闭旧 transport 并重新认证。
-
-连接顺序：原生 IPv6 / IPv4 直连竞速 → 2.5 秒无 authenticated winner → 延迟解析并
-尝试 Relay。未配置时没有 Relay DNS、UDP socket 或 admission 请求。每个 peer/地址族
-attempt 使用独立 socket，challenge-response + Ed25519 admission 后，收到 RelayReady
-才将**同一个 socket**交给 Quinn。RelayReady 只是 UDP 就绪，身份仍需真实 NodeId、
-双边 Ed25519 签名、当前 TLS exporter binding 和 Ready；仅一个 winner 提交 FIN。
-
-Relay ticket 只来自真实在线节点 pairing，有 TTL、并发数量与单 IP pending 上限。
-普通 NodeId Lookup 另有固定 10 秒窗口：默认每 signaling connection 64 次、每 source IP
-256 次；IP bucket 最多 1024 项并清理过期项。超限在 pairing 前返回统一错误，不签发
-ticket、不向目标推送候选，也不新增 offline waiter；`max_pending_lookups` 仍只限制
-真实挂起的离线查询。少量重复查询、重新连接和直连模式继续使用原有协议与 CLI。
-Admission 的 outstanding ticket 默认每 unordered NodeId pair 最多 16 张、每 NodeId
-最多 64 张；小容量服务还将两者分别限制在全局 ticket 池的一半。quota 直接依据真实
-ticket map，TTL 到期自动释放；已 Ready 的转发 session 仍按原有 idle timeout 运行。
-Session 另有独立配额：每 unordered NodeId pair 最多 16 个、每 NodeId 最多 64 个，
-小容量服务将其限制为全局 session 池的一半（单槽服务至少允许一个）。每个 arm
-无论 half-bound 或 Ready 均计入，按已签名 Bound 的 node/peer 从真实 session map
-统计；创建前及签名 Register 后都检查。ticket 过期或普通 UDP 保活均不能释放
-session 配额；idle 清理自动释放。已有 half-bound arm 可在配额满时完成另一端绑定。
-第三方 source、未知 ticket、错 pair/公钥/签名与重放均拒绝。两边绑定前丢弃数据，
-不排队；绑定后的 source 不能漂移或抢占，断线重新 pairing。Relay 不解码 QUIC 或
-文件/Tunnel/Speedtest，不解密、不落盘；恶意服务器可以阻断，不能冒充设备。
-Remote Password / Trusted Device / 单向授权 / Tunnel allowlist 语义均保持原样，
-新 transport 的授权必须重新绑定，Relay 不自动建立信任，也不保存对端密码。
-
-运行时区分 `IPv6 Direct`、`IPv4 Direct`、`Relay IPv6`、`Relay IPv4`，日志包含
-`path_kind`、family、remote。GPUI 依次显示 fallback、UDP 就绪、最终认证路径。
-
-`./scripts/e2e.sh` 依次测试 IPv4、IPv6 和确定性的本地 Relay fixture；后者公布实际
-被持有且不回应的 blackhole candidates（`--advertise-only` 诊断选项），验证真实
-pairing → admission → 端到端 QUIC → 1MB Tunnel / 多连接 / 文件 hash / Speedtest / 重连。
-原生三平台 loopback 测试不依赖公网；跨 NAT 的真实部署可达性仍需实际网络验收。
-
-## IPv6 原生直连与双栈竞速
-
-Desktop 和 CLI `serve/tunnel/push/speedtest` 默认分别建立 IPv4、IPv6 UDP path。
-IPv6 socket 在绑定前设置 `IPV6_V6ONLY`，不用 IPv4-mapped 地址。每族自己的 STUN、
-PunchToken 探测和 QUIC 使用同一个 socket；固定端口按族各绑定一次，`--port 0`
-时各自公告自己的实际随机端口。某一族绑定失败不会禁用另一族。
-
-IPv6 优先启动，IPv4 最多延后 200ms；候选并发、有数量和时间上限。竞速覆盖 QUIC、
-Ed25519 签名、TLS exporter binding 和 `Ready`，只在 winner 的专用身份流上发送 FIN。
-接收方确认 FIN 后才协商 Desktop 能力、Remote Auth 或启动 CLI 业务 handler；loser
-连接和探测注册会被回收。IPv6 QUIC 或 Ready 阶段黑洞都不会等完 IPv6 超时才尝试 IPv4。
-
-IPv6 global / ULA 是 Host 候选；IPv6 STUN Binding 只是补充地址观测，失败时仍保留
-Host。IPv4 的 RFC 5780 mapping 分类只使用 IPv4 样本。链路本地 scope-id、IPv4-mapped、
-未指定地址、多播地址不参与 P2P 候选。信令 TCP 可以走 IPv4，同时业务走 IPv6。
-
-```bash
-# 公网 IPv6 主机的手动公告；serve 与其余公网命令使用相同参数
-p2p_file serve --signal signal.example.com:7000 --allow <PEER_NODE_ID> \
-  --port 9000 --advertise '[YOUR_GLOBAL_IPV6]:9000' --ip-family ipv6-only
-
-# LAN send/recv 按指定地址族绑定
-p2p_file recv --listen '[::]:9000' --out-dir ./received
-p2p_file send ./file.bin '[PEER_IPV6]:9000'
-```
-
-`--ip-family dual-stack` 为默认；排障时可用 `ipv4-only` 或 `ipv6-only`。`stun` 命令
-分别报告两族 socket、Host、STUN observation，IPv6 不显示为 NAT EIM/ADM/APDM。
-GPUI 网络卡片显示本地 path 是否可用、peer 两族候选数量和最终已认证的 family/address。
-IPv6 地址只决定 transport，不代替 NodeId 身份、远程密码、单向 Trusted Device 或
-Tunnel 的 peer/target allowlist。
-
-IPv6 仍需要操作系统、路由器和云安全组允许相应 UDP 端口。没有 global IPv6 的网络可
-通过 IPv4 path 工作；跨网络公网 IPv6 是否可达需要两台真实主机验证。自动化覆盖原生
-IPv6 loopback 和可控黑洞，不代表已实测公网 IPv6 穿透。可选认证 UDP Relay 兜底见上节；
-未实现完整 TURN/ICE、TCP/TLS Relay、UPnP、NAT-PMP、PCP、link-local scope-id、Multipath QUIC。
-
-## 局域网直连（不经过信令服务器）
-
-两台机器在同一个局域网里时，不需要云主机：
-
-```bash
-# 接收方
-$BIN recv --listen 0.0.0.0:9000 --out-dir ./downloads
-
-# 发送方（先用 discover 找到对端地址）
-$BIN discover --timeout 5
-$BIN send ./大文件.mkv 192.168.1.7:9000
-```
-
-## 开发
-
-```bash
-cargo test                    # 222 个测试（221 单元 + 1 集成）
-cargo clippy --all-targets
-cargo fmt --check
-
-./scripts/e2e.sh              # 真起三个进程跑完整链路
-./scripts/e2e.sh --release    # 用 release 版跑
-```
-
-架构、协议格式和踩过的坑见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
-
-后续统一节点方向见 [目标架构设计](docs/NODE_ARCHITECTURE.md)、
-[分阶段迁移与验收计划](docs/NODE_MIGRATION_PLAN.md) 和
-[Agent 执行任务与审核流程](docs/NODE_EXECUTION_TASKS.md)。这些文档为待实施方案，
-明确 CLI、桌面与无界面 Agent 的职责、协议兼容范围和验收条件，不表示这些目标能力已实现。
-
-## 已实现的安全性质
-
-- **通道加密**：QUIC 自带 TLS 1.3。TLS 证书是**自签**的，不依赖 CA。
-- **身份认证**：Ed25519 密钥对，节点 ID = 公钥的 BLAKE3 摘要，**自证**，不需要 CA。
-- **双向认证握手，签名绑定当前 TLS 会话**：双方各自签名「双方公钥 + 双方随机数 +
-  当前 QUIC/TLS 会话导出的绑定值」，防冒名、防重放。绑定值来自当前会话的 TLS
-  exporter（RFC 5705），不同会话导出的值不同，所以签名只对**这一条**会话有效。
-- **打洞令牌**：每次牵线由信令服务器下发一个 128 位随机令牌给双方，探测包带令牌
-  才被认下。令牌只认证探测包属于本次会话、防止未知来源被误认；它不保证任何 NAT
-  类型一定能穿透，也不替代 mapping/filtering 证据。
-- **信令登记认证**：登记是 challenge-response，签名覆盖「服务器随机 challenge + 节点 ID +
-  公钥 + 候选地址哈希」，既证明持有私钥、又防重放（明文信令上光看
-  `node_id = hash(public_key)` 并不构成认证）。**这条签名保护的只是「客户端 → 服务器」的
-  登记内容**：它让服务器确信「这个连接确实持有该私钥、候选没被改过」。服务器随后转发给
-  对端的 `PeerCandidates`/打洞令牌**没有**端到端签名或加密，链路上的主动攻击者可以篡改
-  它们，把打洞引到错误的地址、造成连接失败（DoS）。这不会让攻击者冒充业务对端——
-  业务身份仍由 QUIC 之上的应用层握手确认（见下）。
-  信令服务器同时还限制每条连接只能登记一个身份、限制了候选地址/在线节点/等待队列的数量，
-  并用连接所有权避免旧连接误删新记录、主动断开被取代的旧连接、把等待状态绑定到具体连接。
-  客户端后台按 `DEFAULT_HEARTBEAT_INTERVAL` 自动心跳，所以正常持有的长连接不会因为空闲
-  被服务器误摘（只有超过空闲超时都没有任何帧，才会被清理）。
-- **转发白名单**：`serve` 只允许转发到 `--forward` 明确列出的地址，且只接受
-  `IP:port`（不接受域名，避免用 DNS 绕过白名单）。
-- **节点白名单**：`serve --allow` 之外的人连不上。
-- **完整性**：每个分片 BLAKE3 校验，清单有覆盖全字段的根哈希，收尾前双方核对。
-  根哈希只防**链路中间**的篡改，不防发送端本身——所以所有来自网络的清单在首次
-  使用前都必须过 `FileManifest::validate()`：分片大小在 16 KiB..=16 MiB、
-  分片数与 `total_len` 精确一致、分片数放得进 `u32`、根哈希自洽；任一项不过
-  只返回协议错误，绝不 panic、也不按对端声称的长度分配内存。
-  `from_bytes()` / `ControlMessage::decode()` 都走完整校验，接收端与落盘层再各
-  复查一次；发送端的 `--chunk-size` 由 CLI 提前拒绝，`manifest_from_reader()`
-  在分配缓冲区之前也会再校验一次。
-- **落盘安全**：先写 `.part` 临时文件，全部校验通过才改名；文件名经过清洗，
-  挡住 `../` 路径穿越。
-
-证书自签、客户端跳过证书校验，这些都是**有意**的：证书不承担身份，身份完全由
-Ed25519 握手承担。但光有握手还不够——如果签名不绑定当前会话，中间人可以建立
-`A ↔ M ↔ B` 两条独立连接，把 `Hello / HelloAck / Auth` 原样搬过去，让两边都验证通过。
-现在签名覆盖了当前会话绑定值，这种转发必然验不过，**中间人无法透明代理握手**。
-
-信令服务器知道**谁在跟谁说话**（节点 ID 和 IP）；启用的 Relay 还能观察包大小与时序，
-但看不到业务明文。登记内容
-已由私钥签名认证，所以没人能冒充别人的节点 ID 去登记。
-
-信令默认使用**明文 TCP**，可选启用严格校验服务器证书及主机名的 TLS，失败不会降级。
-注册签名的保护范围是「客户端 → 服务器」，服务器转发的候选与打洞令牌没有设备间签名。
-明文模式下，路径上的主动攻击者可以篡改这些内容制造 DoS；TLS 模式保护客户端与服务器
-之间的传输。最终业务身份仍由 QUIC 之上的 Ed25519 会话绑定握手确认，业务数据始终在
-QUIC/TLS 内加密。信令服务器仍能看到牵线关系并拒绝服务。部署和桌面配置见
-[信令 TLS](docs/SIGNALING_TLS.md)。
-
-## 桌面系统通知
-
-设置中可开启后台完成、失败/中断提醒，默认关闭。历史记录不补弹，目录与短时间
-多项结果合并；通知只显示数量，点击可恢复窗口并定位任务。
-权限、平台与点击生命周期边界见 [系统通知说明](docs/DESKTOP_NOTIFICATIONS.md)。
-
-## 桌面文件限速
-
-设置页支持全局上传、下载限速（KiB/s，0 不限速），保存后立即生效并持久化。
-所有设备的 Direct/Relay 文件共享额度，隧道和测速独立。下载有有限在途缓冲，
-暂停优先完成当前分片。开启限速需要对端支持新版文件保活能力。
-实现边界和兼容行为见 [文件限速说明](docs/TRANSFER_LIMITS.md)。
-
-## 开源协议
-
-[MIT](LICENSE)。
-
-随便用：商用、闭源修改、再发布、卖钱、再许可，全都可以。唯一的要求是
-保留版权声明和许可声明。
-
-### 桌面任务筛选与历史清理
-
-任务列表支持文件名/设备搜索、设备/方向/状态组合筛选和匹配数量。可确认后批量清理筛选内的已完成历史；传输文件保留，部分目录组及未完成任务保留。详见 [任务管理](docs/TASK_MANAGEMENT.md)。
-
-### 连接诊断
-
-主界面「连接诊断」显示已观察的信令、地址族、Direct/Relay 路径、业务授权阶段、耗时及排查建议，并可复制/导出脱敏摘要。详见 [连接诊断](docs/CONNECTION_DIAGNOSTICS.md)。
+当前实现、平台构建与实机验收分别记录。最近一次 Mac / Ubuntu 更新完成双向 1 MiB 文件校验及各服务入口检查；这不等同于 Windows 实机、所有 GUI 操作、物理睡眠唤醒或长期弱网验收。详细版本、时间、范围和限制见[当前部署验收记录](docs/task-reports/VEYTRANE_DEPLOYMENT.md)。
+
+## 文档导航
+
+| 要了解什么 | 文档 |
+| --- | --- |
+| 交互式查看模块与源码 | [可点击架构图](docs/architecture-current.html)、[仓库分层](docs/REPOSITORY_LAYOUT.md) |
+| 安装、常驻、升级与恢复 | [节点宿主说明](packaging/node/README.md)、[生命周期契约](docs/specs/NODE_HOST_LIFECYCLE.md) |
+| 管理 API 与配置事务 | [Agent API](docs/specs/NODE_AGENT_API.md)、[配置契约](docs/specs/NODE_CONFIG_P1.md) |
+| 设备认证、授权与服务目录 | [远程认证](docs/REMOTE_AUTH.md)、[授权模型](docs/specs/NODE_AUTHORIZATION.md)、[TCP 服务](docs/specs/NODE_SERVICES.md) |
+| 文件、增量发送与任务管理 | [文件契约](docs/specs/NODE_FILES.md)、[增量发送](docs/DESKTOP_INCREMENTAL_SEND.md)、[任务管理](docs/TASK_MANAGEMENT.md) |
+| 限速、测速与连接排查 | [文件限速](docs/TRANSFER_LIMITS.md)、[连接诊断](docs/CONNECTION_DIAGNOSTICS.md) |
+| 专用客户端与网关 | [Veytrane for Sub2API](packaging/sub2api-windows/README.md) |
+| 独立 CLI 的 serve / tunnel / push 等命令 | [独立 CLI 使用指南](docs/STANDALONE_CLI.md)、[动态转发](docs/CLI_DYNAMIC_TUNNEL.md) |
+| 部署版本与验证证据 | [当前部署记录](docs/task-reports/VEYTRANE_DEPLOYMENT.md)、[任务记录索引](docs/task-reports/IMPLEMENTATION_STATUS.md) |
+
+## 许可证
+
+[MIT License](LICENSE)。第三方组件及共享代码归属见 [THIRD_PARTY_NOTICES.md](docs/gpui-mvp/THIRD_PARTY_NOTICES.md)。
