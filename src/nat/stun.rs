@@ -712,6 +712,7 @@ pub async fn resolve_server_for(
     spec: &str,
     family: crate::net::AddressFamily,
 ) -> Result<Vec<SocketAddr>> {
+    validate_server_literal(spec)?;
     let mut addresses: Vec<_> = tokio::net::lookup_host(spec)
         .await?
         .filter(|addr| family.accepts(*addr))
@@ -723,11 +724,26 @@ pub async fn resolve_server_for(
 
 /// 解析 `host:port` 形式的 STUN 服务器地址。
 pub async fn resolve_server(spec: &str) -> Result<SocketAddr> {
+    validate_server_literal(spec)?;
     tokio::net::lookup_host(spec)
         .await
         .map_err(|err| Error::Stun(format!("无法解析 STUN 服务器 {spec}: {err}")))?
         .next()
         .ok_or_else(|| Error::Stun(format!("STUN 服务器 {spec} 没有解析出任何地址")))
+}
+
+// A dotted numeric host is an IPv4 literal, not a hostname to send to DNS.
+// Otherwise malformed addresses can succeed through resolver search domains
+// or wildcard DNS answers. Leave domain names and bracketed IPv6 to lookup_host.
+fn validate_server_literal(spec: &str) -> Result<()> {
+    if let Some((host, _)) = spec.rsplit_once(':')
+        && host.contains('.')
+        && host.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+        && host.parse::<Ipv4Addr>().is_err()
+    {
+        return Err(Error::Stun(format!("STUN 服务器 IPv4 地址无效: {host}")));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1142,5 +1158,58 @@ mod tests {
         assert_eq!(addr.port(), 3478);
         // 语法非法的地址应立刻报错，不该去做 DNS 查询。
         assert!(resolve_server("256.256.256.256:1").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn 非法数字_ipv4在两个解析入口都不进入_dns() {
+        use crate::net::AddressFamily;
+
+        for spec in [
+            "256.256.256.256:1",
+            "127.0.0.999:3478",
+            "127.0.0:3478",
+            "127..0.1:3478",
+            "127.0.0.1.2:3478",
+            "127.0.0.01:3478",
+        ] {
+            let expected = validate_server_literal(spec).unwrap_err().to_string();
+            // The validation error, rather than a DNS result/error, proves the
+            // resolver was never reached, regardless of local DNS settings.
+            assert_eq!(
+                resolve_server(spec).await.unwrap_err().to_string(),
+                expected
+            );
+            for family in [AddressFamily::Ipv4, AddressFamily::Ipv6] {
+                assert_eq!(
+                    resolve_server_for(spec, family)
+                        .await
+                        .unwrap_err()
+                        .to_string(),
+                    expected
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn 合法_ip与主机名保持解析支持() {
+        use crate::net::AddressFamily;
+
+        for (spec, family) in [
+            ("127.0.0.1:3478", AddressFamily::Ipv4),
+            ("[::1]:3478", AddressFamily::Ipv6),
+        ] {
+            let address: SocketAddr = spec.parse().unwrap();
+            assert_eq!(resolve_server(spec).await.unwrap(), address);
+            assert_eq!(
+                resolve_server_for(spec, family).await.unwrap(),
+                vec![address]
+            );
+        }
+        // Real hostname resolution without relying on public DNS or a network.
+        assert_eq!(resolve_server("localhost:3478").await.unwrap().port(), 3478);
+        for spec in ["stun.example.com:3478", "123.example.com:3478"] {
+            assert!(validate_server_literal(spec).is_ok());
+        }
     }
 }

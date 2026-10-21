@@ -189,18 +189,36 @@ pub async fn probe_rfc5780(
     primary: SocketAddr,
     timeout: Duration,
 ) -> Result<MappingProbe> {
-    if !socket.local_addr()?.is_ipv4() || !primary.is_ipv4() {
+    probe_rfc5780_with(socket.local_addr()?, primary, |server| {
+        query_binding_with(socket, server, timeout)
+    })
+    .await
+}
+
+// Keep probe ordering and topology validation independent of UDP addressing.
+// Tests route the logical two-IP topology over real loopback STUN sockets,
+// without requiring privileged interface aliases on macOS.
+async fn probe_rfc5780_with<F, Fut>(
+    local: SocketAddr,
+    primary: SocketAddr,
+    mut query: F,
+) -> Result<MappingProbe>
+where
+    F: FnMut(SocketAddr) -> Fut,
+    Fut: std::future::Future<Output = Result<StunResult>>,
+{
+    if !local.is_ipv4() || !primary.is_ipv4() {
         return Err(Error::Stun(
             "RFC 5780 NAT mapping classification requires IPv4".into(),
         ));
     }
 
-    let first = query_binding_with(socket, primary, timeout).await?;
+    let first = query(primary).await?;
     let other_address = first.other_address;
     let mut observations = vec![StunObservation::from_result(primary, &first)];
 
     // RFC 5780 允许在 Test I 发现映射没有发生时，直接报告 effective EIM。
-    if first.mapped_addr == socket.local_addr()? {
+    if first.mapped_addr == local {
         return Ok(MappingProbe {
             observations,
             other_address,
@@ -232,7 +250,7 @@ pub async fn probe_rfc5780(
     }
 
     let alternate_ip_primary_port = SocketAddr::new(other.ip(), primary.port());
-    let second = match query_binding_with(socket, alternate_ip_primary_port, timeout).await {
+    let second = match query(alternate_ip_primary_port).await {
         Ok(result) => result,
         Err(err) => {
             tracing::warn!(target = %alternate_ip_primary_port, error = %err, "RFC 5780 Test II 探测失败");
@@ -262,7 +280,7 @@ pub async fn probe_rfc5780(
         });
     }
 
-    let third = match query_binding_with(socket, other, timeout).await {
+    let third = match query(other).await {
         Ok(result) => result,
         Err(err) => {
             tracing::warn!(target = %other, error = %err, "RFC 5780 Test III 探测失败");
@@ -426,16 +444,23 @@ mod tests {
     async fn probe_with_mappings(mapped: [SocketAddr; 3], serve_test_iii: bool) -> MappingProbe {
         use crate::nat::stun::{Attribute, Message, MessageClass, Method};
 
+        // RFC topology is logical; all wire traffic stays on portable loopback.
+        // Keep three real sockets and exercise the STUN codec/transaction checks.
         let primary = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let primary_addr = primary.local_addr().unwrap();
-        let alternate_ip_primary_port = UdpSocket::bind(SocketAddr::new(
-            "127.0.0.2".parse().unwrap(),
-            primary_addr.port(),
-        ))
-        .await
-        .unwrap();
-        let alternate_ip_alternate_port = UdpSocket::bind("127.0.0.2:0").await.unwrap();
-        let alternate_addr = alternate_ip_alternate_port.local_addr().unwrap();
+        let alternate_ip_primary_port = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let alternate_ip_alternate_port = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let physical = [
+            primary.local_addr().unwrap(),
+            alternate_ip_primary_port.local_addr().unwrap(),
+            alternate_ip_alternate_port.local_addr().unwrap(),
+        ];
+        let logical: [SocketAddr; 3] = [
+            "192.0.2.1:3478".parse().unwrap(),
+            "192.0.2.2:3478".parse().unwrap(),
+            "192.0.2.2:3479".parse().unwrap(),
+        ];
+        let alternate_addr = logical[2];
+        let count = if serve_test_iii { 3 } else { 2 };
 
         let task = tokio::spawn(async move {
             let sockets = [
@@ -443,10 +468,13 @@ mod tests {
                 alternate_ip_primary_port,
                 alternate_ip_alternate_port,
             ];
-            let count = if serve_test_iii { 3 } else { 2 };
             for (index, socket) in sockets.into_iter().take(count).enumerate() {
                 let mut buffer = [0u8; 1500];
-                let (len, from) = socket.recv_from(&mut buffer).await.unwrap();
+                let (len, from) =
+                    tokio::time::timeout(Duration::from_secs(3), socket.recv_from(&mut buffer))
+                        .await
+                        .expect("expected RFC 5780 probe was not sent")
+                        .unwrap();
                 let request = Message::decode(&buffer[..len]).unwrap();
                 let mut attributes = vec![Attribute::XorMappedAddress(mapped[index])];
                 if index == 0 {
@@ -463,10 +491,30 @@ mod tests {
         });
 
         let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let report = probe_rfc5780(&socket, primary_addr, Duration::from_secs(1))
-            .await
-            .unwrap();
+        let mut queried = Vec::new();
+        let report = probe_rfc5780_with(socket.local_addr().unwrap(), logical[0], |target| {
+            let index = queried.len();
+            assert!(index < count, "unexpected extra probe to {target}");
+            assert_eq!(
+                target, logical[index],
+                "incorrect RFC 5780 probe target/order"
+            );
+            queried.push(target);
+            query_binding_with(&socket, physical[index], Duration::from_secs(1))
+        })
+        .await
+        .unwrap();
         task.await.unwrap();
+        assert_eq!(queried, logical[..count]);
+        assert_eq!(
+            report
+                .observations
+                .iter()
+                .map(|o| o.server)
+                .collect::<Vec<_>>(),
+            queried
+        );
+        assert_eq!(report.other_address, Some(alternate_addr));
         report
     }
 
