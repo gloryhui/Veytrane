@@ -40,7 +40,7 @@ NodeErrorCode 顺序固定：0 UnsupportedVersion；1 UnsupportedCapability；2 
 
 P2PN 的 magic 尾字节 01 是帧封装标识，NodeFrame.version=2 才是此次业务契约版本。删除文件消息变体改变了 postcard 编号，因此必须先在节点握手拒绝 v1，不能让旧端进入业务阶段误解码。P2PF 载荷固定字节测试约束当前枚举编号；后续变更需重新审查协议版本。
 
-`NodeSessionConfig::new` 直接创建当前协议会话，不存在 wire_mode、peer_modes 或兼容构造器。`NodeSettings` 删除 peer_modes，未知字段直接拒绝；每条转发必须有 service_ids 映射。部署新二进制前，两端需同步升级并移除旧配置中的 peer_modes 字段，保留身份、密码验证器、资源授权及任务库；本次源码变更没有修改实际运行的节点配置。
+`NodeSessionConfig::new` 直接创建当前协议会话，不存在 wire_mode、peer_modes 或兼容构造器。`NodeSettings` 删除 peer_modes，未知字段直接拒绝；每条转发必须有 service_ids 映射。部署新二进制前，两端需同步升级并移除旧配置中的 peer_modes 字段，保留身份、密码验证器、资源授权及任务库。2026-10-21 Mac / Ubuntu 主节点已完成该升级；配置保留与实际互通证据见[部署验收记录](../task-reports/P2PN_V2_DEPLOYMENT.md)。
 
 ## 授权和任务兼容约束
 

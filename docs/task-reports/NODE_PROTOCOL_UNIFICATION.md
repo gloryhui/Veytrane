@@ -2,6 +2,8 @@
 
 日期：2026-10-21。范围：当前 Agent、桌面附着入口、Sub2API 与核心业务测试；不部署或重启运行中的 Mac / Ubuntu 节点。
 
+后续部署：同日已将 Mac 与 Ubuntu 主节点升级至本报告的 `50a167f` 构建，实机结果见[P2PN v2 部署验收](P2PN_V2_DEPLOYMENT.md)。下文保留源码清理阶段的范围和测试证据。
+
 ## 实现
 
 - 删除 LegacyDesktopV1 / PeerWireMode、wire_mode / peer_modes 及兼容构造器。所有 NodeSessionConfig 均使用当前协议。
