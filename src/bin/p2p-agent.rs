@@ -3,7 +3,7 @@ use clap::Parser;
 use p2p_file::node::{adapters::cli as management_cli, host::agent, local::paths::AgentPaths};
 use std::path::PathBuf;
 #[derive(Parser)]
-#[command(about = "无图形界面的 P2P 节点宿主", version)]
+#[command(about = "Veytrane Agent · 无图形界面的可信设备互联节点", version)]
 struct Args {
     #[arg(long)]
     data_dir: Option<PathBuf>,

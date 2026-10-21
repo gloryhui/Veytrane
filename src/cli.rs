@@ -72,7 +72,7 @@ fn parse_admin_listen(raw: &str) -> std::result::Result<SocketAddr, String> {
 #[command(
     name = "p2p_file",
     version,
-    about = "点对点直连：IPv4/IPv6 NAT 穿透 + QUIC，支持文件传输、TCP 隧道与端到端加密 UDP Relay 兜底",
+    about = "Veytrane · 可信设备互联：QUIC 直连、服务访问与文件传输",
     propagate_version = true
 )]
 pub struct Cli {

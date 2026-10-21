@@ -99,7 +99,7 @@ jobs:
         run: ./packaging/macos-x86_64/build.sh --output "${{ runner.temp }}/p2p-desktop-candidate"
       - uses: actions/upload-artifact@v4
         with:
-          name: p2p-desktop-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}
+          name: veytrane-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/p2p-desktop-candidate/*.tar.gz
             ${{ runner.temp }}/p2p-desktop-candidate/*.zip
@@ -113,15 +113,15 @@ jobs:
         run: |
           python scripts/package-desktop.py --binary target/${{ matrix.target }}/release/${{ matrix.executable }} --target ${{ matrix.target }} --output "${{ runner.temp }}/p2p-desktop-app-only" --app-only
           cd "${{ runner.temp }}/p2p-desktop-app-only"
-          ditto -c -k --keepParent "P2P File.app" "p2p-desktop-app-only-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}.zip"
-          shasum -a256 "p2p-desktop-app-only-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}.zip" > "p2p-desktop-app-only-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}.zip.sha256"
-          ditto -x -k "p2p-desktop-app-only-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}.zip" "${{ runner.temp }}/p2p-desktop-app-only-unpacked"
-          codesign --verify --strict "${{ runner.temp }}/p2p-desktop-app-only-unpacked/P2P File.app"
-          "${{ runner.temp }}/p2p-desktop-app-only-unpacked/P2P File.app/Contents/MacOS/p2p-desktop" --build-info
+          ditto -c -k --keepParent "Veytrane.app" "veytrane-app-only-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}.zip"
+          shasum -a256 "veytrane-app-only-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}.zip" > "veytrane-app-only-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}.zip.sha256"
+          ditto -x -k "veytrane-app-only-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}.zip" "${{ runner.temp }}/p2p-desktop-app-only-unpacked"
+          codesign --verify --strict "${{ runner.temp }}/p2p-desktop-app-only-unpacked/Veytrane.app"
+          "${{ runner.temp }}/p2p-desktop-app-only-unpacked/Veytrane.app/Contents/MacOS/p2p-desktop" --build-info
       - uses: actions/upload-artifact@v4
         if: runner.os == 'macOS'
         with:
-          name: p2p-desktop-app-only-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}
+          name: veytrane-app-only-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             ${{ runner.temp }}/p2p-desktop-app-only/*.zip
             ${{ runner.temp }}/p2p-desktop-app-only/*.sha256

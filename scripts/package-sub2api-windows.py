@@ -27,7 +27,7 @@ def main():
     if args.output.exists():
         raise SystemExit("Output already exists; choose a new directory")
     repo = Path(__file__).resolve().parents[1]
-    package = args.output / "Sub2API-Windows-x64"
+    package = args.output / "Veytrane-Sub2API-Windows-x64"
     package.mkdir(parents=True)
     (package / "Sub2API.exe").write_bytes(raw)
     templates = repo / "packaging/sub2api-windows"
@@ -35,7 +35,7 @@ def main():
     (package / "Start-Sub2API.bat").write_bytes(bat.replace("\n", "\r\n").encode("utf-8"))
     (package / "使用说明.txt").write_bytes(b"\xef\xbb\xbf" + (templates / "使用说明.txt").read_text().replace("\n", "\r\n").encode("utf-8"))
     (package / "LICENSE.txt").write_bytes((repo / "LICENSE").read_bytes())
-    archive = args.output / "Sub2API-Windows-x64.zip"
+    archive = args.output / "Veytrane-Sub2API-Windows-x64.zip"
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zipped:
         for path in sorted(package.iterdir()):
             zipped.write(path, f"{package.name}/{path.name}")
@@ -53,7 +53,7 @@ def main():
         "sources_sha256": {str(p.relative_to(repo)): sha256(p) for p in sources},
     }
     (args.output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
-    (args.output / "Sub2API-Windows-x64.zip.sha256").write_text(f"{sha256(archive)}  {archive.name}\n")
+    (args.output / "Veytrane-Sub2API-Windows-x64.zip.sha256").write_text(f"{sha256(archive)}  {archive.name}\n")
     print(f"ZIP: {archive.resolve()}")
     print(f"SHA256: {sha256(archive)}")
     print(f"Size: {archive.stat().st_size / 1024 / 1024:.2f} MiB")

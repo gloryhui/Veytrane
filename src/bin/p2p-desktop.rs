@@ -2,7 +2,7 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 use clap::Parser;
 #[derive(Parser)]
-#[command(about = "P2P File desktop · 文件传输", disable_version_flag = true)]
+#[command(about = "Veytrane desktop · 可信设备互联", disable_version_flag = true)]
 struct Args {
     #[arg(long)]
     background: bool,

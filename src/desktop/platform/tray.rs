@@ -55,14 +55,14 @@ impl NativeTray {
                 menu::{Menu, MenuItem},
             };
             let menu = Menu::new();
-            let status = MenuItem::new("P2P File · 正在启动", false, None);
+            let status = MenuItem::new("Veytrane · 正在启动", false, None);
             menu.append(&status).map_err(|e| e.to_string())?;
             let mut menu_actions = Vec::new();
             for (label, action) in [
                 ("状态面板", TrayAction::Panel),
                 ("打开主窗口", TrayAction::Open),
                 ("设置", TrayAction::Settings),
-                ("退出 P2P File", TrayAction::Quit),
+                ("退出 Veytrane", TrayAction::Quit),
             ] {
                 let item = MenuItem::new(label, true, None);
                 menu_actions.push((item.id().clone(), action));
@@ -70,7 +70,7 @@ impl NativeTray {
             }
             let icon = TrayIconBuilder::new()
                 .with_menu(Box::new(menu))
-                .with_tooltip("P2P File · 正在启动")
+                .with_tooltip("Veytrane · 正在启动")
                 .with_icon(native_icon(CoreState::Offline)?)
                 .with_icon_as_template(cfg!(target_os = "macos"))
                 .with_menu_on_left_click(false)
@@ -146,7 +146,7 @@ impl NativeTray {
                 .set_tooltip(Some(snapshot.tooltip()))
                 .map_err(|e| e.to_string())?;
             self.status
-                .set_text(format!("P2P File · {}", snapshot.core.label()));
+                .set_text(format!("Veytrane · {}", snapshot.core.label()));
             if self
                 .last
                 .as_ref()
@@ -256,7 +256,7 @@ impl ksni::Tray for LinuxTray {
             ("状态面板", TrayAction::Panel),
             ("打开主窗口", TrayAction::Open),
             ("设置", TrayAction::Settings),
-            ("退出 P2P File", TrayAction::Quit),
+            ("退出 Veytrane", TrayAction::Quit),
         ] {
             items.push(
                 StandardItem {

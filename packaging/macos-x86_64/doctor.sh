@@ -87,7 +87,7 @@ check_rust_version() {
     fi
 }
 
-echo "P2P File macOS packaging doctor"
+echo "Veytrane macOS packaging doctor"
 echo "repo: $REPO_ROOT"
 echo "target: $TARGET"
 

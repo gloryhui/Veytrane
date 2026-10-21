@@ -1,4 +1,6 @@
-# Sub2API 专用分发包
+# Veytrane for Sub2API 专用分发包
+
+新构建的分发包命名为 `Veytrane-Sub2API-Windows-x64.zip`，包内继续使用 `Sub2API.exe` 和 `Start-Sub2API.bat`；现有身份目录保持不变。此前已交付的 ZIP 名称与校验值保留在对应部署记录中。
 
 该模式与通用桌面客户端及现有 JSON Agent 分离。ZIP 内仅有 `Sub2API.exe`、`Start-Sub2API.bat`、使用说明及许可证；不包含通用 Agent、管理 CLI、Web 管理端、配置 JSON 或任何预生成身份。
 

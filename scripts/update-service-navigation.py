@@ -89,7 +89,7 @@ def main():
                              target=service["target"] if service else forward["target"],
                              enabled=bool(forward["enabled"] and (service is None or service["enabled"])),
                              autoStart=bool(forward["auto_start"]), remote=True))
-    services.append(dict(id="mac-admin", serviceId="mac-admin", title="本机 Mac · 节点管理", name="Mac P2P 管理", description="配置这台 Mac 的监听端口，接收 Ubuntu 等远端设备提供的服务。", category="节点管理", protocol="http", url=args.mac_web, listen=args.mac_web.split("://", 1)[1].rstrip("/"), target="本机 P2P Web 管理", enabled=True, autoStart=None, remote=False))
+    services.append(dict(id="mac-admin", serviceId="mac-admin", title="本机 Mac · 节点管理", name="Mac Veytrane 管理", description="配置这台 Mac 的监听端口，接收 Ubuntu 等远端设备提供的服务。", category="节点管理", protocol="http", url=args.mac_web, listen=args.mac_web.split("://", 1)[1].rstrip("/"), target="本机 Veytrane Web 管理", enabled=True, autoStart=None, remote=False))
     data = dict(updatedAt=datetime.datetime.now().astimezone().isoformat(timespec="seconds"), services=services)
     html = render_data(args.output.read_text(), data)
     write_private_navigation(args, html, data)

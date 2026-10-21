@@ -23,10 +23,10 @@ Python >=3.11（含 tomllib）和 `x86_64-apple-darwin` target。doctor 只检�
 
 构建要求干净工作区和仓库外的新/空输出目录。完整模式依次执行共享边界测试、锁定依赖的
 release GUI build、候选打包与校验，保留依赖来源材料、SHA256 和源码提交信息。
-`--app-only` 仅输出可运行的 `P2P File.app` 与许可证材料，不生成完整审计候选。
+`--app-only` 仅输出可运行的 `Veytrane.app` 与许可证材料，不生成完整审计候选。
 
-CI 下载中，`p2p-desktop-app-only-x86_64-apple-darwin-*` 是轻量 Intel 应用 ZIP；
-`p2p-desktop-x86_64-apple-darwin-*` 是完整候选。下载后解压轻量 ZIP，将 `P2P File.app`
+CI 下载中，`veytrane-app-only-x86_64-apple-darwin-*` 是轻量 Intel 应用 ZIP；
+`veytrane-x86_64-apple-darwin-*` 是完整候选。下载后解压轻量 ZIP，将 `Veytrane.app`
 放入 Applications，通过 Finder 打开。完整安装说明见 [RUNNING.md](../RUNNING.md)。
 
 签名状态为经过检查的 ad-hoc / not notarized，没有 Developer ID 或 Apple 公证。

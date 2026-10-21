@@ -109,10 +109,10 @@ if (( APP_ONLY )); then
         --app-only
     echo "build SHA: $BUILD_SHA"
     echo "target: $TARGET"
-    echo "artifact path: $OUTPUT_DIR/P2P File.app"
+    echo "artifact path: $OUTPUT_DIR/Veytrane.app"
     echo "archive: not produced (app-only)"
     echo "archive SHA256: not applicable (app-only)"
-    echo "executable/app path: $OUTPUT_DIR/P2P File.app/Contents/MacOS/p2p-desktop"
+    echo "executable/app path: $OUTPUT_DIR/Veytrane.app/Contents/MacOS/p2p-desktop"
     echo "signing status: ad-hoc; not notarized"
     exit 0
 fi
@@ -126,7 +126,7 @@ fi
 ARCHIVE=$("$PYTHON_BIN" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["archive"])' "$OUTPUT_DIR/candidate.json")
 ARCHIVE_SHA256=$("$PYTHON_BIN" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["archive_sha256"])' "$OUTPUT_DIR/candidate.json")
 PACKAGE_DIR=${ARCHIVE%.zip}
-APP_PATH="$OUTPUT_DIR/$PACKAGE_DIR/P2P File.app"
+APP_PATH="$OUTPUT_DIR/$PACKAGE_DIR/Veytrane.app"
 EXECUTABLE_PATH="$APP_PATH/Contents/MacOS/p2p-desktop"
 
 echo "build SHA: $BUILD_SHA"

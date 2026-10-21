@@ -114,7 +114,7 @@ function Test-VersionCommand {
     return $tool
 }
 
-Write-Host 'P2P File Windows x64 packaging doctor'
+Write-Host 'Veytrane Windows x64 packaging doctor'
 Write-Host ('repo: ' + $RepoRoot)
 Write-Host ('target: ' + $Target)
 

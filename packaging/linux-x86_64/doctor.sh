@@ -173,7 +173,7 @@ basic_remediation() {
     esac
 }
 
-echo "P2P File Linux packaging doctor"
+echo "Veytrane Linux packaging doctor"
 echo "repo: $REPO_ROOT"
 echo "target: $TARGET"
 

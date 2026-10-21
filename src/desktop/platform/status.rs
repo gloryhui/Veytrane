@@ -48,7 +48,7 @@ pub(in crate::desktop) struct StatusSnapshot {
 impl StatusSnapshot {
     pub fn tooltip(&self) -> String {
         format!(
-            "P2P File · {} · {} 台设备 · {} 个传输 · {} 个隧道",
+            "Veytrane · {} · {} 台设备 · {} 个传输 · {} 个隧道",
             self.core.label(),
             self.connected_peers,
             self.active_files,

@@ -130,13 +130,13 @@ impl Render for PanelWindow {
 impl Page {
     fn title(self) -> &'static str {
         match self {
-            Self::Home => "P2P File",
-            Self::Settings => "P2P File · 设置",
-            Self::Management => "P2P File · 节点管理",
-            Self::Diagnostics => "P2P File · 连接诊断",
-            Self::Speed => "P2P File · 速度测试",
-            Self::TaskDetails => "P2P File · 任务详情",
-            Self::DirectoryPreview => "P2P File · 目录预览",
+            Self::Home => "Veytrane",
+            Self::Settings => "Veytrane · 设置",
+            Self::Management => "Veytrane · 节点管理",
+            Self::Diagnostics => "Veytrane · 连接诊断",
+            Self::Speed => "Veytrane · 速度测试",
+            Self::TaskDetails => "Veytrane · 任务详情",
+            Self::DirectoryPreview => "Veytrane · 目录预览",
         }
     }
 

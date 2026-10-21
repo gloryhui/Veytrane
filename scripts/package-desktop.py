@@ -277,7 +277,7 @@ def main():
     version = info['version']
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?', version):
         parser.error('invalid package version')
-    stem = f'p2p-desktop-{version}-{args.target}-{head[:12]}'
+    stem = f'veytrane-{version}-{args.target}-{head[:12]}'
     package = output if args.app_only else output / stem
     if not args.app_only:
         package.mkdir()
@@ -285,7 +285,7 @@ def main():
     signing = {'status': 'unsigned', 'notarization': 'not applicable', 'certificate': None}
     inspection = {}
     if platform.system() == 'Darwin':
-        app = package / 'P2P File.app'
+        app = package / 'Veytrane.app'
         contents = app / 'Contents'
         (contents / 'MacOS').mkdir(parents=True)
         (contents / 'Resources').mkdir()
@@ -293,7 +293,7 @@ def main():
         executable = contents / 'MacOS/p2p-desktop'
         with (contents / 'Info.plist').open('wb') as stream:
             plistlib.dump({'CFBundleExecutable': 'p2p-desktop', 'CFBundleIdentifier': 'io.github.gloryhui.p2p-file',
-                           'CFBundleName': 'P2P File', 'CFBundleDisplayName': 'P2P File', 'CFBundlePackageType': 'APPL',
+                           'CFBundleName': 'Veytrane', 'CFBundleDisplayName': 'Veytrane', 'CFBundlePackageType': 'APPL',
                            'CFBundleIconFile': 'AppIcon.icns',
                            'CFBundleShortVersionString': version.split('-')[0].split('+')[0], 'CFBundleVersion': '1',
                            'LSMinimumSystemVersion': '13.0', 'NSHighResolutionCapable': True,
@@ -315,7 +315,7 @@ def main():
     if platform.system() == 'Linux':
         shutil.copyfile(REPO / 'assets/icons/app-icon.png', package / 'p2p-file.png')
         (package / 'p2p-file.desktop').write_text(
-            '[Desktop Entry]\nType=Application\nName=P2P File\nExec=p2p-desktop\n'
+            '[Desktop Entry]\nType=Application\nName=Veytrane\nExec=p2p-desktop\n'
             'Icon=p2p-file\nTerminal=false\nCategories=Network;FileTransfer;\n', encoding='utf-8')
         inspection['dynamic_dependencies'] = run(['ldd', str(executable)])
         if 'not found' in inspection['dynamic_dependencies']:

@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 setlocal
-title Sub2API
+title Veytrane for Sub2API
 cd /d "%~dp0"
 if not exist "%~dp0Sub2API.exe" (
     echo Sub2API.exe was not found. Extract the complete ZIP and try again.

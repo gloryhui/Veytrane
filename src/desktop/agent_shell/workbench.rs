@@ -432,7 +432,7 @@ impl AgentShell {
             .justify_between()
             .gap_3()
             .child(crate::desktop::ui::branding::brand_identity(
-                "P2P File",
+                "Veytrane",
                 "设备之间，直接传文件",
             ))
             .child(
@@ -1505,7 +1505,7 @@ impl AgentShell {
                     .items_center()
                     .justify_between()
                     .child(crate::desktop::ui::branding::brand_identity(
-                        "P2P File 设置",
+                        "Veytrane 设置",
                         "个性化设置你的使用体验",
                     ))
                     .child(

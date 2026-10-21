@@ -205,7 +205,7 @@ pub async fn run_gateway(root: &Path) -> io::Result<()> {
     settings.signal_tls = profile.signal_tls;
     settings.relay_server = profile.relay_server;
     settings.services = vec![only_service(&BTreeSet::new())];
-    println!("Dedicated Sub2API gateway started; files/speed/management disabled");
+    println!("Veytrane Gateway for Sub2API started; files/speed/management disabled");
     let shutdown = tokio::signal::ctrl_c();
     tokio::pin!(shutdown);
     let mut generation = 0u64;
@@ -282,7 +282,7 @@ pub async fn run_client(embedded_profile: &str) -> io::Result<()> {
     let settings = profile.settings(root.clone())?;
     let identity = Identity::load_or_create(&root.join("identity.key")).map_err(error)?;
     println!(
-        "Sub2API 专用连接\n本地地址：{LOCAL_URL}\n设备身份：{}\n保持此窗口运行；按 Ctrl+C 停止。",
+        "Veytrane for Sub2API\n本地地址：{LOCAL_URL}\n设备身份：{}\n保持此窗口运行；按 Ctrl+C 停止。",
         identity.node_id()
     );
     let peer = NodeId::from_hex(&profile.server_node_id).map_err(error)?;

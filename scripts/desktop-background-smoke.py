@@ -124,7 +124,7 @@ def main():
         root = output / "node"
         app = launch([str(binary), "--data-dir", str(root)], "desktop")
         def main_window(visible=True):
-            result = subprocess.run(["xdotool", "search"] + (["--onlyvisible"] if visible else []) + ["--pid", str(app.pid), "--name", "P2P File"], env=env, capture_output=True, text=True)
+            result = subprocess.run(["xdotool", "search"] + (["--onlyvisible"] if visible else []) + ["--pid", str(app.pid), "--name", "Veytrane"], env=env, capture_output=True, text=True)
             return result.stdout.strip().splitlines()[0] if result.returncode == 0 else None
         window = wait_for(main_window)
         tray_name = wait_for(lambda: names() and names()[0])

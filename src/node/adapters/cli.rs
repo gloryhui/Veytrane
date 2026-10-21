@@ -12,7 +12,7 @@ use std::{
 };
 
 #[derive(Parser)]
-#[command(about = "管理同一后台 P2P Agent", version)]
+#[command(about = "Veytrane Node · 管理同一后台 Agent", version)]
 pub struct Args {
     #[arg(long, global = true)]
     pub data_dir: Option<PathBuf>,

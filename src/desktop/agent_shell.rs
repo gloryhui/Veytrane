@@ -587,7 +587,7 @@ impl AgentShell {
             .p_6()
             .bg(rgb(ui_theme::PAGE_BG))
             .text_color(rgb(ui_theme::TEXT))
-            .child(div().text_2xl().child("P2P File · 节点管理"))
+            .child(div().text_2xl().child("Veytrane · 节点管理"))
             .child(
                 ui_components::secondary_button("返回主界面", true).on_mouse_up(
                     MouseButton::Left,
@@ -1098,7 +1098,7 @@ pub fn run(root: PathBuf, background: bool) {
         match cx.open_window(
             WindowOptions {
                 titlebar: Some(gpui::TitlebarOptions {
-                    title: Some("P2P File".into()),
+                    title: Some("Veytrane".into()),
                     ..Default::default()
                 }),
                 window_bounds: Some(WindowBounds::Windowed(bounds)),

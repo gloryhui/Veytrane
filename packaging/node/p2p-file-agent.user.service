@@ -1,5 +1,5 @@
 [Unit]
-Description=P2P File user Agent (replace absolute paths before install)
+Description=Veytrane user Agent (replace absolute paths before install)
 StartLimitIntervalSec=60
 StartLimitBurst=5
 

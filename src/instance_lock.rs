@@ -11,7 +11,7 @@ pub struct InstanceLock {
 
 #[derive(Debug, thiserror::Error)]
 pub enum InstanceLockError {
-    #[error("此目录或身份已由另一个 P2P File 实例使用")]
+    #[error("此目录或身份已由另一个 Veytrane 实例使用")]
     AlreadyRunning,
     #[error("无法取得实例锁：{0}")]
     Io(#[from] io::Error),

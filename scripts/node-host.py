@@ -147,7 +147,7 @@ def service_write(state, service):
         def quote(value):
             return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'
         service.parent.mkdir(parents=True, exist_ok=True)
-        service.write_text('[Unit]\nDescription=P2P File user Agent\nStartLimitIntervalSec=60\nStartLimitBurst=5\n'
+        service.write_text('[Unit]\nDescription=Veytrane user Agent\nStartLimitIntervalSec=60\nStartLimitBurst=5\n'
                            '[Service]\nType=simple\nExecStart=' + quote(agent) + ' --data-dir ' + quote(state['data_dir']) +
                            '\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=30\n[Install]\nWantedBy=default.target\n', encoding='utf-8')
         run(['systemctl', '--user', 'daemon-reload'])

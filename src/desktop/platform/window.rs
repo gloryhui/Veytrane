@@ -122,7 +122,7 @@ fn map_x11_main(show: bool) -> Result<(), String> {
                 .get_property(false, candidate, AtomEnum::WM_NAME, AtomEnum::ANY, 0, 32)
                 .map_err(|e| e.to_string())?
                 .reply();
-            if title.is_ok_and(|title| title.value == b"P2P File") {
+            if title.is_ok_and(|title| title.value == b"Veytrane") {
                 let request = if show {
                     connection.map_window(candidate)
                 } else {

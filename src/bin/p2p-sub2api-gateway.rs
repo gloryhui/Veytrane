@@ -4,6 +4,7 @@ use p2p_file::node::products::sub2api as restricted_sub2api;
 use std::path::PathBuf;
 
 #[derive(Parser)]
+#[command(about = "Veytrane Gateway for Sub2API · 专用服务网关")]
 struct Args {
     #[arg(long)]
     data_dir: PathBuf,

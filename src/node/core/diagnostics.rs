@@ -299,7 +299,7 @@ impl Diagnostics {
     }
     pub fn text(&self, now: Instant) -> String {
         let mut lines = vec![
-            "P2P File 连接诊断 v1（脱敏摘要）".to_owned(),
+            "Veytrane 连接诊断 v1（脱敏摘要）".to_owned(),
             format!("信令：{}", self.signal.label()),
         ];
         lines.push(format!(

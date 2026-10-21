@@ -1,15 +1,21 @@
-# p2p_file
+# Veytrane
 
-点对点（P2P）直连工具。**Rust** 实现，靠 NAT 穿透建立直连：
+**Trusted devices. Connected.**
 
-- **传文件** —— 分片、BLAKE3 逐片校验、断点续传。
-- **通用 TCP 隧道** —— 把本机一个端口转发到对端的任意服务（`ssh`、`rdp`、`http`……）。
+跨网络的可信设备互联软件。**Rust** 实现，通过信令发现设备、交换网络候选，优先建立经过身份认证与授权的端到端 QUIC 直连：
+
+- **可信设备连接** —— 稳定设备身份、远端认证、资源授权与撤销。
+- **服务访问与端口映射** —— 将远端授权服务接入本机，支持 Web、SSH、文件共享等 TCP 服务。
+- **文件与目录传输** —— 分片、BLAKE3 校验、断点续传。
+- **专用客户端与网关** —— 按用途提供受限的服务入口，例如 Veytrane for Sub2API。
 
 Direct 成功时服务器只负责信令，不承载业务数据。用户配置 Relay 且 Direct 无法
 及时建立 authenticated transport 时，Relay UDP 服务延迟转发**端到端加密的 QUIC
 datagram**。Relay 看不到业务明文，QUIC / Ed25519 身份认证仍然是设备间端到端。
 
-## 统一节点实施分支
+产品名为 **Veytrane**，内部节点协议仍称 **P2PN v2**，协议版本与产品版本分别管理。工程包名 `p2p_file`、已有命令及节点数据路径维持当前标识，继续使用现有身份、授权、任务和服务安装。后续构建的桌面应用为 `Veytrane.app`，专用分发包为 `Veytrane-Sub2API-Windows-x64.zip`；已部署二进制与既有 ZIP 的名称以各自部署记录为准。
+
+## 当前节点架构
 
 当前整体架构可直接打开[可点击架构图](docs/architecture-current.html)：提供系统全景、节点分层、核心内部、桌面边界四个视图，支持搜索模块、展开职责和跳转源码。图与 2026-10-21 分层后的源码对应；部署章节同步 Mac / Ubuntu 主节点的 P2PN v2 升级快照，详见[部署验收记录](docs/task-reports/P2PN_V2_DEPLOYMENT.md)。目录职责与维护方式见[仓库分层说明](docs/REPOSITORY_LAYOUT.md)。
 
@@ -25,7 +31,7 @@ target/release/p2p-agent
 
 桌面默认保留文件传输工作台：连接设备、接收目录、任务列表、目录预览和测速均通过 IPC 操作独立 Agent。设置、节点管理、连接诊断、测速、任务详情及目录预览均在独立窗口打开，主界面保持显示；重复打开会激活已有窗口，关闭后可重新打开。节点管理、资源授权与端口转发从“设置 → 打开节点管理”进入，所有窗口共享同一个 IPC 状态与后台。启动桌面时先附着现有 Agent；已有节点配置但后台未运行时自动启动，不创建第二套业务会话。
 
-首次使用按[节点宿主说明](packaging/node/README.md)初始化；`init`不会覆盖现有配置。旧桌面导入和协议适配已删除，当前节点统一使用 P2PN v2，升级需同步两端程序并移除配置中的 `peer_modes` 字段。桌面包须包含同SHA的Agent和CLI。主窗口标题栏“×”会隐藏到系统托盘，传输和后台节点继续；点击托盘图标恢复原窗口，二级窗口仍单独关闭。只有托盘菜单“退出 P2P File”会停止 Agent、确认状态已保存并退出。托盘不可用时保留任务栏入口；不会隐藏成无法恢复的进程。桌面仅保留 Agent 工作台，已移除内嵌旧桌面和 `--legacy` 参数。独立 CLI 的范围见[发布矩阵](docs/specs/NODE_RELEASE_DECISION.md)。
+首次使用按[节点宿主说明](packaging/node/README.md)初始化；`init`不会覆盖现有配置。旧桌面导入和协议适配已删除，当前节点统一使用 P2PN v2，升级需同步两端程序并移除配置中的 `peer_modes` 字段。桌面包须包含同SHA的Agent和CLI。主窗口标题栏“×”会隐藏到系统托盘，传输和后台节点继续；点击托盘图标恢复原窗口，二级窗口仍单独关闭。只有托盘菜单“退出 Veytrane”会停止 Agent、确认状态已保存并退出。托盘不可用时保留任务栏入口；不会隐藏成无法恢复的进程。桌面仅保留 Agent 工作台，已移除内嵌旧桌面和 `--legacy` 参数。独立 CLI 的范围见[发布矩阵](docs/specs/NODE_RELEASE_DECISION.md)。
 
 本轮按用户要求完成代码与静态检查，测试/回归/真实设备验收后置；三个缺陷未据此关闭。进度见[任务台账](docs/task-reports/IMPLEMENTATION_STATUS.md)，四设备准备见[验收计划](docs/FOUR_DEVICE_ACCEPTANCE.md)。
 
@@ -189,7 +195,7 @@ $BIN push --signal $SIGNAL --peer $HOME_ID ./大文件.mkv
 协议、迁移与安全边界见 [远程访问认证](docs/REMOTE_AUTH.md)。
 
 默认 Agent 桌面点击主窗口“×”会隐藏至托盘，传输、测速和后台节点保持运行；点击
-托盘图标可恢复原窗口。二级窗口单独关闭。托盘菜单“退出 P2P File”才会停止后台、
+托盘图标可恢复原窗口。二级窗口单独关闭。托盘菜单“退出 Veytrane”才会停止后台、
 等待状态保存和所有权释放后退出。托盘不可用时，关闭按钮只最小化到任务栏。
 旧内嵌桌面的可选后台开关和登录项说明见 [后台运行](docs/DESKTOP_BACKGROUND.md)。
 设置页的 [断网自动恢复](docs/DESKTOP_AUTO_RESUME.md) 继续由 Agent 执行。

@@ -1,6 +1,6 @@
-> 默认桌面保留原文件传输工作台，通过 IPC 附着独立 Agent，安装包须同时包含 p2p-agent 与 p2p-node。设置、节点管理、连接诊断、测速、任务详情和目录预览均使用独立窗口；节点管理从“设置 → 打开节点管理”进入。打开、关闭或重新打开二级窗口不改变主界面、后台身份或会话。9 位设备 ID、连接、文件/目录发送、增量预览、暂停继续、测速和接收目录变更均由 Agent 执行。主窗口“×”隐藏至托盘，点击托盘图标恢复；托盘菜单“退出 P2P File”才停止后台并退出。已有配置时桌面会附着或启动后台；首次使用可初始化，或预览并确认迁移原版身份与任务。初始化、旧身份导入、后台启动及升级细节见 [node 宿主说明](node/README.md)。下文保留原版功能说明；新工作台的网络设置通过“保存网络并停止节点”提交，之后点击启动后台节点重新上线。
+> 默认桌面保留原文件传输工作台，通过 IPC 附着独立 Agent，安装包须同时包含 p2p-agent 与 p2p-node。设置、节点管理、连接诊断、测速、任务详情和目录预览均使用独立窗口；节点管理从“设置 → 打开节点管理”进入。打开、关闭或重新打开二级窗口不改变主界面、后台身份或会话。9 位设备 ID、连接、文件/目录发送、增量预览、暂停继续、测速和接收目录变更均由 Agent 执行。主窗口“×”隐藏至托盘，点击托盘图标恢复；托盘菜单“退出 Veytrane”才停止后台并退出。已有配置时桌面会附着或启动后台；首次使用可初始化，或预览并确认迁移原版身份与任务。初始化、旧身份导入、后台启动及升级细节见 [node 宿主说明](node/README.md)。下文保留原版功能说明；新工作台的网络设置通过“保存网络并停止节点”提交，之后点击启动后台节点重新上线。
 
-# P2P File 桌面候选包
+# Veytrane 桌面候选包
 
 这是 GPUI MVP 的候选产物。版本、完整源码 commit、目标、实际二进制/归档大小、SHA256、签名状态在 `build-info.json` / `candidate.json`。`SHA256SUMS` 校验解包后的文件；旁置 `.sha256` 校验归档。不要把 PR 的 CI 成功当作最低系统、物理设备或双 NAT 验收。最终状态以 [Issue #24](https://github.com/gloryhui/p2p_file/issues/24) 为准；未完成 mandatory 外部验证之前不创建正式 Release。
 
@@ -31,17 +31,17 @@ Get-AuthenticodeSignature .\p2p-desktop.exe
 
 macOS：产品目标 macOS 13+，分别提供 Apple Silicon arm64 与 Intel x86_64 包。
 Apple Silicon 选择 `aarch64-apple-darwin`，Intel Mac 选择 `x86_64-apple-darwin`。
-CI 下载中 `p2p-desktop-app-only-*` 是轻量应用 ZIP，`p2p-desktop-*` 是含依赖来源材料的
-完整候选。解压 ZIP，将 `P2P File.app` 放在 Applications 或用户可读目录，通过 Finder 打开。
+CI 下载中 `veytrane-app-only-*` 是轻量应用 ZIP，`veytrane-*` 是含依赖来源材料的
+完整候选。解压 ZIP，将 `Veytrane.app` 放在 Applications 或用户可读目录，通过 Finder 打开。
 两种包的 Info.plist 都保持 `LSMinimumSystemVersion=13.0`；CI 检查 Mach-O 最低部署版本，
 并在各自架构的 macOS runner 原生执行回归，不能代替 macOS13 实机交互验收。
 
 ```sh
-"P2P File.app/Contents/MacOS/p2p-desktop" --build-info
-codesign -dv --verbose=4 "P2P File.app"
+"Veytrane.app/Contents/MacOS/p2p-desktop" --build-info
+codesign -dv --verbose=4 "Veytrane.app"
 ```
 
-只需本机可运行的轻量 `.app` 时，打包命令加 `--app-only`。该模式只输出 `P2P File.app`，保留依赖许可证/声明文本，不复制完整 `.crate` 源码归档，也不生成候选 ZIP、`candidate.json` 或 SHA256 旁置文件；因此它不是完整审计候选包：
+只需本机可运行的轻量 `.app` 时，打包命令加 `--app-only`。该模式只输出 `Veytrane.app`，保留依赖许可证/声明文本，不复制完整 `.crate` 源码归档，也不生成候选 ZIP、`candidate.json` 或 SHA256 旁置文件；因此它不是完整审计候选包：
 
 ```sh
 python3.12 scripts/package-desktop.py \
@@ -49,7 +49,7 @@ python3.12 scripts/package-desktop.py \
   --target aarch64-apple-darwin \
   --output "$P2P_PACKAGE_DIR" \
   --app-only
-open "$P2P_PACKAGE_DIR/P2P File.app"
+open "$P2P_PACKAGE_DIR/Veytrane.app"
 ```
 
 Intel 本机构建使用 [macos-x86_64 入口](macos-x86_64/README.md)：

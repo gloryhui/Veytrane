@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions
 
-title P2P File Windows Build and Deploy
+title Veytrane Windows Build and Deploy
 
 set "P2P_REPO=F:\git\p2p_file"
 set "P2P_TARGET=x86_64-pc-windows-msvc"
@@ -122,15 +122,15 @@ python.exe scripts\verify-desktop-package.py "%P2P_PACKAGE_DIR%\candidate.json"
 if errorlevel 1 goto :failed
 
 set "P2P_SOURCE_PACKAGE="
-for /d %%D in ("%P2P_PACKAGE_DIR%\p2p-desktop-*") do if not defined P2P_SOURCE_PACKAGE set "P2P_SOURCE_PACKAGE=%%D"
+for /d %%D in ("%P2P_PACKAGE_DIR%\veytrane-*") do if not defined P2P_SOURCE_PACKAGE set "P2P_SOURCE_PACKAGE=%%D"
 if not defined P2P_SOURCE_PACKAGE (
     echo ERROR: Verified package directory was not found.
     goto :failed
 )
-for %%D in ("%P2P_SOURCE_PACKAGE%") do set "P2P_INSTALL=%LOCALAPPDATA%\Programs\P2P File\%%~nxD"
+for %%D in ("%P2P_SOURCE_PACKAGE%") do set "P2P_INSTALL=%LOCALAPPDATA%\Programs\Veytrane\%%~nxD"
 
-echo Installing and launching P2P File...
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $proc=Get-Process -Name 'p2p-desktop' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq (Join-Path $env:P2P_INSTALL 'p2p-desktop.exe') }; if ($proc) { throw 'Close the installed P2P File app and run this BAT again' }; New-Item -ItemType Directory -Path (Split-Path -Parent $env:P2P_INSTALL) -Force | Out-Null; if (Test-Path -LiteralPath $env:P2P_INSTALL) { Remove-Item -LiteralPath $env:P2P_INSTALL -Recurse -Force }; Copy-Item -LiteralPath $env:P2P_SOURCE_PACKAGE -Destination $env:P2P_INSTALL -Recurse -Force; $exe=Join-Path $env:P2P_INSTALL 'p2p-desktop.exe'; $desktop=[Environment]::GetFolderPath('Desktop'); $shell=New-Object -ComObject WScript.Shell; $shortcut=$shell.CreateShortcut((Join-Path $desktop 'P2P File.lnk')); $shortcut.TargetPath=$exe; $shortcut.WorkingDirectory=$env:P2P_INSTALL; $shortcut.Description='P2P File'; $shortcut.Save(); Start-Process -FilePath $exe -WorkingDirectory $env:P2P_INSTALL"
+echo Installing and launching Veytrane...
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $proc=Get-Process -Name 'p2p-desktop' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq (Join-Path $env:P2P_INSTALL 'p2p-desktop.exe') }; if ($proc) { throw 'Close the installed Veytrane app and run this BAT again' }; New-Item -ItemType Directory -Path (Split-Path -Parent $env:P2P_INSTALL) -Force | Out-Null; if (Test-Path -LiteralPath $env:P2P_INSTALL) { Remove-Item -LiteralPath $env:P2P_INSTALL -Recurse -Force }; Copy-Item -LiteralPath $env:P2P_SOURCE_PACKAGE -Destination $env:P2P_INSTALL -Recurse -Force; $exe=Join-Path $env:P2P_INSTALL 'p2p-desktop.exe'; $desktop=[Environment]::GetFolderPath('Desktop'); $shell=New-Object -ComObject WScript.Shell; $shortcut=$shell.CreateShortcut((Join-Path $desktop 'Veytrane.lnk')); $shortcut.TargetPath=$exe; $shortcut.WorkingDirectory=$env:P2P_INSTALL; $shortcut.Description='Veytrane'; $shortcut.Save(); Start-Process -FilePath $exe -WorkingDirectory $env:P2P_INSTALL"
 if errorlevel 1 goto :failed
 
 echo.
