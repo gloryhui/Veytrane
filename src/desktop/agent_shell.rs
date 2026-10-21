@@ -847,7 +847,7 @@ impl AgentShell {
                                 "{} · {} → {}",
                                 rule["name"].as_str().unwrap_or(""),
                                 rule["listen"].as_str().unwrap_or(""),
-                                draft["service_ids"][&id].as_str().unwrap_or("legacy")
+                                draft["service_ids"][&id].as_str().unwrap_or("缺少服务 ID")
                             ))
                             .child(
                                 ui_components::primary_button(format!("启动 {id}"), enabled)

@@ -59,8 +59,6 @@ fn is_current_signal_generation(current: u64, result_generation: u64) -> bool {
 
 #[derive(Clone, Debug)]
 pub struct NodeSessionConfig {
-    pub wire_mode: crate::node::core::wire::PeerWireMode,
-    pub peer_modes: HashMap<NodeId, crate::node::core::wire::PeerWireMode>,
     pub service_ids: HashMap<String, String>,
     pub resources: crate::node::core::authorization::ResourcePolicy,
     pub trust_sources: HashMap<NodeId, crate::node::core::authorization::TrustSource>,
@@ -81,16 +79,8 @@ pub struct NodeSessionConfig {
 }
 
 impl NodeSessionConfig {
-    pub fn unified(signal_server: impl Into<String>) -> Self {
-        Self {
-            wire_mode: crate::node::core::wire::PeerWireMode::UnifiedV1,
-            ..Self::new(signal_server)
-        }
-    }
     pub fn new(signal_server: impl Into<String>) -> Self {
         Self {
-            wire_mode: crate::node::core::wire::PeerWireMode::LegacyDesktopV1,
-            peer_modes: HashMap::new(),
             service_ids: HashMap::new(),
             resources: Default::default(),
             trust_sources: HashMap::new(),
@@ -838,7 +828,7 @@ enum SessionInput {
         generation: u64,
         capabilities: u64,
         authorization: RemoteAuthorization,
-        control: Option<Box<crate::node::core::remote_auth::TrustedControl>>,
+        control: Box<crate::node::core::remote_auth::TrustedControl>,
         connection: quinn::Connection,
     },
     PeerFailed {
@@ -911,7 +901,7 @@ pub fn spawn(
         .resources
         .validate()
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    if config.peer_modes.len() > 128 || config.trust_sources.len() > 128 {
+    if config.trust_sources.len() > 128 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "节点策略设备数量超限",
@@ -1059,20 +1049,11 @@ async fn run_session(
         }
     };
 
-    let tunnel_policy = TunnelWirePolicy {
-        mode: config.wire_mode,
-        peers: config.peer_modes.clone(),
+    let tunnel_policy = TunnelServices {
         services: config.service_ids.clone(),
     };
     let service_queries = Arc::new(Semaphore::new(16));
     let forward_streams = Arc::new(crate::tunnel::ForwardStreamOwner::new(256));
-    let mode_for = |peer: NodeId| {
-        config
-            .peer_modes
-            .get(&peer)
-            .copied()
-            .unwrap_or(config.wire_mode)
-    };
     let local_capabilities = crate::node::core::wire::capabilities(
         config.transfer.is_some() && config.enable_files,
         config.transfer.is_some() && config.enable_speed,
@@ -1269,7 +1250,6 @@ async fn run_session(
         };
         if let Wake::Command(Some(command)) = &wake
             && let Some(peer) = command.business_peer()
-            && mode_for(peer) == crate::node::core::wire::PeerWireMode::UnifiedV1
             && !peer_capabilities.get(&peer).is_some_and(|caps| {
                 caps & command.required_capability() == command.required_capability()
             })
@@ -1486,10 +1466,9 @@ async fn run_session(
                 let _ = done.send(Ok(outcome));
             }
             Wake::Command(Some(SessionCommand::ListServices { peer, done })) => {
-                if mode_for(peer) != crate::node::core::wire::PeerWireMode::UnifiedV1
-                    || !peer_capabilities.get(&peer).is_some_and(|caps| {
-                        caps & crate::node::core::wire::CAP_SERVICE_DIRECTORY != 0
-                    })
+                if !peer_capabilities
+                    .get(&peer)
+                    .is_some_and(|caps| caps & crate::node::core::wire::CAP_SERVICE_DIRECTORY != 0)
                 {
                     let _ = done.send(Err("对端未协商统一服务目录能力".into()));
                     continue;
@@ -1681,22 +1660,20 @@ async fn run_session(
                         );
                     }
                     for peer in revoked {
-                        if mode_for(peer) == crate::node::core::wire::PeerWireMode::UnifiedV1 {
-                            // Strong revocation invalidates password and trust grants alike.
-                            credentials.remove(&peer);
-                            credential_retries.remove(&peer);
-                            if let Some((_, attempt)) = peer_attempts.remove(&peer) {
-                                attempt.abort();
-                            }
-                            if let Some((_, _, rights)) = authorizations.get(&peer) {
-                                rights.send_replace(RemoteAuthorization::default());
-                            }
-                            if let Some((_, connection)) = connections.get(&peer) {
-                                connection.close(3u32.into(), b"device trust revoked");
-                            }
-                            if let Some(service) = &config.transfer {
-                                service.cancel_peer_recovery(peer);
-                            }
+                        // Strong revocation invalidates password and trust grants alike.
+                        credentials.remove(&peer);
+                        credential_retries.remove(&peer);
+                        if let Some((_, attempt)) = peer_attempts.remove(&peer) {
+                            attempt.abort();
+                        }
+                        if let Some((_, _, rights)) = authorizations.get(&peer) {
+                            rights.send_replace(RemoteAuthorization::default());
+                        }
+                        if let Some((_, connection)) = connections.get(&peer) {
+                            connection.close(3u32.into(), b"device trust revoked");
+                        }
+                        if let Some(service) = &config.transfer {
+                            service.cancel_peer_recovery(peer);
                         }
                     }
                     events.control.retain_trust_sources(devices);
@@ -2793,7 +2770,6 @@ async fn run_session(
                         auth_context.clone(),
                         remote_verifier.clone(),
                         AttemptOptions {
-                            mode: mode_for(node_id),
                             capabilities: local_capabilities,
                         },
                         credentials.get(&node_id).cloned().or_else(|| {
@@ -3076,12 +3052,10 @@ async fn run_session(
                 {
                     old.send_replace(RemoteAuthorization::default());
                 }
-                if let Some(control) = control {
-                    let control_rights = rights.clone();
-                    peer_tasks.spawn(async move {
-                        (*control).run(control_rights).await;
-                    });
-                }
+                let control_rights = rights.clone();
+                peer_tasks.spawn(async move {
+                    (*control).run(control_rights).await;
+                });
                 let changed_inputs = input_tx.clone();
                 let mut changed = live.clone();
                 let changed_connection = connection.clone();
@@ -3229,105 +3203,64 @@ async fn run_session(
                         .await;
                     }
                 }
-                let unified = mode_for(peer) == crate::node::core::wire::PeerWireMode::UnifiedV1;
                 let transfer = config.transfer.clone();
-                let resource_scope = (config.wire_mode
-                    == crate::node::core::wire::PeerWireMode::UnifiedV1
-                    || unified)
-                    .then(|| resource_policy.subscribe());
-                let wire_binding = transfer.as_ref().map(|service| {
-                    service.set_unified_connection(&connection, unified, resource_scope.clone())
-                });
                 let business_connection = connection.clone();
                 let allowed_targets = allowed_forward_targets.subscribe();
                 let resources = resource_policy.subscribe();
                 let business_events = events.clone();
                 let service_tcp_streams = forward_streams.clone();
                 peer_tasks.spawn(async move {
-                    let _wire_binding = wire_binding;
-                    if unified {
-                        let (_dispatcher, incoming) =
-                            crate::node::core::dispatch::Dispatcher::start(
-                                business_connection.clone(),
-                                capabilities,
-                            );
-                        let crate::node::core::dispatch::Incoming {
+                    let (_dispatcher, incoming) = crate::node::core::dispatch::Dispatcher::start(
+                        business_connection.clone(),
+                        capabilities,
+                    );
+                    let crate::node::core::dispatch::Incoming {
+                        files,
+                        services,
+                        speed,
+                    } = incoming;
+                    if let Some(service) = transfer {
+                        let inlets = crate::node::core::transfer::FileInlets::new(
                             files,
-                            services,
                             speed,
-                        } = incoming;
-                        if let Some(service) = transfer {
-                            let inlets = crate::node::core::transfer::FileInlets::new(
-                                files,
-                                speed,
-                                resources.clone(),
-                            );
-                            let (file_result, service_result) = tokio::join!(
-                                service.serve_dispatched(
-                                    business_connection,
-                                    peer,
-                                    local_node,
-                                    live.clone(),
-                                    allowed_targets.clone(),
-                                    inlets
-                                ),
-                                crate::node::core::services::serve(
-                                    peer,
-                                    live,
-                                    allowed_targets,
-                                    resources,
-                                    services,
-                                    service_tcp_streams
-                                ),
-                            );
-                            if file_result.is_err() || service_result.is_err() {
-                                let _ = business_events
-                                    .send(SessionEvent::Diagnostic(
-                                        "节点业务会话已结束；任务状态以持久记录为准".into(),
-                                    ))
-                                    .await;
-                            }
-                        } else {
-                            drop(files);
-                            drop(speed);
-                            let _ = crate::node::core::services::serve(
+                            resources.clone(),
+                        );
+                        let (file_result, service_result) = tokio::join!(
+                            service.serve_dispatched(
+                                business_connection,
+                                peer,
+                                local_node,
+                                live.clone(),
+                                inlets
+                            ),
+                            crate::node::core::services::serve(
                                 peer,
                                 live,
                                 allowed_targets,
                                 resources,
                                 services,
-                                service_tcp_streams,
-                            )
-                            .await;
-                        }
-                    } else if let Some(service) = transfer {
-                        if service
-                            .serve_peer_with_speed_and_targets(
-                                business_connection,
-                                peer,
-                                local_node,
-                                live,
-                                allowed_targets,
-                            )
-                            .await
-                            .is_err()
-                        {
+                                service_tcp_streams
+                            ),
+                        );
+                        if file_result.is_err() || service_result.is_err() {
                             let _ = business_events
                                 .send(SessionEvent::Diagnostic(
-                                    "文件会话已中断，任务可手动继续".into(),
+                                    "节点业务会话已结束；任务状态以持久记录为准".into(),
                                 ))
                                 .await;
                         }
-                    } else if let Err(error) = crate::node::core::tunnel::serve_peer_scoped(
-                        business_connection,
-                        peer,
-                        live,
-                        allowed_targets,
-                        resource_scope,
-                    )
-                    .await
-                    {
-                        debug!(peer = %peer.short(), %error, "TCP tunnel peer service ended");
+                    } else {
+                        drop(files);
+                        drop(speed);
+                        let _ = crate::node::core::services::serve(
+                            peer,
+                            live,
+                            allowed_targets,
+                            resources,
+                            services,
+                            service_tcp_streams,
+                        )
+                        .await;
                     }
                 });
                 let closed_inputs = input_tx.clone();
@@ -3541,7 +3474,6 @@ async fn run_session(
                     auth_context.clone(),
                     remote_verifier.clone(),
                     AttemptOptions {
-                        mode: mode_for(peer),
                         capabilities: local_capabilities,
                     },
                     credentials.get(&peer).cloned().or_else(|| {
@@ -3761,10 +3693,9 @@ async fn run_session(
                         .state(**peer)
                         .is_some_and(PeerLifecycle::outbound_authorized)
                         && connection.close_reason().is_none()
-                        && (mode_for(**peer) != crate::node::core::wire::PeerWireMode::UnifiedV1
-                            || peer_capabilities.get(*peer).is_some_and(|caps| {
-                                caps & crate::node::core::protocol::CAP_FILE_TRANSFER != 0
-                            }))
+                        && (peer_capabilities.get(*peer).is_some_and(|caps| {
+                            caps & crate::node::core::protocol::CAP_FILE_TRANSFER != 0
+                        }))
                 })
                 .map(|(peer, (_, connection))| (*peer, connection.clone()))
                 .collect();
@@ -3869,17 +3800,9 @@ fn fail_peer_tunnels(
     }
 }
 
-struct TunnelWirePolicy {
-    mode: crate::node::core::wire::PeerWireMode,
-    peers: HashMap<NodeId, crate::node::core::wire::PeerWireMode>,
+struct TunnelServices {
     services: HashMap<String, String>,
 }
-impl TunnelWirePolicy {
-    fn mode_for(&self, peer: NodeId) -> crate::node::core::wire::PeerWireMode {
-        self.peers.get(&peer).copied().unwrap_or(self.mode)
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn start_tunnel_rule(
     rule: crate::node::core::config::TunnelRule,
@@ -3895,7 +3818,7 @@ async fn start_tunnel_rule(
     tunnel_tasks: &mut JoinSet<TunnelTaskResult>,
     command_tx: &mpsc::Sender<SessionCommand>,
     events: &SessionEvents,
-    policy: &TunnelWirePolicy,
+    policy: &TunnelServices,
     stream_owner: &Arc<crate::tunnel::ForwardStreamOwner>,
 ) {
     if running_tunnels.contains_key(&rule.id) {
@@ -3930,7 +3853,7 @@ async fn start_tunnel_rule(
             return;
         }
     };
-    let service_id = if policy.mode_for(peer) == crate::node::core::wire::PeerWireMode::UnifiedV1 {
+    let service_id = {
         let Some(service) = policy.services.get(&rule_id) else {
             let _ = events
                 .send(SessionEvent::TunnelState {
@@ -3942,9 +3865,7 @@ async fn start_tunnel_rule(
                 .await;
             return;
         };
-        Some(service.clone())
-    } else {
-        None
+        service.clone()
     };
     if !rule.enabled {
         let _ = events
@@ -4022,25 +3943,20 @@ async fn start_tunnel_rule(
     let (errors_tx, mut errors_rx) = mpsc::channel(32);
     let task_events = events.clone();
     let task_rule_id = rule_id.clone();
-    let target = rule.target;
     let stream_owner = stream_owner.clone();
     tunnel_tasks.spawn(async move {
         let forward = crate::tunnel::forward_with_owner(
             listener,
-            target,
+            rule.target,
             connection_updates,
             shutdown_rx,
             errors_tx,
             stream_owner,
-            move |tcp, connection, target| {
+            move |tcp, connection, _target| {
                 let service_id = service_id.clone();
                 async move {
-                    if let Some(service_id) = service_id {
-                        let stream = crate::node::core::services::open_tcp(&connection, &service_id).await?;
-                        crate::tunnel::bridge_tcp(tcp, stream.send, stream.recv).await
-                    } else {
-                        crate::node::core::tunnel::open_tunnel(tcp, &connection, target).await
-                    }
+                    let stream = crate::node::core::services::open_tcp(&connection, &service_id).await?;
+                    crate::tunnel::bridge_tcp(tcp, stream.send, stream.recv).await
                 }
             },
         );
@@ -4267,7 +4183,6 @@ fn canonical_candidates(candidates: &[Candidate]) -> Vec<Candidate> {
 
 #[derive(Clone, Copy)]
 struct AttemptOptions {
-    mode: crate::node::core::wire::PeerWireMode,
     capabilities: u64,
 }
 
@@ -4470,23 +4385,12 @@ async fn run_peer_attempt(
             state: PeerLifecycle::Negotiating,
         })
         .await;
-    let capabilities = match options.mode {
-        crate::node::core::wire::PeerWireMode::UnifiedV1 => {
-            crate::node::core::wire::negotiate(
-                connection,
-                should_initiate_quic(local_node, peer),
-                options.capabilities,
-            )
-            .await
-        }
-        crate::node::core::wire::PeerWireMode::LegacyDesktopV1 => {
-            crate::node::core::protocol::negotiate(
-                connection,
-                should_initiate_quic(local_node, peer),
-            )
-            .await
-        }
-    }
+    let capabilities = crate::node::core::wire::negotiate(
+        connection,
+        should_initiate_quic(local_node, peer),
+        options.capabilities,
+    )
+    .await
     .map_err(|error| error.to_string())?;
 
     let _ = inputs
@@ -4530,7 +4434,7 @@ async fn run_peer_attempt(
             generation,
             capabilities,
             authorization: authorization.authorization,
-            control: authorization.control.map(Box::new),
+            control: Box::new(authorization.control),
             connection: guard.release(),
         })
         .await

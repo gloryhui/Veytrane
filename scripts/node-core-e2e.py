@@ -31,7 +31,7 @@ CASES = {
     "byte-fairness-and-slow-writer": ["continuously_ready_writers_have_a_byte_bound_even_with_different_short_writes", "synchronously_ready_async_loops_yield_and_remain_byte_fair", "blocked_writer_releases_turn_and_unused_share_is_borrowed_without_credit_growth"],
     "source-storage-network-signal-errors": ["two_process_pause_both_sides_and_storage_source_errors_reach_ui", "session_process_kill_either_endpoint_restart_requires_manual_continue", "three_process_passive_directory_collision_and_signal_restart", "permissions_failure_keeps_recovery_and_does_not_commit_receipt", "receiver_continue_reports_previously_detected_source_change"],
     "security-boundaries": ["paths_are_relative_portable_and_never_silently_rewritten", "source_symlink_and_normalization_or_case_collision_are_rejected", "malicious_manifest_path_trailing_bytes_and_bitmap_are_rejected", "oversized_length_header_fails_without_waiting_for_payload", "unexpected_authenticated_target_fails_before_connected"],
-    "old-desktop-explicit-rejection": ["unsupported_version_missing_capability_and_old_cli_are_explicit_errors", "authenticated_legacy_peer_is_rejected_by_desktop_negotiation", "schema_only_speed_capability_cannot_negotiate_the_execution_business"],
+    "node-negotiation-rejection": ["unsupported_version_missing_security_capability_and_old_frames_are_rejected", "authenticated_non_node_peer_is_rejected_by_node_negotiation", "schema_only_speed_capability_does_not_enable_execution"],
     "speed-file-arbitration-and-cancel": ["speed_cancel_and_stale_uni_token_do_not_pollute_next_test_or_file_transfer", "speed_and_file_activity_exclude_each_other_without_silent_pause", "speed_simultaneous_requests_have_one_grant_and_one_busy"],
 }
 

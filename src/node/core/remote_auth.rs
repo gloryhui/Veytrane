@@ -386,23 +386,17 @@ impl AuthContext {
         password: Option<SecretPassword>,
         capabilities: u64,
     ) -> Result<AuthorizedSession> {
-        if capabilities & crate::node::core::protocol::CAP_REMOTE_AUTH == 0 {
+        let required = crate::node::core::protocol::CAP_REMOTE_AUTH
+            | crate::node::core::protocol::CAP_TRUSTED_DEVICE_AUTH;
+        if capabilities & required != required {
             return Err(Error::Protocol(
-                "对端不支持远程访问认证，请升级客户端".into(),
+                "对端缺少远程认证或持续授权能力，请升级客户端".into(),
             ));
         }
         self.failures.lock().await.check(peer)?;
         let result = tokio::time::timeout(
             AUTH_TIMEOUT,
-            self.exchange(
-                connection,
-                initiator,
-                local,
-                peer,
-                verifier,
-                password,
-                capabilities,
-            ),
+            self.exchange(connection, initiator, local, peer, verifier, password),
         )
         .await;
         match result {
@@ -446,7 +440,6 @@ impl AuthContext {
         peer: NodeId,
         verifier: RemoteVerifier,
         password: Option<SecretPassword>,
-        capabilities: u64,
     ) -> Result<(AuthorizedSession, bool)> {
         let binding = ChannelBinding::from_connection(connection)?;
         let challenge = Challenge::new(&verifier)?;
@@ -550,30 +543,24 @@ impl AuthContext {
             inbound: AuthorizationGrant::password(accepted),
             outbound: AuthorizationGrant::password(confirmed),
         };
-        let control = if capabilities & crate::node::core::protocol::CAP_TRUSTED_DEVICE_AUTH != 0 {
-            let trusted = self.trusted.subscribe();
-            authorization.inbound.trusted_device = trusted.borrow().contains(&peer);
-            let mut control = TrustedControl {
-                send,
-                recv: Some(recv),
-                binding,
-                challenge,
-                remote,
-                local,
-                peer,
-                trusted,
-                sent_sequence: 0,
-                received_sequence: 0,
-            };
-            control
-                .send_grant(authorization.inbound.trusted_device)
-                .await?;
-            authorization.outbound.trusted_device = control.receive_grant(0).await?;
-            Some(control)
-        } else {
-            send.finish().map_err(|_| invalid())?;
-            None
+        let trusted = self.trusted.subscribe();
+        authorization.inbound.trusted_device = trusted.borrow().contains(&peer);
+        let mut control = TrustedControl {
+            send,
+            recv: Some(recv),
+            binding,
+            challenge,
+            remote,
+            local,
+            peer,
+            trusted,
+            sent_sequence: 0,
+            received_sequence: 0,
         };
+        control
+            .send_grant(authorization.inbound.trusted_device)
+            .await?;
+        authorization.outbound.trusted_device = control.receive_grant(0).await?;
         if authorization.inbound_authorized() || authorization.outbound_authorized() {
             Ok((
                 AuthorizedSession {
@@ -589,7 +576,7 @@ impl AuthContext {
 }
 pub struct AuthorizedSession {
     pub authorization: RemoteAuthorization,
-    pub control: Option<TrustedControl>,
+    pub control: TrustedControl,
 }
 
 pub struct TrustedControl {
@@ -922,7 +909,7 @@ mod tests {
                     b,
                     verifier.clone(),
                     prover_is_dialer.then(|| password.clone()),
-                    crate::node::core::protocol::LOCAL_CAPABILITIES
+                    crate::node::core::wire::capabilities(true, true, true)
                 ),
                 sa.authorize(
                     &s,
@@ -931,7 +918,7 @@ mod tests {
                     a,
                     verifier.clone(),
                     (!prover_is_dialer).then(|| password.clone()),
-                    crate::node::core::protocol::LOCAL_CAPABILITIES
+                    crate::node::core::wire::capabilities(true, true, true)
                 )
             );
             assert_eq!(
@@ -979,7 +966,7 @@ mod tests {
                 b,
                 va,
                 Some(pb),
-                crate::node::core::protocol::LOCAL_CAPABILITIES
+                crate::node::core::wire::capabilities(true, true, true)
             ),
             right.authorize(
                 &s,
@@ -988,7 +975,7 @@ mod tests {
                 a,
                 vb,
                 Some(pa),
-                crate::node::core::protocol::LOCAL_CAPABILITIES
+                crate::node::core::wire::capabilities(true, true, true)
             ),
         );
         assert_eq!(ca.unwrap(), RemoteAuthorization::BOTH);
@@ -1016,7 +1003,7 @@ mod tests {
                     b,
                     va.clone(),
                     Some(pb.clone()),
-                    crate::node::core::protocol::LOCAL_CAPABILITIES
+                    crate::node::core::wire::capabilities(true, true, true)
                 ),
                 right.authorize(
                     &s,
@@ -1025,7 +1012,7 @@ mod tests {
                     a,
                     vb.clone(),
                     Some(wrong.clone()),
-                    crate::node::core::protocol::LOCAL_CAPABILITIES
+                    crate::node::core::wire::capabilities(true, true, true)
                 ),
             );
             assert_eq!(
@@ -1071,7 +1058,7 @@ mod tests {
                 b,
                 verifier.clone(),
                 Some(password),
-                crate::node::core::protocol::LOCAL_CAPABILITIES
+                crate::node::core::wire::capabilities(true, true, true)
             ),
             context.authorize(
                 &s,
@@ -1080,7 +1067,7 @@ mod tests {
                 a,
                 verifier,
                 None,
-                crate::node::core::protocol::LOCAL_CAPABILITIES
+                crate::node::core::wire::capabilities(true, true, true)
             ),
         );
         assert!(ca.unwrap().outbound_authorized());
@@ -1109,7 +1096,7 @@ mod tests {
                     b,
                     verifier.clone(),
                     outgoing,
-                    crate::node::core::protocol::LOCAL_CAPABILITIES
+                    crate::node::core::wire::capabilities(true, true, true)
                 ),
                 sa.authorize(
                     &s,
@@ -1118,7 +1105,7 @@ mod tests {
                     a,
                     verifier.clone(),
                     None,
-                    crate::node::core::protocol::LOCAL_CAPABILITIES
+                    crate::node::core::wire::capabilities(true, true, true)
                 )
             );
             assert!(left.is_err());
@@ -1134,7 +1121,8 @@ mod tests {
                     b,
                     verifier,
                     None,
-                    crate::node::core::protocol::REQUIRED_CAPABILITIES
+                    crate::node::core::wire::capabilities(true, true, true)
+                        & !crate::node::core::protocol::CAP_REMOTE_AUTH
                 )
                 .await
                 .unwrap_err()
@@ -1156,9 +1144,9 @@ mod tests {
                     crate::node::core::protocol::write(
                         &mut send,
                         &crate::node::core::protocol::Frame {
-                            request_id: 0,
-                            message: crate::node::core::protocol::Message::TunnelOpen {
-                                target: "127.0.0.1:22".parse().unwrap(),
+                            request_id: 1,
+                            message: crate::node::core::protocol::Message::ResumeTask {
+                                task_id: crate::node::core::task_model::TaskId::generate(),
                             },
                         },
                     )
@@ -1199,7 +1187,7 @@ mod tests {
                     b,
                     verifier.clone(),
                     submit_password.then(|| password.clone()),
-                    crate::node::core::protocol::LOCAL_CAPABILITIES
+                    crate::node::core::wire::capabilities(true, true, true)
                 ),
                 attack
             );
@@ -1224,7 +1212,7 @@ mod tests {
                     b,
                     verifier,
                     None,
-                    crate::node::core::protocol::LOCAL_CAPABILITIES,
+                    crate::node::core::wire::capabilities(true, true, true),
                 )
                 .await
         });
@@ -1396,7 +1384,7 @@ mod tests {
         sa.failures.lock().await.failed(a);
         let verifier =
             RemoteVerifier::create(&SecretPassword::new("A9b8C7".into()).unwrap()).unwrap();
-        let caps = crate::node::core::protocol::LOCAL_CAPABILITIES;
+        let caps = crate::node::core::wire::capabilities(true, true, true);
         let (left, right) = tokio::join!(
             ca.authorize_session(&c, true, a, b, verifier.clone(), None, caps),
             sa.authorize_session(&s, false, b, a, verifier, None, caps)
@@ -1419,8 +1407,8 @@ mod tests {
         let mut lrx = ltx.subscribe();
         let rtx = AuthorizationPublisher::new(right.authorization);
         let mut rrx = rtx.subscribe();
-        let ltask = tokio::spawn(left.control.unwrap().run(ltx));
-        let rtask = tokio::spawn(right.control.unwrap().run(rtx));
+        let ltask = tokio::spawn(left.control.run(ltx));
+        let rtask = tokio::spawn(right.control.run(rtx));
         sa.set_trusted(&[]);
         wait_rights(&mut lrx, RemoteAuthorization::default()).await;
         wait_rights(&mut rrx, RemoteAuthorization::default()).await;
@@ -1438,7 +1426,7 @@ mod tests {
         sa.set_trusted(&[trust(a)]);
         let password = SecretPassword::new("A9b8C7".into()).unwrap();
         let verifier = RemoteVerifier::create(&password).unwrap();
-        let caps = crate::node::core::protocol::LOCAL_CAPABILITIES;
+        let caps = crate::node::core::wire::capabilities(true, true, true);
         let (left, right) = tokio::join!(
             ca.authorize_session(&c, true, a, b, verifier.clone(), Some(password), caps),
             sa.authorize_session(&s, false, b, a, verifier, None, caps)
@@ -1456,8 +1444,8 @@ mod tests {
         let mut lrx = ltx.subscribe();
         let rtx = AuthorizationPublisher::new(right.authorization);
         let mut rrx = rtx.subscribe();
-        let ltask = tokio::spawn(left.control.unwrap().run(ltx));
-        let rtask = tokio::spawn(right.control.unwrap().run(rtx));
+        let ltask = tokio::spawn(left.control.run(ltx));
+        let rtask = tokio::spawn(right.control.run(rtx));
         sa.set_trusted(&[]);
         let expected_left = RemoteAuthorization {
             inbound: AuthorizationGrant::default(),
@@ -1477,7 +1465,7 @@ mod tests {
         ltask.abort();
     }
     #[tokio::test]
-    async fn legacy_capability_requires_password_and_never_silently_trusts() {
+    async fn missing_trust_capability_is_rejected_even_with_a_valid_password() {
         let a = crate::identity::Identity::generate().node_id();
         let b = crate::identity::Identity::generate().node_id();
         let ca = AuthContext::default();
@@ -1485,7 +1473,7 @@ mod tests {
         sa.set_trusted(&[trust(a)]);
         let password = SecretPassword::new("A9b8C7".into()).unwrap();
         let verifier = RemoteVerifier::create(&password).unwrap();
-        let caps = crate::node::core::protocol::LOCAL_CAPABILITIES
+        let caps = crate::node::core::wire::capabilities(true, true, true)
             & !crate::node::core::protocol::CAP_TRUSTED_DEVICE_AUTH;
         for use_password in [false, true] {
             let (_ce, _se, c, s) = pair().await;
@@ -1501,17 +1489,7 @@ mod tests {
                 ),
                 sa.authorize_session(&s, false, b, a, verifier.clone(), None, caps)
             );
-            if !use_password {
-                assert!(left.is_err() && right.is_err());
-            } else {
-                let left = left.unwrap();
-                let right = right.unwrap();
-                assert!(left.control.is_none() && right.control.is_none());
-                assert_eq!(
-                    left.authorization.outbound,
-                    AuthorizationGrant::password(true)
-                );
-            }
+            assert!(left.is_err() && right.is_err());
         }
     }
     #[tokio::test]
@@ -1591,7 +1569,7 @@ mod tests {
         *sa.publish_gate.lock().unwrap() = Some((reached, released));
         let verifier =
             RemoteVerifier::create(&SecretPassword::new("A9b8C7".into()).unwrap()).unwrap();
-        let caps = crate::node::core::protocol::LOCAL_CAPABILITIES;
+        let caps = crate::node::core::wire::capabilities(true, true, true);
         let server_auth = tokio::spawn({
             let sa = sa.clone();
             let verifier = verifier.clone();
@@ -1614,7 +1592,7 @@ mod tests {
         let client = client_auth.await.unwrap().unwrap();
         let rights = AuthorizationPublisher::new(client.authorization);
         let mut changes = rights.subscribe();
-        let control = tokio::spawn(client.control.unwrap().run(rights));
+        let control = tokio::spawn(client.control.run(rights));
         wait_rights(&mut changes, RemoteAuthorization::default()).await;
         control.abort();
     }

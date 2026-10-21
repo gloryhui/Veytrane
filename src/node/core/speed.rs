@@ -62,7 +62,6 @@ impl SpeedSnapshot {
 #[derive(Clone)]
 pub(crate) struct SpeedPeer(Arc<Peer>);
 struct Peer {
-    unified: bool,
     connection: Connection,
     local: NodeId,
     remote: NodeId,
@@ -129,16 +128,14 @@ impl Drop for DataRecv {
 }
 
 impl SpeedPeer {
-    pub fn new_with_mode(
+    pub fn new(
         connection: Connection,
         local: NodeId,
         remote: NodeId,
         activity: Activity,
         changed: watch::Sender<u64>,
-        unified: bool,
     ) -> Self {
         Self(Arc::new(Peer {
-            unified,
             connection,
             local,
             remote,
@@ -369,7 +366,6 @@ impl SpeedPeer {
             crate::node::core::dispatch::open_bi(
                 &self.0.connection,
                 crate::node::core::wire::StreamKind::Speed,
-                self.0.unified,
             ),
         )
         .await

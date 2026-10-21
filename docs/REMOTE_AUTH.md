@@ -1,6 +1,6 @@
 # 短设备 ID 与远程访问认证（Issue #51）
 
-Trusted Device 扩展及最新授权来源/撤销语义见 [TRUSTED_DEVICES.md](TRUSTED_DEVICES.md)。
+本文保留 Issue #51 的认证设计与信令记录。当前节点统一为 P2PN v2，持续授权通道为必需能力；当前授权与强撤销语义以 [NODE_AUTHORIZATION.md](specs/NODE_AUTHORIZATION.md) 为准。旧桌面协议入口已删除。
 
 ## 身份与权限
 

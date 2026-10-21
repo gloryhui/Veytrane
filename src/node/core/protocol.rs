@@ -1,9 +1,6 @@
-//! Legacy desktop framing and shared task-message guards. No filesystem operations.
-//!
-//! The legacy ControlMessage enum and CLI wire protocol remain unchanged.
+//! File and speed payload frames carried by typed P2PN streams. No filesystem operations.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -15,7 +12,6 @@ use crate::protocol::manifest::{ChunkHash, FileManifest};
 
 use crate::node::core::task_model::TaskId;
 
-pub const VERSION: u16 = 1;
 pub const CAP_TASK_PROTOCOL: u64 = 1;
 pub const CAP_RELATIVE_ENTRIES: u64 = 2;
 pub const CAP_PAUSE_RESUME: u64 = 4;
@@ -29,20 +25,10 @@ pub const CAP_TRUSTED_DEVICE_AUTH: u64 = 1 << 9;
 pub const CAP_FILE_FLOW: u64 = 1 << 10;
 pub const CAP_AUTO_RESUME: u64 = 1 << 11;
 pub const CAP_INCREMENTAL_DIRECTORY: u64 = 1 << 12;
-pub const REQUIRED_CAPABILITIES: u64 =
-    15 | CAP_FILE_TRANSFER | CAP_DIRECTORY_TRANSFER | CAP_SPEED_EXECUTION;
-pub const LOCAL_CAPABILITIES: u64 = REQUIRED_CAPABILITIES
-    | CAP_TCP_TUNNEL
-    | CAP_REMOTE_AUTH
-    | CAP_TRUSTED_DEVICE_AUTH
-    | CAP_FILE_FLOW
-    | CAP_AUTO_RESUME
-    | CAP_INCREMENTAL_DIRECTORY;
 pub const MAX_FRAME_BYTES: u32 = 4 * 1024 * 1024;
 pub const MAX_CHUNKS: usize = 65_536;
 pub const MAX_TASKS_PER_PEER: usize = 128;
-pub const NEGOTIATION_TIMEOUT: Duration = Duration::from_secs(5);
-const MAGIC: &[u8; 5] = b"P2PD\x01";
+const MAGIC: &[u8; 5] = b"P2PF\x01";
 
 fn invalid(message: &str) -> Error {
     Error::Protocol(message.into())
@@ -65,7 +51,7 @@ impl Entry {
                 || manifest.total_len > (1u64 << 40)
                 || Some(manifest.file_name.as_str()) != relative_path.rsplit('/').next()
             {
-                return Err(invalid("桌面清单超限或文件名与相对路径不一致"));
+                return Err(invalid("文件清单超限或文件名与相对路径不一致"));
             }
         }
         Ok(())
@@ -96,14 +82,9 @@ pub enum ErrorCode {
     Interrupted,
 }
 
-/// Append variants only. Request ordering and task binding are checked by TaskProtocol.
+/// File/speed messages; request ordering and task binding are checked by TaskProtocol.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Message {
-    Hello {
-        version: u16,
-        capabilities: u64,
-    },
-    Ready,
     Offer {
         task_id: TaskId,
         group_id: Option<TaskId>,
@@ -148,18 +129,11 @@ pub enum Message {
         task_id: TaskId,
         index: u32,
     },
-    TunnelOpen {
-        target: std::net::SocketAddr,
-    },
-    TunnelReady,
-    TunnelError {
-        reason: String,
-    },
     /// Negotiated task-bound keepalive while a receiver waits for its byte budget.
     FlowWait {
         task_id: TaskId,
     },
-    /// Appended variants preserve all existing postcard discriminants.
+    /// Automatic transfers retain task binding and durable receipt semantics.
     AutomaticOffer {
         task_id: TaskId,
         group_id: Option<TaskId>,
@@ -234,7 +208,6 @@ impl Message {
     }
     fn task_id(&self) -> Option<&TaskId> {
         match self {
-            Self::Hello { .. } | Self::Ready | Self::TunnelReady | Self::TunnelOpen { .. } => None,
             Self::Speed(control) => Some(control.test_id()),
             Self::CompareFile { task_id, .. }
             | Self::ComparedFile { task_id, .. }
@@ -252,7 +225,6 @@ impl Message {
             | Self::Chunk { task_id, .. }
             | Self::ChunkAck { task_id, .. }
             | Self::FlowWait { task_id } => Some(task_id),
-            Self::TunnelError { .. } => None,
         }
     }
 
@@ -283,24 +255,14 @@ impl Message {
             } => Entry::File(manifest.clone()).validate(relative_path),
             Self::Speed(control) => control.validate(),
             Self::Chunk { data, .. } if data.len() > 1024 * 1024 => {
-                Err(invalid("桌面数据分片超限"))
+                Err(invalid("文件数据分片超限"))
             }
             Self::Resume { have, .. } if have.len() > MAX_CHUNKS.div_ceil(8) => {
-                Err(invalid("桌面恢复位图超限"))
+                Err(invalid("文件恢复位图超限"))
             }
             Self::Completed {
                 receipt_version, ..
             } if !matches!(*receipt_version, 1 | 2) => Err(invalid("不支持的完成回执版本")),
-            Self::TunnelOpen { target }
-                if target.port() == 0
-                    || target.ip().is_unspecified()
-                    || target.ip().is_multicast() =>
-            {
-                Err(invalid("隧道目标必须是具体 IP 和 1..65535 端口"))
-            }
-            Self::TunnelError { reason } if reason.len() > 2048 => {
-                Err(invalid("隧道错误信息超出长度上限"))
-            }
             _ => Ok(()),
         }
     }
@@ -318,21 +280,21 @@ impl Frame {
         let mut bytes = MAGIC.to_vec();
         bytes.extend(postcard::to_allocvec(self)?);
         if bytes.len() > MAX_FRAME_BYTES as usize {
-            return Err(invalid("桌面帧超限"));
+            return Err(invalid("文件帧超限"));
         }
         Ok(bytes)
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self> {
         if bytes.len() > MAX_FRAME_BYTES as usize {
-            return Err(invalid("桌面帧超限"));
+            return Err(invalid("文件帧超限"));
         }
         let payload = bytes
             .strip_prefix(MAGIC)
-            .ok_or_else(|| invalid("对端不支持桌面协议"))?;
+            .ok_or_else(|| invalid("对端不支持文件协议"))?;
         let (frame, trailing): (Self, _) = postcard::take_from_bytes(payload)?;
         if !trailing.is_empty() {
-            return Err(invalid("桌面帧含多余字节"));
+            return Err(invalid("文件帧含多余字节"));
         }
         frame.validate()?;
         Ok(frame)
@@ -342,7 +304,7 @@ impl Frame {
         if (self.message.task_id().is_some() && self.request_id == 0)
             || (self.message.task_id().is_none() && self.request_id != 0)
         {
-            return Err(invalid("桌面请求编号非法"));
+            return Err(invalid("文件请求编号非法"));
         }
         self.message.validate()
     }
@@ -351,76 +313,12 @@ impl Frame {
 pub async fn read<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Frame> {
     let bytes = read_raw_frame_limited(reader, MAX_FRAME_BYTES)
         .await?
-        .ok_or_else(|| invalid("桌面协议流已关闭"))?;
+        .ok_or_else(|| invalid("文件协议流已关闭"))?;
     Frame::decode(&bytes)
 }
 
 pub async fn write<W: AsyncWrite + Unpin>(writer: &mut W, frame: &Frame) -> Result<()> {
     write_raw_frame_limited(writer, &frame.encode()?, MAX_FRAME_BYTES).await
-}
-
-async fn exchange<S: AsyncWrite + Unpin, R: AsyncRead + Unpin>(
-    send: &mut S,
-    recv: &mut R,
-) -> Result<u64> {
-    write(
-        send,
-        &Frame {
-            request_id: 0,
-            message: Message::Hello {
-                version: VERSION,
-                capabilities: LOCAL_CAPABILITIES,
-            },
-        },
-    )
-    .await?;
-    let capabilities = match read(recv).await?.message {
-        Message::Hello {
-            version,
-            capabilities,
-        } if version == VERSION
-            && capabilities & REQUIRED_CAPABILITIES == REQUIRED_CAPABILITIES =>
-        {
-            capabilities
-        }
-        _ => return Err(invalid("桌面版本或能力不兼容")),
-    };
-    write(
-        send,
-        &Frame {
-            request_id: 0,
-            message: Message::Ready,
-        },
-    )
-    .await?;
-    if read(recv).await?.message != Message::Ready {
-        return Err(invalid("桌面能力确认顺序错误"));
-    }
-    Ok(capabilities)
-}
-
-/// Must only be called after the existing identity/channel-binding handshake.
-pub async fn negotiate(connection: &quinn::Connection, initiator: bool) -> Result<u64> {
-    let result = tokio::time::timeout(NEGOTIATION_TIMEOUT, async {
-        let (mut send, mut recv) = if initiator {
-            connection.open_bi().await
-        } else {
-            connection.accept_bi().await
-        }
-        .map_err(|_| invalid("桌面能力流不可用"))?;
-        let capabilities = exchange(&mut send, &mut recv).await?;
-        send.finish()
-            .map_err(|_| invalid("桌面能力确认流关闭失败"))?;
-        Ok::<u64, Error>(capabilities)
-    })
-    .await;
-    match result {
-        Ok(Ok(capabilities)) => Ok(capabilities),
-        _ => {
-            connection.close(3u32.into(), b"desktop protocol incompatible");
-            Err(invalid("桌面版本或能力不兼容，或协商超时"))
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -490,7 +388,7 @@ impl TaskProtocol {
             .map_or(Some(1), |binding| {
                 binding.sequence[actor.index()].checked_add(1)
             })
-            .ok_or_else(|| invalid("桌面请求序号已耗尽"))
+            .ok_or_else(|| invalid("文件请求序号已耗尽"))
     }
 
     /// Caller restores only task IDs already authorized in its durable store.
@@ -506,7 +404,7 @@ impl TaskProtocol {
             || self.tasks.contains_key(&task)
             || chunks > MAX_CHUNKS
         {
-            return Err(invalid("已授权桌面任务恢复冲突或超限"));
+            return Err(invalid("已授权文件任务恢复冲突或超限"));
         }
         self.tasks.insert(
             task,
@@ -545,7 +443,7 @@ impl TaskProtocol {
             );
         }
         if authenticated_peer != self.peer {
-            return Err(invalid("桌面任务对端身份不符"));
+            return Err(invalid("文件任务对端身份不符"));
         }
         frame.validate()?;
         let incremental = matches!(frame.message, Message::IncrementalOffer { .. });
@@ -585,7 +483,7 @@ impl TaskProtocol {
                 || self.tasks.len() >= MAX_TASKS_PER_PEER
                 || frame.request_id != 1
             {
-                return Err(invalid("重复、乱序或超限的桌面 Offer"));
+                return Err(invalid("重复、乱序或超限的文件 Offer"));
             }
             let (root, chunks) = entry.identity(relative_path);
             let mut sequence = [0; 2];
@@ -608,9 +506,9 @@ impl TaskProtocol {
             .tasks
             .get(task)
             .cloned()
-            .ok_or_else(|| invalid("未授权或未知的桌面任务"))?;
+            .ok_or_else(|| invalid("未授权或未知的文件任务"))?;
         if binding.sequence[actor.index()].checked_add(1) != Some(frame.request_id) {
-            return Err(invalid("重复或乱序的桌面任务请求"));
+            return Err(invalid("重复或乱序的文件任务请求"));
         }
         match &frame.message {
             Message::RequestChunk { index, .. } | Message::ChunkAck { index, .. } => {
@@ -621,7 +519,7 @@ impl TaskProtocol {
                         WireTaskState::Transferring | WireTaskState::Pausing
                     )
                 {
-                    return Err(invalid("桌面分片请求方向、索引或状态不符"));
+                    return Err(invalid("文件分片请求方向、索引或状态不符"));
                 }
             }
             Message::Chunk { index, .. } => {
@@ -632,7 +530,7 @@ impl TaskProtocol {
                         WireTaskState::Transferring | WireTaskState::Pausing
                     )
                 {
-                    return Err(invalid("桌面分片方向、索引或状态不符"));
+                    return Err(invalid("文件分片方向、索引或状态不符"));
                 }
             }
             Message::Resume {
@@ -727,7 +625,7 @@ impl TaskProtocol {
                 }
                 binding.state = WireTaskState::Failed;
             }
-            _ => return Err(invalid("桌面消息顺序错误")),
+            _ => return Err(invalid("文件消息顺序错误")),
         }
         binding.sequence[actor.index()] = frame.request_id;
         self.tasks.insert(task.clone(), binding);
@@ -907,7 +805,8 @@ mod tests {
     use crate::identity::Identity;
     use crate::protocol::manifest::{MIN_CHUNK_SIZE, root_hash_of};
     use crate::protocol::message::ControlMessage;
-    use tokio::io::{AsyncWriteExt, split};
+    use std::time::Duration;
+    use tokio::io::AsyncWriteExt;
 
     #[test]
     fn automatic_variants_are_appended_and_validate_the_same_bounded_bindings() {
@@ -922,14 +821,14 @@ mod tests {
             message: offer.clone().automatic(),
         };
         let encoded = automatic.encode().unwrap();
-        assert_eq!(encoded[MAGIC.len() + 1], 17);
+        assert_eq!(encoded[MAGIC.len() + 1], 12);
         assert_eq!(Frame::decode(&encoded).unwrap(), automatic);
         assert_eq!(automatic.message.manual(), Some(offer));
         let resume = Frame {
             request_id: 1,
             message: Message::AutomaticResumeTask { task_id: task() },
         };
-        assert_eq!(resume.encode().unwrap()[MAGIC.len() + 1], 18);
+        assert_eq!(resume.encode().unwrap()[MAGIC.len() + 1], 13);
         let invalid = Frame {
             request_id: 1,
             message: Message::AutomaticOffer {
@@ -1103,58 +1002,18 @@ mod tests {
     }
 
     #[test]
-    fn golden_desktop_frames_and_legacy_discriminants_are_stable() {
-        let hello = Frame {
-            request_id: 0,
-            message: Message::Hello {
-                version: VERSION,
-                capabilities: REQUIRED_CAPABILITIES,
-            },
-        };
-        assert_eq!(hello.encode().unwrap(), b"P2PD\x01\x00\x00\x01\x7f");
-        // The old T007/T008 Hello bytes remain stable; execution negotiation
-        // explicitly requires the new speed bit rather than assuming schema is business.
-        assert_eq!(
-            Frame {
-                request_id: 0,
-                message: Message::Hello {
-                    version: 1,
-                    capabilities: 63
-                }
-            }
-            .encode()
-            .unwrap(),
-            b"P2PD\x01\x00\x00\x01\x3f"
-        );
-        assert_eq!(
-            Frame {
-                request_id: 0,
-                message: Message::Hello {
-                    version: 1,
-                    capabilities: 15
-                }
-            }
-            .encode()
-            .unwrap(),
-            b"P2PD\x01\x00\x00\x01\x0f"
-        );
-        assert_eq!(
-            Frame {
-                request_id: 0,
-                message: Message::Ready
-            }
-            .encode()
-            .unwrap(),
-            b"P2PD\x01\x00\x01"
-        );
+    fn golden_file_frames_reject_other_protocols() {
         let resume = Frame {
             request_id: 7,
             message: Message::ResumeTask { task_id: task() },
         };
-        let mut expected = b"P2PD\x01\x07\x06\x20".to_vec();
+        let mut expected = b"P2PF\x01\x07\x04\x20".to_vec();
         expected.extend_from_slice(task().as_str().as_bytes());
         assert_eq!(resume.encode().unwrap(), expected);
         assert_eq!(Frame::decode(&expected).unwrap(), resume);
+        let mut old = expected.clone();
+        old[3] = b'D';
+        assert!(Frame::decode(&old).is_err());
         assert_eq!(ControlMessage::Ready.encode().unwrap(), [3]);
         assert_eq!(ControlMessage::Bye.encode().unwrap(), [15]);
         assert_eq!(ControlMessage::SpeedTestReady.encode().unwrap(), [17]);
@@ -1167,7 +1026,7 @@ mod tests {
             .unwrap(),
             [18, 1, 2]
         );
-        assert!(ControlMessage::decode(&hello.encode().unwrap()).is_err());
+        assert!(ControlMessage::decode(&resume.encode().unwrap()).is_err());
         assert!(Frame::decode(&ControlMessage::Ready.encode().unwrap()).is_err());
     }
 
@@ -1257,71 +1116,6 @@ mod tests {
             .unwrap()
             .unwrap_err();
         assert!(matches!(error, Error::Protocol(_)));
-    }
-
-    #[tokio::test]
-    async fn capability_exchange_requires_both_hello_and_ready() {
-        let (a, b) = tokio::io::duplex(128);
-        let (mut ar, mut aw) = split(a);
-        let (mut br, mut bw) = split(b);
-        let (a, b) = tokio::join!(exchange(&mut aw, &mut ar), exchange(&mut bw, &mut br));
-        assert_eq!(a.unwrap(), LOCAL_CAPABILITIES);
-        assert_eq!(b.unwrap(), LOCAL_CAPABILITIES);
-    }
-
-    #[tokio::test]
-    async fn unsupported_version_missing_capability_and_old_cli_are_explicit_errors() {
-        for response in [
-            Frame {
-                request_id: 0,
-                message: Message::Hello {
-                    version: VERSION,
-                    capabilities: REQUIRED_CAPABILITIES & !CAP_DIRECTORY_TRANSFER,
-                },
-            }
-            .encode()
-            .unwrap(),
-            Frame {
-                request_id: 0,
-                message: Message::Hello {
-                    version: VERSION,
-                    capabilities: REQUIRED_CAPABILITIES & !CAP_FILE_TRANSFER,
-                },
-            }
-            .encode()
-            .unwrap(),
-            Frame {
-                request_id: 0,
-                message: Message::Hello {
-                    version: 99,
-                    capabilities: REQUIRED_CAPABILITIES,
-                },
-            }
-            .encode()
-            .unwrap(),
-            Frame {
-                request_id: 0,
-                message: Message::Hello {
-                    version: VERSION,
-                    capabilities: CAP_TASK_PROTOCOL,
-                },
-            }
-            .encode()
-            .unwrap(),
-            ControlMessage::Ready.encode().unwrap(),
-        ] {
-            let (a, b) = tokio::io::duplex(128);
-            let (mut ar, mut aw) = split(a);
-            let (mut br, mut bw) = split(b);
-            let remote = async {
-                read(&mut br).await.unwrap();
-                write_raw_frame_limited(&mut bw, &response, MAX_FRAME_BYTES)
-                    .await
-                    .unwrap();
-            };
-            let (result, ()) = tokio::join!(exchange(&mut aw, &mut ar), remote);
-            assert!(matches!(result, Err(Error::Protocol(_))));
-        }
     }
 
     #[test]
@@ -1626,9 +1420,7 @@ mod tests {
                 index: 0,
             },
         };
-        let mut golden = b"P2PD
- "
-        .to_vec();
+        let mut golden = b"P2PF\x01\x02\x08\x20".to_vec();
         golden.extend_from_slice(task().as_str().as_bytes());
         golden.push(0);
         assert_eq!(request.encode().unwrap(), golden);
@@ -1704,105 +1496,6 @@ mod tests {
                     index: 0,
                     data: vec![0; 1024 * 1024 + 1]
                 }
-            }
-            .encode()
-            .is_err()
-        );
-    }
-    #[tokio::test]
-    async fn schema_only_speed_capability_cannot_negotiate_the_execution_business() {
-        for old in [15, 31, 63] {
-            let (new, mut old_io) = tokio::io::duplex(4096);
-            let (mut recv, mut send) = tokio::io::split(new);
-            let negotiate = exchange(&mut send, &mut recv);
-            let peer = async {
-                let hello = read(&mut old_io).await.unwrap();
-                assert_eq!(
-                    hello.message,
-                    Message::Hello {
-                        version: 1,
-                        capabilities: LOCAL_CAPABILITIES
-                    }
-                );
-                write(
-                    &mut old_io,
-                    &Frame {
-                        request_id: 0,
-                        message: Message::Hello {
-                            version: 1,
-                            capabilities: old,
-                        },
-                    },
-                )
-                .await
-                .unwrap();
-            };
-            let (result, ()) = tokio::join!(negotiate, peer);
-            assert!(result.unwrap_err().to_string().contains("能力不兼容"));
-        }
-    }
-
-    #[tokio::test]
-    async fn required_only_peer_remains_compatible_without_tcp_tunnel_capability() {
-        let (new, mut old_io) = tokio::io::duplex(4096);
-        let (mut recv, mut send) = tokio::io::split(new);
-        let exchange = exchange(&mut send, &mut recv);
-        let old_peer = async {
-            let hello = read(&mut old_io).await.unwrap();
-            assert_eq!(
-                hello.message,
-                Message::Hello {
-                    version: VERSION,
-                    capabilities: LOCAL_CAPABILITIES,
-                }
-            );
-            write(
-                &mut old_io,
-                &Frame {
-                    request_id: 0,
-                    message: Message::Hello {
-                        version: VERSION,
-                        capabilities: REQUIRED_CAPABILITIES,
-                    },
-                },
-            )
-            .await
-            .unwrap();
-            assert_eq!(read(&mut old_io).await.unwrap().message, Message::Ready);
-            write(
-                &mut old_io,
-                &Frame {
-                    request_id: 0,
-                    message: Message::Ready,
-                },
-            )
-            .await
-            .unwrap();
-        };
-        let (capabilities, ()) = tokio::join!(exchange, old_peer);
-        assert_eq!(capabilities.unwrap(), REQUIRED_CAPABILITIES);
-    }
-
-    #[test]
-    fn tunnel_frames_are_append_only_and_validate_literal_targets() {
-        let open = Frame {
-            request_id: 0,
-            message: Message::TunnelOpen {
-                target: "192.168.1.10:22".parse().unwrap(),
-            },
-        };
-        assert_eq!(Frame::decode(&open.encode().unwrap()).unwrap(), open);
-        let ready = Frame {
-            request_id: 0,
-            message: Message::TunnelReady,
-        };
-        assert_eq!(Frame::decode(&ready.encode().unwrap()).unwrap(), ready);
-        assert!(
-            Frame {
-                request_id: 0,
-                message: Message::TunnelOpen {
-                    target: "0.0.0.0:22".parse().unwrap(),
-                },
             }
             .encode()
             .is_err()

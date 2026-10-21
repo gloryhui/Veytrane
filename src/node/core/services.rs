@@ -1,4 +1,4 @@
-//! Authorized service discovery and ID-based TCP streams for node-v1.
+//! Authorized service discovery and ID-based TCP streams for node-v2.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -185,7 +185,7 @@ async fn prepare(
 async fn request(connection: &Connection, message: NodeMessage) -> Result<(BiStream, NodeMessage)> {
     tokio::time::timeout(RPC_TIMEOUT, async {
         let id = rand::random::<u64>().max(1);
-        let mut stream = dispatch::open_bi(connection, StreamKind::Service, true).await?;
+        let mut stream = dispatch::open_bi(connection, StreamKind::Service).await?;
         wire::write(&mut stream.send, &NodeFrame::new(id, message)).await?;
         let response = wire::read(&mut stream.recv).await?;
         if response.request_id != id {
@@ -223,3 +223,6 @@ pub async fn open_tcp(connection: &Connection, service_id: &str) -> Result<BiStr
         _ => Err(Error::Protocol("服务开流响应类型无效".into())),
     }
 }
+
+#[cfg(test)]
+mod tunnel_tests;

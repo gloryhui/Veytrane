@@ -32,7 +32,6 @@ pub mod task_store;
 pub(crate) mod transfer;
 pub(crate) mod transfer_files;
 pub mod trusted_devices;
-pub(crate) mod tunnel;
 pub mod wire;
 
 #[cfg(test)]

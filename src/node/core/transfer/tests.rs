@@ -58,7 +58,13 @@ impl Pair {
                 .unwrap();
             assert_eq!(outcome.peer_node_id, ia);
             send.finish().unwrap();
-            protocol::negotiate(&connection, false).await.unwrap();
+            crate::node::core::wire::negotiate(
+                &connection,
+                false,
+                crate::node::core::wire::capabilities(true, true, true),
+            )
+            .await
+            .unwrap();
             connection
         });
         let ca = crate::transport::quic::connect(&ea, eb.local_addr().unwrap(), "p2pfile")
@@ -71,7 +77,13 @@ impl Pair {
             .unwrap();
         assert_eq!(outcome.peer_node_id, ib);
         send.finish().unwrap();
-        protocol::negotiate(&ca, true).await.unwrap();
+        crate::node::core::wire::negotiate(
+            &ca,
+            true,
+            crate::node::core::wire::capabilities(true, true, true),
+        )
+        .await
+        .unwrap();
         let cb = remote.await.unwrap();
         let mut tasks = JoinSet::new();
         let service = a.clone();
@@ -143,7 +155,13 @@ impl Pair {
                 peer
             );
             send.finish().unwrap();
-            protocol::negotiate(&connection, false).await.unwrap();
+            crate::node::core::wire::negotiate(
+                &connection,
+                false,
+                crate::node::core::wire::capabilities(true, true, true),
+            )
+            .await
+            .unwrap();
             connection
         });
         self.ca =
@@ -160,7 +178,13 @@ impl Pair {
             self.ib
         );
         send.finish().unwrap();
-        protocol::negotiate(&self.ca, true).await.unwrap();
+        crate::node::core::wire::negotiate(
+            &self.ca,
+            true,
+            crate::node::core::wire::capabilities(true, true, true),
+        )
+        .await
+        .unwrap();
         self.cb = accept.await.unwrap();
         for (service, connection, peer) in [
             (self.a.clone(), self.ca.clone(), self.ib),
@@ -958,7 +982,7 @@ async fn file_limits_pause_during_budget_wait_is_not_consumed_by_the_limiter() {
     pair.shutdown().await;
 }
 #[tokio::test]
-async fn file_limits_reject_legacy_peer_without_silent_protocol_change() {
+async fn file_limits_reject_peer_without_flow_capability() {
     let pair = Pair::new().await;
     pair.a.set_peer_flow_support(pair.ib, false);
     pair.a
@@ -1179,7 +1203,13 @@ fn process_worker_entry() {
                     peer
                 );
                 send.finish().unwrap();
-                protocol::negotiate(&connection, false).await.unwrap();
+                crate::node::core::wire::negotiate(
+                    &connection,
+                    false,
+                    crate::node::core::wire::capabilities(true, true, true),
+                )
+                .await
+                .unwrap();
                 connection
             } else {
                 let addr = fs::read_to_string(root.join("receiver-address"))
@@ -1199,7 +1229,13 @@ fn process_worker_entry() {
                     peer
                 );
                 send.finish().unwrap();
-                protocol::negotiate(&connection, true).await.unwrap();
+                crate::node::core::wire::negotiate(
+                    &connection,
+                    true,
+                    crate::node::core::wire::capabilities(true, true, true),
+                )
+                .await
+                .unwrap();
                 connection
             };
             let mut helpers = JoinSet::new();
@@ -1891,7 +1927,7 @@ async fn incremental_lost_receipt_replays_same_task_without_backup_or_payload() 
     pair.shutdown().await;
 }
 #[tokio::test]
-async fn incremental_legacy_peer_preview_falls_back_to_original_full_send() {
+async fn incremental_preview_without_capability_uses_explicit_full_send() {
     let pair = Pair::new().await;
     pair.a.set_peer_incremental_support(pair.ib, false);
     pair.b.set_peer_incremental_support(pair.ia, false);

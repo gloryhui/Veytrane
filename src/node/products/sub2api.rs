@@ -79,7 +79,7 @@ impl ClientProfile {
             name: "Sub2API".into(),
             peer_node_id: peer.to_hex(),
             listen: LISTEN.parse().unwrap(),
-            // UnifiedV1 uses service_ids, never a client-selected remote target.
+            // The node protocol uses service_ids, never a client-selected remote target.
             target: "127.0.0.1:1".parse().unwrap(),
             enabled: true,
             auto_start: true,
@@ -500,7 +500,7 @@ mod tests {
             }
         });
         let local = || {
-            let mut c = NodeSessionConfig::unified(&signal);
+            let mut c = NodeSessionConfig::new(&signal);
             c.enable_files = false;
             c.enable_speed = false;
             c.remote_auth =
@@ -594,7 +594,7 @@ mod tests {
                 assert!(services::open_tcp(&connection, forbidden).await.is_err());
             }
             for kind in [StreamKind::File, StreamKind::Speed] {
-                let mut stream = dispatch::open_bi(&connection, kind, true).await.unwrap();
+                let mut stream = dispatch::open_bi(&connection, kind).await.unwrap();
                 stream.send.finish().unwrap();
                 let result =
                     tokio::time::timeout(Duration::from_secs(3), stream.recv.read(&mut [0; 1]))

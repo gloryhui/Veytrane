@@ -40,7 +40,7 @@ node/adapters / node/products → 以上服务与契约
 
 `core/settings.rs` 定义当前 `node.json`。`core/config.rs` 仍有共享规则校验、测速类型和独立核心配置读写调用；已移除旧 schema 1–10 升级、历史目录发现、通知/后台偏好及无生产调用的偏好写入接口。旧桌面导入适配器与对应 CLI / UI 已删除。
 
-`core/process_tests.rs` 保留原先位于旧桌面目录的真实进程业务回归，直接依赖核心，随 node 特性测试执行。
+`core/process_tests.rs` 保留原先位于旧桌面目录的真实进程业务回归，直接依赖核心，随 node 特性测试执行，全部使用 P2PN v2 协商及统一分发器。
 
 `core/session.rs` 与 `core/transfer.rs` 的大型测试模块分别位于同名子目录的 `tests.rs`，仍然是原模块的子测试，可访问必要私有状态。进程测试使用 `module_path!()` 构造子进程入口，避免目录重组后悄悄执行零个测试。
 
@@ -88,3 +88,5 @@ python3 scripts/node-host-tests.py
 边界脚本检查显式 crate 路径，覆盖测试与当前主机未激活的条件分支，已接入现有 GPUI CI；它不替代 Rust 名称解析或运行验收。跨层导入采用规范路径，不绕过公共层级重导出来隐藏依赖。桌面核心中的会话与文件执行仍是较大的状态机；进一步拆业务算法需连同并发、事务及协议负例独立验证，不能只按行数切碎。
 
 本次清理与验证见 [遗留代码清理记录](task-reports/LEGACY_CLEANUP.md)；首次分层证据见 [分层整理验证记录](task-reports/REPOSITORY_REORGANIZATION.md)。
+
+当前节点只有 `wire.rs` 协商和 `dispatch.rs` 分发入口。`protocol.rs` 是 P2PF 文件/测速载荷；`services.rs` 负责服务 ID 开流，字节搬运复用 `src/tunnel/mod.rs`。旧 `core/tunnel.rs`、PeerWireMode 与双路入站循环已删除。

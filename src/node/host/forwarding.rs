@@ -23,8 +23,7 @@ struct Route {
     control: NodeControl,
     peer: NodeId,
     connection: watch::Receiver<Option<quinn::Connection>>,
-    target: SocketAddr,
-    service: Option<String>,
+    service: String,
 }
 struct Running {
     listen: SocketAddr,
@@ -77,24 +76,15 @@ impl ForwardManager {
                 .connection_updates(peer)
                 .await
                 .map_err(Error::Protocol)?;
-            let service = if settings.peer_modes.get(&rule.peer_node_id)
-                == Some(&crate::node::core::wire::PeerWireMode::LegacyDesktopV1)
-            {
-                None
-            } else {
-                Some(
-                    settings
-                        .service_ids
-                        .get(&rule.id)
-                        .ok_or_else(|| Error::Protocol("缺少服务ID".into()))?
-                        .clone(),
-                )
-            };
+            let service = settings
+                .service_ids
+                .get(&rule.id)
+                .ok_or_else(|| Error::Protocol("转发缺少服务 ID".into()))?
+                .clone();
             let route = Route {
                 control: control.clone(),
                 peer,
                 connection,
-                target: rule.target,
                 service,
             };
             if self
@@ -227,10 +217,6 @@ async fn open(tcp: tokio::net::TcpStream, mut route: Route) -> Result<()> {
     })
     .await
     .map_err(|_| Error::Transport("等待对端认证超时，请先连接设备".into()))??;
-    if let Some(service) = route.service {
-        let stream = crate::node::core::services::open_tcp(&connection, &service).await?;
-        crate::tunnel::bridge_tcp(tcp, stream.send, stream.recv).await
-    } else {
-        crate::node::core::tunnel::open_tunnel(tcp, &connection, route.target).await
-    }
+    let stream = crate::node::core::services::open_tcp(&connection, &route.service).await?;
+    crate::tunnel::bridge_tcp(tcp, stream.send, stream.recv).await
 }

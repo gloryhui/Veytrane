@@ -36,6 +36,7 @@ fn id(v: &Value) -> TaskId {
     TaskId::parse(str_field(v, "id")).unwrap()
 }
 fn start(
+    root: &Path,
     identity: Identity,
     draft: &SettingsDraft,
     service: TransferService,
@@ -58,6 +59,10 @@ fn start(
     // explicitly hold the test peer password and prove it on every new transport.
     conf.test_outgoing_password =
         Some(super::remote_auth::SecretPassword::new("Test9Pass".into()).unwrap());
+    conf.resources = fs::read(root.join("resources.json"))
+        .ok()
+        .map(|bytes| serde_json::from_slice(&bytes).unwrap())
+        .unwrap_or_default();
     conf.transfer = Some(service);
     session::spawn(identity, conf).unwrap()
 }
@@ -73,7 +78,7 @@ fn actor(root: PathBuf) {
     let (store, _) = TaskStore::open(&root.join("state/tasks.json")).unwrap();
     let service = TransferService::new(store, draft.receive_directory.clone().unwrap());
     service.set_send_limit(draft.send_concurrency).unwrap();
-    let mut network = saved.map(|_| start(identity.clone(), &draft, service.clone()));
+    let mut network = saved.map(|_| start(&root, identity.clone(), &draft, service.clone()));
     let mut online = false;
     let mut peers = HashMap::<NodeId, (u64, String)>::new();
     let mut diagnostics = Vec::<String>::new();
@@ -146,7 +151,30 @@ fn actor(root: PathBuf) {
                     .save_atomic(&root.join("state/config.json"))
                     .map_err(|e| e.to_string())?;
                 assert!(network.is_none());
-                network = Some(start(identity.clone(), &draft, service.clone()));
+                network = Some(start(&root, identity.clone(), &draft, service.clone()));
+                Ok(json!(true))
+            }
+            "grant" => {
+                let handle = &network.as_ref().unwrap().0;
+                let mut policy = handle.resource_policy();
+                let id = peer(&v).to_hex();
+                policy.peers.retain(|p| p.node_id != id);
+                policy.peers.push(super::authorization::PeerResources {
+                    node_id: id,
+                    files: true,
+                    speed: true,
+                    disabled: false,
+                });
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(handle.apply_resource_policy(policy.clone()))?;
+                fs::write(
+                    root.join("resources.json"),
+                    serde_json::to_vec(&policy).unwrap(),
+                )
+                .unwrap();
                 Ok(json!(true))
             }
             "connect" => network
@@ -331,6 +359,9 @@ impl Actor {
     fn configure(&mut self, server: SocketAddr) {
         self.call(json!({"op":"configure","signal":server.to_string()}));
         self.wait("signal registration", |s| s["signal_online"] == true);
+    }
+    fn grant(&mut self, node: &str) {
+        self.call(json!({"op":"grant", "peer": node}));
     }
     fn connect(&mut self, node: &str) {
         self.call(json!({"op":"connect","peer":node}));
@@ -536,6 +567,10 @@ mod tests {
         for actor in [&mut a, &mut b, &mut c] {
             actor.configure(addr);
         }
+        a.grant(&bid);
+        a.grant(&cid);
+        b.grant(&aid);
+        c.grant(&aid);
         b.connect(&aid);
         c.connect(&aid);
         a.wait("two passive peers", |s| {
@@ -608,6 +643,10 @@ mod tests {
         a.wait("restored config", |s| s["signal_online"] == true);
         assert_eq!(a.snapshot()["tasks"], before);
         assert_eq!(a.snapshot()["pending"], 0);
+        a.grant(&bid);
+        a.grant(&cid);
+        b.grant(&aid);
+        c.grant(&aid);
         b.connect(&aid);
         c.connect(&aid);
         a.wait("fresh passive connections after restart", |s| {
@@ -655,6 +694,8 @@ mod tests {
         b.configure(server.addr);
         let aid = a.node();
         let bid = b.node();
+        a.grant(&bid);
+        b.grant(&aid);
         a.connect(&bid);
         for mode in ["sender", "receiver", "simultaneous"] {
             let (source, bytes) = large(&f.0, &format!("{mode}.bin"));
@@ -786,6 +827,8 @@ mod tests {
         b.configure(server.addr);
         let aid = a.node();
         let bid = b.node();
+        a.grant(&bid);
+        b.grant(&aid);
         a.connect(&bid);
         let source = f.0.join("permission-real.bin");
         let bytes = vec![84; 1024 * 1024];
@@ -834,6 +877,8 @@ mod tests {
             b.configure(server.addr);
             let aid = a.node();
             let bid = b.node();
+            a.grant(&bid);
+            b.grant(&aid);
             a.connect(&bid);
             let (source, bytes) = large(&f.0, "kill.bin");
             b.call(json!({"op":"gate","kind":"checkpoint"}));
@@ -864,6 +909,8 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(150));
             assert!(!b.root.join("receive/kill.bin").exists());
+            a.grant(&bid);
+            b.grant(&aid);
             a.connect(&bid);
             b.wait("fresh authenticated survivor connection", |s| {
                 s["peers"][&aid] == "Connected"

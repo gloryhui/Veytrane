@@ -44,10 +44,6 @@ type TestGate = Arc<
 
 #[derive(Clone)]
 pub(crate) struct TransferService {
-    unified_connections: Arc<Mutex<HashSet<usize>>>,
-    resource_scopes: Arc<
-        Mutex<HashMap<usize, watch::Receiver<crate::node::core::authorization::ResourcePolicy>>>,
-    >,
     store: Arc<Mutex<TaskStore>>,
     receive_root: Arc<Mutex<PathBuf>>,
     active: Arc<Mutex<HashMap<TaskId, Active>>>,
@@ -179,25 +175,6 @@ async fn blocking<T: Send + 'static>(
         .map_err(|_| disk::failure("文件后台任务中断"))?
 }
 
-pub(crate) struct TransportModeGuard {
-    service: TransferService,
-    transport: usize,
-}
-impl Drop for TransportModeGuard {
-    fn drop(&mut self) {
-        self.service
-            .unified_connections
-            .lock()
-            .unwrap()
-            .remove(&self.transport);
-        self.service
-            .resource_scopes
-            .lock()
-            .unwrap()
-            .remove(&self.transport);
-    }
-}
-
 pub(crate) struct FileInlets {
     pub files: tokio::sync::mpsc::Receiver<crate::node::core::dispatch::BiStream>,
     pub speed: tokio::sync::mpsc::Receiver<crate::node::core::dispatch::BiStream>,
@@ -222,18 +199,11 @@ impl FileInlets {
 }
 async fn next_incoming(
     connection: &Connection,
-    incoming: &mut Option<FileInlets>,
+    inlets: &mut FileInlets,
 ) -> Option<(
-    Option<crate::node::core::wire::StreamKind>,
+    crate::node::core::wire::StreamKind,
     crate::node::core::dispatch::BiStream,
 )> {
-    let Some(inlets) = incoming else {
-        return connection
-            .accept_bi()
-            .await
-            .ok()
-            .map(|(send, recv)| (None, crate::node::core::dispatch::BiStream { send, recv }));
-    };
     loop {
         if !inlets.files_open && !inlets.speed_open {
             return None;
@@ -241,11 +211,11 @@ async fn next_incoming(
         tokio::select! {
             _ = connection.closed() => return None,
             stream = inlets.files.recv(), if inlets.files_open => match stream {
-                Some(stream) => return Some((Some(crate::node::core::wire::StreamKind::File), stream)),
+                Some(stream) => return Some((crate::node::core::wire::StreamKind::File, stream)),
                 None => inlets.files_open = false,
             },
             stream = inlets.speed.recv(), if inlets.speed_open => match stream {
-                Some(stream) => return Some((Some(crate::node::core::wire::StreamKind::Speed), stream)),
+                Some(stream) => return Some((crate::node::core::wire::StreamKind::Speed, stream)),
                 None => inlets.speed_open = false,
             }
         }
@@ -253,40 +223,10 @@ async fn next_incoming(
 }
 
 impl TransferService {
-    pub(crate) fn set_unified_connection(
-        &self,
-        connection: &Connection,
-        unified: bool,
-        scope: Option<watch::Receiver<crate::node::core::authorization::ResourcePolicy>>,
-    ) -> TransportModeGuard {
-        let mut modes = self.unified_connections.lock().unwrap();
-        if unified {
-            modes.insert(connection.stable_id());
-        } else {
-            modes.remove(&connection.stable_id());
-        }
-        let mut scopes = self.resource_scopes.lock().unwrap();
-        if let Some(scope) = scope {
-            scopes.insert(connection.stable_id(), scope);
-        } else {
-            scopes.remove(&connection.stable_id());
-        }
-        TransportModeGuard {
-            service: self.clone(),
-            transport: connection.stable_id(),
-        }
-    }
-    fn is_unified(&self, connection: &Connection) -> bool {
-        self.unified_connections
-            .lock()
-            .unwrap()
-            .contains(&connection.stable_id())
-    }
     async fn open_file_stream(&self, connection: &Connection) -> Result<(SendStream, RecvStream)> {
         let stream = crate::node::core::dispatch::open_bi(
             connection,
             crate::node::core::wire::StreamKind::File,
-            self.is_unified(connection),
         )
         .await?;
         Ok((stream.send, stream.recv))
@@ -317,8 +257,6 @@ impl TransferService {
     pub fn new(store: TaskStore, receive_root: PathBuf) -> Self {
         let (changed, _) = watch::channel(0);
         Self {
-            unified_connections: Default::default(),
-            resource_scopes: Default::default(),
             store: Arc::new(Mutex::new(store)),
             receive_root: Arc::new(Mutex::new(receive_root)),
             active: Arc::new(Mutex::new(HashMap::new())),
@@ -2246,40 +2184,42 @@ impl TransferService {
             .collect()
     }
     #[cfg(test)]
+    async fn test_inlets(
+        &self,
+        connection: &Connection,
+        peer: NodeId,
+    ) -> (crate::node::core::dispatch::Dispatcher, FileInlets) {
+        let (_, resources) = watch::channel(crate::node::core::authorization::ResourcePolicy {
+            peers: vec![crate::node::core::authorization::PeerResources {
+                node_id: peer.to_hex(),
+                files: true,
+                speed: true,
+                disabled: false,
+            }],
+        });
+        let (dispatcher, incoming) = crate::node::core::dispatch::Dispatcher::start(
+            connection.clone(),
+            crate::node::core::wire::capabilities(true, true, false),
+        );
+        (
+            dispatcher,
+            FileInlets::new(incoming.files, incoming.speed, resources),
+        )
+    }
+    #[cfg(test)]
     pub async fn serve_peer_with_speed(
         &self,
         connection: Connection,
         peer: NodeId,
         local: NodeId,
     ) -> Result<()> {
-        let (_, allowed_forward_targets) = tokio::sync::watch::channel(Vec::new());
-        self.serve_peer_with_speed_and_targets(
+        let (_dispatcher, inlets) = self.test_inlets(&connection, peer).await;
+        self.serve_dispatched(
             connection,
             peer,
             local,
-            crate::node::core::remote_auth::RemoteAuthorization::BOTH,
-            allowed_forward_targets,
-        )
-        .await
-    }
-
-    pub async fn serve_peer_with_speed_and_targets(
-        &self,
-        connection: Connection,
-        peer: NodeId,
-        local: NodeId,
-        authorization: impl Into<crate::node::core::remote_auth::LiveAuthorization>,
-        allowed_forward_targets: watch::Receiver<
-            Vec<crate::node::core::config::AllowedForwardTarget>,
-        >,
-    ) -> Result<()> {
-        self.serve_peer_transport(
-            connection,
-            peer,
-            local,
-            authorization.into(),
-            allowed_forward_targets,
-            None,
+            crate::node::core::remote_auth::RemoteAuthorization::BOTH.into(),
+            inlets,
         )
         .await
     }
@@ -2289,44 +2229,17 @@ impl TransferService {
         peer: NodeId,
         local: NodeId,
         authorization: crate::node::core::remote_auth::LiveAuthorization,
-        allowed_forward_targets: watch::Receiver<
-            Vec<crate::node::core::config::AllowedForwardTarget>,
-        >,
         incoming: FileInlets,
     ) -> Result<()> {
-        self.serve_peer_transport(
-            connection,
-            peer,
-            local,
-            authorization,
-            allowed_forward_targets,
-            Some(incoming),
-        )
-        .await
-    }
-    async fn serve_peer_transport(
-        &self,
-        connection: Connection,
-        peer: NodeId,
-        local: NodeId,
-        authorization: crate::node::core::remote_auth::LiveAuthorization,
-        allowed_forward_targets: watch::Receiver<
-            Vec<crate::node::core::config::AllowedForwardTarget>,
-        >,
-        incoming: Option<FileInlets>,
-    ) -> Result<()> {
-        let speed = crate::node::core::speed::SpeedPeer::new_with_mode(
+        let speed = crate::node::core::speed::SpeedPeer::new(
             connection.clone(),
             local,
             peer,
             self.activity.clone(),
             self.changed.clone(),
-            self.is_unified(&connection),
         );
         self.speed_peers.lock().unwrap().insert(peer, speed.clone());
         struct RemovePeer {
-            modes: Arc<Mutex<HashSet<usize>>>,
-            transport: usize,
             map: Arc<Mutex<HashMap<NodeId, crate::node::core::speed::SpeedPeer>>>,
             peer: NodeId,
             speed: crate::node::core::speed::SpeedPeer,
@@ -2334,7 +2247,6 @@ impl TransferService {
         impl Drop for RemovePeer {
             fn drop(&mut self) {
                 self.speed.cancel_all();
-                self.modes.lock().unwrap().remove(&self.transport);
                 let mut map = self.map.lock().unwrap();
                 if map
                     .get(&self.peer)
@@ -2345,33 +2257,23 @@ impl TransferService {
             }
         }
         let _guard = RemovePeer {
-            modes: self.unified_connections.clone(),
-            transport: connection.stable_id(),
             map: self.speed_peers.clone(),
             peer,
             speed: speed.clone(),
         };
-        self.serve_peer_inner(
-            connection,
-            peer,
-            Some(speed),
-            authorization,
-            allowed_forward_targets,
-            incoming,
-        )
-        .await
+        self.serve_peer_inner(connection, peer, Some(speed), authorization, incoming)
+            .await
     }
     /// Test convenience; production always enables negotiated speed business.
     #[cfg(test)]
     pub async fn serve_peer(&self, connection: Connection, peer: NodeId) -> Result<()> {
-        let (_, allowed_forward_targets) = watch::channel(Vec::new());
+        let (_dispatcher, inlets) = self.test_inlets(&connection, peer).await;
         self.serve_peer_inner(
             connection,
             peer,
             None,
             crate::node::core::remote_auth::RemoteAuthorization::BOTH.into(),
-            allowed_forward_targets,
-            None,
+            inlets,
         )
         .await
     }
@@ -2381,10 +2283,7 @@ impl TransferService {
         peer: NodeId,
         speed: Option<crate::node::core::speed::SpeedPeer>,
         authorization: crate::node::core::remote_auth::LiveAuthorization,
-        allowed_forward_targets: watch::Receiver<
-            Vec<crate::node::core::config::AllowedForwardTarget>,
-        >,
-        mut incoming: Option<FileInlets>,
+        mut incoming: FileInlets,
     ) -> Result<()> {
         let mut streams = JoinSet::new();
         if let Some(speed) = speed.clone() {
@@ -2397,38 +2296,29 @@ impl TransferService {
             tokio::select! {
                 accepted=next_incoming(&connection, &mut incoming)=> {
                     let Some((kind, crate::node::core::dispatch::BiStream {mut send, mut recv})) = accepted else { break };
-                    let resources = incoming.as_ref().map(|inlets| inlets.resources.clone())
-                        .or_else(|| self.resource_scopes.lock().unwrap().get(&connection.stable_id()).cloned());
+                    let resources = incoming.resources.clone();
                     if !authorization.current().inbound_authorized() || streams.len()>=8 {let _=send.reset(4u32.into());let _=recv.stop(4u32.into());continue;}
-                    let service=self.clone();let connection=connection.clone();let speed=speed.clone();let allowed_forward_targets=allowed_forward_targets.clone();
+                    let service=self.clone();let connection=connection.clone();let speed=speed.clone();
                     let authorization = authorization.clone();
                     streams.spawn(async move {
                         authorization.guard(true, async {
                         let buffered=tokio::time::timeout(Duration::from_secs(5),service.frame_budget.read(&mut recv,None)).await.map_err(|_|disk::failure("文件流首帧超时"))??;
                         let crate::node::core::frame_budget::BufferedFrame {frame:mut first,_lease}=buffered;
-                        if kind.is_some() || resources.is_some() {
-                            let allowed = resources.as_ref().map(|r| r.borrow().for_peer(peer)).unwrap_or_default();
-                            let actual = kind.unwrap_or(match first.message {
-                                Message::Speed(_) => crate::node::core::wire::StreamKind::Speed,
-                                Message::TunnelOpen { .. } => crate::node::core::wire::StreamKind::Service,
-                                _ => crate::node::core::wire::StreamKind::File,
-                            });
-                            let kind_matches = match kind {
-                                Some(crate::node::core::wire::StreamKind::File) => !matches!(first.message, Message::Speed(_) | Message::TunnelOpen { .. }),
-                                Some(crate::node::core::wire::StreamKind::Speed) => matches!(first.message, Message::Speed(_)),
-                                Some(_) => false,
-                                None => true,
-                            };
-                            let permitted = !allowed.disabled && match actual {
-                                crate::node::core::wire::StreamKind::File => allowed.files,
-                                crate::node::core::wire::StreamKind::Speed => allowed.speed,
-                                crate::node::core::wire::StreamKind::Service => kind.is_none(),
-                            };
-                            if !kind_matches || !permitted {
-                                let code = if !kind_matches { crate::node::core::dispatch::RESET_INVALID } else { crate::node::core::dispatch::RESET_UNAUTHORIZED };
-                                let _ = send.reset(code.into()); let _ = recv.stop(code.into());
-                                return Err(disk::failure("节点业务类型或资源权限拒绝"));
-                            }
+                        let allowed = resources.borrow().for_peer(peer);
+                        let kind_matches = match kind {
+                            crate::node::core::wire::StreamKind::File => !matches!(first.message, Message::Speed(_)),
+                            crate::node::core::wire::StreamKind::Speed => matches!(first.message, Message::Speed(_)),
+                            _ => false,
+                        };
+                        let permitted = !allowed.disabled && match kind {
+                            crate::node::core::wire::StreamKind::File => allowed.files,
+                            crate::node::core::wire::StreamKind::Speed => allowed.speed,
+                            _ => false,
+                        };
+                        if !kind_matches || !permitted {
+                            let code = if !kind_matches { crate::node::core::dispatch::RESET_INVALID } else { crate::node::core::dispatch::RESET_UNAUTHORIZED };
+                            let _ = send.reset(code.into()); let _ = recv.stop(code.into());
+                            return Err(disk::failure("节点业务类型或资源权限拒绝"));
                         }
                         let incremental = matches!(&first.message, Message::IncrementalOffer { .. });
                         let incremental_automatic = matches!(&first.message, Message::IncrementalOffer { automatic: true, .. });
@@ -2458,11 +2348,6 @@ impl TransferService {
                                 protocol::write(&mut send, &Frame { request_id: 1, message: Message::ComparedFile { task_id, root_hash, difference } }).await?;
                                 send.finish().map_err(disk::local_error)?;
                                 Ok(())
-                            },
-                            Message::TunnelOpen{target}=> {
-                                drop(_lease);
-                                let allowed=allowed_forward_targets.borrow().clone();
-                                crate::node::core::tunnel::serve_open(send,recv,*target,peer,&allowed).await
                             },
                             Message::Speed(_)=> { let speed=speed.ok_or_else(||disk::failure("对端不支持测速执行"))?;drop(_lease);speed.serve_control(send,recv,first).await },
                             Message::Offer{..} => service.receive_offer(send,recv,&connection,peer,crate::node::core::frame_budget::BufferedFrame{frame:first,_lease},ReceiveMode {automatic,incremental}).await,

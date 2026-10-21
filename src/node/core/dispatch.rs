@@ -99,20 +99,14 @@ impl Dispatcher {
     }
 }
 
-/// Explicit framing mode supplied by the authenticated connection owner.
-pub async fn open_bi(
-    connection: &quinn::Connection,
-    kind: StreamKind,
-    unified: bool,
-) -> Result<BiStream> {
+/// Open a typed stream on an authenticated node connection.
+pub async fn open_bi(connection: &quinn::Connection, kind: StreamKind) -> Result<BiStream> {
     let (mut send, recv) = connection
         .open_bi()
         .await
         .map_err(|error| Error::Transport(format!("打开节点业务流失败：{error}")))?;
-    if unified {
-        send.write_all(&[kind as u8])
-            .await
-            .map_err(|error| Error::Transport(format!("写入节点流类型失败：{error}")))?;
-    }
+    send.write_all(&[kind as u8])
+        .await
+        .map_err(|error| Error::Transport(format!("写入节点流类型失败：{error}")))?;
     Ok(BiStream { send, recv })
 }

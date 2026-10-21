@@ -3,7 +3,6 @@ use crate::node::core::authorization::{ResourcePolicy, TrustSource};
 use crate::node::core::config::{AllowedForwardTarget, TunnelRule};
 use crate::node::core::remote_auth::RemoteVerifier;
 use crate::node::core::trusted_devices::TrustedDevice;
-use crate::node::core::wire::PeerWireMode;
 use crate::{
     error::{Error, Result},
     identity::NodeId,
@@ -24,7 +23,6 @@ pub struct NodeSettings {
     pub remote_auth: Option<RemoteVerifier>,
     pub trusted_devices: Vec<TrustedDevice>,
     pub trust_sources: HashMap<String, TrustSource>,
-    pub peer_modes: HashMap<String, PeerWireMode>,
     pub resources: ResourcePolicy,
     pub services: Vec<AllowedForwardTarget>,
     pub forwards: Vec<TunnelRule>,
@@ -47,7 +45,6 @@ impl NodeSettings {
             remote_auth: None,
             trusted_devices: vec![],
             trust_sources: HashMap::new(),
-            peer_modes: HashMap::new(),
             resources: ResourcePolicy::default(),
             services: vec![],
             forwards: vec![],
@@ -102,12 +99,7 @@ impl NodeSettings {
         self.resources.validate()?;
         crate::node::core::trusted_devices::validate(&self.trusted_devices)
             .map_err(|e| Error::Protocol(e.to_string()))?;
-        for id in self.peer_modes.keys() {
-            if NodeId::from_hex(id)?.to_hex() != *id {
-                return Err(Error::Protocol("设备 ID 无效".into()));
-            }
-        }
-        if self.peer_modes.len() > 128 || self.services.len() > 128 || self.forwards.len() > 256 {
+        if self.services.len() > 128 || self.forwards.len() > 256 {
             return Err(Error::Protocol("配置条目超出上限".into()));
         }
         for device in &self.trusted_devices {
@@ -139,15 +131,11 @@ impl NodeSettings {
             if rule.enabled && !listeners.insert(rule.listen) {
                 return Err(Error::Protocol("监听端口重复".into()));
             }
-            let legacy =
-                self.peer_modes.get(&rule.peer_node_id) == Some(&PeerWireMode::LegacyDesktopV1);
-            if !legacy {
-                let id = self
-                    .service_ids
-                    .get(&rule.id)
-                    .ok_or_else(|| Error::Protocol("新协议转发缺少服务ID".into()))?;
-                crate::node::core::wire::validate_service_id(id)?;
-            }
+            let id = self
+                .service_ids
+                .get(&rule.id)
+                .ok_or_else(|| Error::Protocol("新协议转发缺少服务ID".into()))?;
+            crate::node::core::wire::validate_service_id(id)?;
         }
         if self
             .service_ids
@@ -160,8 +148,7 @@ impl NodeSettings {
     }
     pub fn session(&self) -> Result<crate::node::core::control::NodeSessionConfig> {
         self.validate()?;
-        let mut config =
-            crate::node::core::control::NodeSessionConfig::unified(&self.signal_server);
+        let mut config = crate::node::core::control::NodeSessionConfig::new(&self.signal_server);
         config.signal_tls = self.signal_tls.clone();
         config.network.relay_server = self.relay_server.clone();
         config.remote_auth = self.remote_auth.clone();
@@ -170,11 +157,6 @@ impl NodeSettings {
             .trust_sources
             .iter()
             .map(|(id, s)| Ok((NodeId::from_hex(id)?, *s)))
-            .collect::<Result<_>>()?;
-        config.peer_modes = self
-            .peer_modes
-            .iter()
-            .map(|(id, m)| Ok((NodeId::from_hex(id)?, *m)))
             .collect::<Result<_>>()?;
         config.resources = self.resources.clone();
         config.allowed_forward_targets = self.services.clone();
@@ -271,4 +253,50 @@ impl ConfigRecord {
 pub(crate) struct CommitOptions {
     pub verified: Option<(crate::identity::NodeId, u64)>,
     pub restart: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn removed_peer_modes_are_rejected_and_forwards_require_service_ids() {
+        let mut settings = NodeSettings::initial(std::env::temp_dir().join("node-config-test"));
+        let mut old = serde_json::to_value(&settings).unwrap();
+        old["peer_modes"] = serde_json::json!({});
+        assert!(
+            serde_json::from_value::<NodeSettings>(old)
+                .unwrap_err()
+                .to_string()
+                .contains("peer_modes")
+        );
+        let peer = crate::identity::Identity::generate().node_id();
+        let rule = TunnelRule::new("echo", peer.to_hex(), 12345, "127.0.0.1:9".parse().unwrap());
+        let id = rule.id.clone();
+        settings.forwards.push(rule);
+        assert!(
+            settings
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("服务ID")
+        );
+        settings
+            .service_ids
+            .insert(id.clone(), "127.0.0.1:9".into());
+        assert!(settings.validate().is_err());
+        settings.service_ids.insert(id.clone(), "echo".into());
+        settings.validate().unwrap();
+        let session = settings.session().unwrap();
+        assert_eq!(
+            session.service_ids.get(&id).map(String::as_str),
+            Some("echo")
+        );
+        assert!(
+            serde_json::to_value(&settings)
+                .unwrap()
+                .get("peer_modes")
+                .is_none()
+        );
+    }
 }

@@ -13,7 +13,7 @@
 
 合成配置：[老家](examples/four-device/home.settings.example.json)、[Mac](examples/four-device/mac.settings.example.json)、[Windows](examples/four-device/windows.settings.example.json)。这些是`result.settings`形状的草稿，不是可直接替换node.json的持久根。111…/222…/333…均为明显合成NodeId；执行前必须替换为从各自真实身份核对的完整ID，并确认资源/管理员授权确实需要。`.invalid`域名不能用于真实部署。模板不含私钥、密码、verifier、管理token。时间戳0仅为合成占位；真实授权通过管理入口生成当前时间及实际来源，不能把模板当作旧密码证明或真实审计记录。
 
-所有新端用UnifiedV1；迁入旧桌面的peer显式LegacyDesktopV1，不在此场景内悄悄转换。文件策略为新Agent/旧桌面备份发布；旧CLI不覆盖路径仍为显式兼容命令，不作为已互通的新Agent。证书可用公共信任或明确私有CA，失败不回退明文。可选Relay仅在获得受控验证权限后填写，不能关闭全局代理或改用户生产防火墙制造路径失败。
+所有节点使用 P2PN v2；没有旧桌面逐 peer 适配。配置不再包含 peer_modes，转发必须指定 service ID。独立 CLI 使用自己的线格式，不作为已互通的 Agent。证书可用公共信任或明确私有CA，失败不回退明文。可选Relay仅在获得受控验证权限后填写，不能关闭全局代理或改用户生产防火墙制造路径失败。
 
 ## 操作顺序
 

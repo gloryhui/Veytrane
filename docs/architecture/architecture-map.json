@@ -400,10 +400,11 @@
       "title": "控制与会话",
       "tag": "CORE / ORCHESTRATION",
       "path": "src/node/core/session.rs",
-      "summary": "维护多 peer 代际、连接状态、认证和唯一入站业务流分发。",
+      "summary": "唯一 P2PN v2 会话：身份认证、持续授权、File / Service / Speed 分发。",
       "rules": [
         "一个入站接纳者分派 File / Service / Speed。",
-        "旧代际结果不得覆盖当前连接。"
+        "旧代际结果不得覆盖当前连接。",
+        "旧版本在协商拒绝；没有逐 peer 模式或旧桌面接收循环。"
       ],
       "parts": [
         {
@@ -419,7 +420,7 @@
         {
           "name": "统一协议",
           "path": "src/node/core/wire.rs",
-          "detail": "能力协商和流前缀。"
+          "detail": "P2PN v2 能力协商；远程认证与持续授权通道为必需能力。"
         },
         {
           "name": "流分发",
@@ -466,7 +467,8 @@
       "summary": "持久任务、并发调度、增量预览、暂停续传与安全发布。",
       "rules": [
         "完成以接收端持久回执为准。",
-        "预览结果和 accepted 均不是完成证明。"
+        "预览结果和 accepted 均不是完成证明。",
+        "P2PF 文件/测速载荷不包含握手和裸目标隧道消息。"
       ],
       "parts": [
         {
@@ -488,6 +490,11 @@
           "name": "安全发布",
           "path": "src/node/core/publish.rs",
           "detail": "目录事务、碰撞备份和回执。"
+        },
+        {
+          "name": "文件帧编码",
+          "path": "src/node/core/protocol.rs",
+          "detail": "P2PF 有界消息、任务绑定与相对路径；节点协商由 wire.rs 独占。"
         }
       ],
       "section": "flows"
@@ -500,7 +507,8 @@
       "summary": "根据 service ID 和当前 peer 权限，将 QUIC 业务流接入固定 TCP 目标。",
       "rules": [
         "长连接不持续占用服务协商配额。",
-        "TCP 断开后需要新连接，不透明续接字节流。"
+        "TCP 断开后需要新连接，不透明续接字节流。",
+        "只接受服务 ID；没有旧桌面裸目标开流。"
       ],
       "parts": [
         {
@@ -510,8 +518,8 @@
         },
         {
           "name": "TCP 搬运",
-          "path": "src/node/core/tunnel.rs",
-          "detail": "双向字节传输和资源限制。"
+          "path": "src/tunnel/mod.rs",
+          "detail": "共享 TCP 字节搬运；节点开流仅由 services.rs 按服务 ID 授权。"
         }
       ],
       "section": "flows"

@@ -1,3 +1,46 @@
+fn service_id(target: SocketAddr) -> String {
+    format!("tcp-{}", target.port())
+}
+fn service_grant(
+    name: impl Into<String>,
+    target: SocketAddr,
+    peers: Vec<String>,
+) -> crate::node::core::config::AllowedForwardTarget {
+    let mut grant = crate::node::core::config::AllowedForwardTarget::new(name, target, peers);
+    grant.id = service_id(target);
+    grant
+}
+fn grant_files(config: &mut NodeSessionConfig, peer: NodeId) {
+    config
+        .resources
+        .peers
+        .push(crate::node::core::authorization::PeerResources {
+            node_id: peer.to_hex(),
+            files: true,
+            speed: true,
+            disabled: false,
+        });
+}
+fn spawn(
+    identity: Identity,
+    mut config: NodeSessionConfig,
+) -> std::io::Result<(NodeSessionHandle, mpsc::Receiver<SessionEvent>)> {
+    for rule in &config.tunnel_rules {
+        config
+            .service_ids
+            .insert(rule.id.clone(), service_id(rule.target));
+    }
+    super::spawn(identity, config)
+}
+async fn service_stream(connection: &quinn::Connection) -> (quinn::SendStream, quinn::RecvStream) {
+    let stream = crate::node::core::dispatch::open_bi(
+        connection,
+        crate::node::core::wire::StreamKind::Service,
+    )
+    .await
+    .unwrap();
+    (stream.send, stream.recv)
+}
 use std::collections::HashSet;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -82,9 +125,13 @@ async fn ipv6_desktop_responder_authenticates_password_without_any_punch_respons
     )
     .await
     .unwrap();
-    let capabilities = crate::node::core::protocol::negotiate(&connection, true)
-        .await
-        .unwrap();
+    let capabilities = crate::node::core::wire::negotiate(
+        &connection,
+        true,
+        crate::node::core::wire::capabilities(true, true, true),
+    )
+    .await
+    .unwrap();
     let authorization = AuthContext::default()
         .authorize_session(
             &connection,
@@ -345,7 +392,7 @@ async fn ipv6_only_concurrent_desktop_requests_publish_one_verified_transport() 
 #[tokio::test]
 async fn trusted_auto_start_reconnects_ipv4_to_ipv6_with_new_generation_and_binding() {
     use crate::net::{NetworkFamilies, family::ipv6_test_available};
-    use crate::node::core::config::{AllowedForwardTarget, DesktopConfig, TunnelRule};
+    use crate::node::core::config::{DesktopConfig, TunnelRule};
     use crate::node::core::remote_auth::AuthorizationGrant;
     use crate::node::core::trusted_devices::TrustedDevice;
     if !ipv6_test_available() {
@@ -384,7 +431,7 @@ async fn trusted_auto_start_reconnects_ipv4_to_ipv6_with_new_generation_and_bind
         DesktopConfig::load(&path).unwrap().unwrap(),
     )
     .trusted_devices;
-    cb.allowed_forward_targets = vec![AllowedForwardTarget::new(
+    cb.allowed_forward_targets = vec![service_grant(
         "echo",
         target.local_addr().unwrap(),
         vec![a.node_id().to_hex()],
@@ -721,7 +768,7 @@ async fn relay_password_grants_are_directional_fresh_and_wrong_password_never_co
 #[tokio::test]
 async fn relay_trusted_auto_start_direct_relay_direct_uses_fresh_tls_and_generation() {
     use crate::net::NetworkFamilies;
-    use crate::node::core::config::{AllowedForwardTarget, DesktopConfig, TunnelRule};
+    use crate::node::core::config::{DesktopConfig, TunnelRule};
     use crate::node::core::remote_auth::AuthorizationGrant;
     use crate::node::core::trusted_devices::TrustedDevice;
     let root = std::env::temp_dir().join(format!(
@@ -767,7 +814,7 @@ async fn relay_trusted_auto_start_direct_relay_direct_uses_fresh_tls_and_generat
         DesktopConfig::load(&path).unwrap().unwrap(),
     )
     .trusted_devices;
-    cb.allowed_forward_targets = vec![AllowedForwardTarget::new(
+    cb.allowed_forward_targets = vec![service_grant(
         "echo",
         target.local_addr().unwrap(),
         vec![a.node_id().to_hex()],
@@ -1072,7 +1119,9 @@ async fn incremental_preview_confirm_and_cancel_run_through_authenticated_sessio
     let mut ca = auth_config(address);
     let mut cb = auth_config(address);
     ca.transfer = Some(a_service.clone());
+    grant_files(&mut ca, b.node_id());
     cb.transfer = Some(b_service.clone());
+    grant_files(&mut cb, a.node_id());
     let (ha, mut ea) = spawn(a.clone(), ca).unwrap();
     let (hb, mut eb) = spawn(b.clone(), cb).unwrap();
     wait_signal_online(&mut ea).await;
@@ -1194,7 +1243,7 @@ async fn unauthorized_file_directory_resume_and_speed_commands_cannot_start_busi
         let mut rejected = 0;
         while rejected < 6 {
             if let Some(SessionEvent::Diagnostic(message)) = events.recv().await
-                && message.contains("远程访问尚未授权")
+                && message.contains("对端未启用此节点业务能力")
             {
                 rejected += 1;
             }
@@ -1232,13 +1281,11 @@ async fn wrong_password_never_publishes_business_connection_or_running_tunnel() 
     let rule_id = rule.id.clone();
     config.tunnel_rules.push(rule);
     let mut destination = auth_config(address);
-    destination
-        .allowed_forward_targets
-        .push(crate::node::core::config::AllowedForwardTarget::new(
-            "protected",
-            target.local_addr().unwrap(),
-            vec![a.node_id().to_hex()],
-        ));
+    destination.allowed_forward_targets.push(service_grant(
+        "protected",
+        target.local_addr().unwrap(),
+        vec![a.node_id().to_hex()],
+    ));
     let (ha, mut ea) = spawn(a.clone(), config).unwrap();
     let (hb, mut eb) = spawn(b.clone(), destination).unwrap();
     // A restarted process has no peer password and must not bind or attempt authentication.
@@ -1310,12 +1357,11 @@ async fn passwordless_auto_start_waits_without_binding_then_continues_after_expl
     let mut ca = auth_config(address);
     ca.tunnel_rules.push(rule.clone());
     let mut cb = auth_config(address);
-    cb.allowed_forward_targets
-        .push(crate::node::core::config::AllowedForwardTarget::new(
-            "target",
-            target.local_addr().unwrap(),
-            vec![a.node_id().to_hex()],
-        ));
+    cb.allowed_forward_targets.push(service_grant(
+        "target",
+        target.local_addr().unwrap(),
+        vec![a.node_id().to_hex()],
+    ));
     let (ha, mut ea) = spawn(a.clone(), ca).unwrap();
     let (hb, mut eb) = spawn(b.clone(), cb).unwrap();
     wait_specific_tunnel_state(&mut ea, &rule.id, TunnelRuntimeState::WaitingAuthorization).await;
@@ -1444,7 +1490,6 @@ async fn relay_one_way_auth_and_both_passwords_gate_bidirectional_files_and_tunn
     directional_business_fixture(true).await;
 }
 async fn directional_business_fixture(relay_enabled: bool) {
-    use crate::node::core::protocol::{self, Frame, Message};
     use crate::node::core::task_model::{TaskDirection, TaskState};
     use crate::node::core::task_store::TaskStore;
     use crate::node::core::transfer::TransferService;
@@ -1477,21 +1522,21 @@ async fn directional_business_fixture(relay_enabled: bool) {
     let mut ca = auth_config(address);
     ca.remote_auth = Some(RemoteVerifier::create(&pa).unwrap());
     ca.transfer = Some(service_a.clone());
+    grant_files(&mut ca, b.node_id());
     let mut cb = auth_config(address);
     cb.remote_auth = Some(RemoteVerifier::create(&pb).unwrap());
     cb.transfer = Some(service_b.clone());
-    ca.allowed_forward_targets
-        .push(crate::node::core::config::AllowedForwardTarget::new(
-            "a",
-            ta.local_addr().unwrap(),
-            vec![b.node_id().to_hex()],
-        ));
-    cb.allowed_forward_targets
-        .push(crate::node::core::config::AllowedForwardTarget::new(
-            "b",
-            tb.local_addr().unwrap(),
-            vec![a.node_id().to_hex()],
-        ));
+    grant_files(&mut cb, a.node_id());
+    ca.allowed_forward_targets.push(service_grant(
+        "a",
+        ta.local_addr().unwrap(),
+        vec![b.node_id().to_hex()],
+    ));
+    cb.allowed_forward_targets.push(service_grant(
+        "b",
+        tb.local_addr().unwrap(),
+        vec![a.node_id().to_hex()],
+    ));
     if relay_enabled {
         for (config, blackhole) in [(&mut ca, &blackhole_a), (&mut cb, &blackhole_b)] {
             config.network.families = crate::net::NetworkFamilies::Ipv4Only;
@@ -1534,13 +1579,14 @@ async fn directional_business_fixture(relay_enabled: bool) {
         assert_eq!(conn_b.remote_address(), relay);
     }
     // Reject forged peer requests despite an authenticated, live QUIC transport.
-    let (mut send, mut recv) = conn_b.open_bi().await.unwrap();
-    let forged_request = protocol::write(
+    let (mut send, mut recv) = service_stream(&conn_b).await;
+    let forged_request = crate::node::core::wire::write(
         &mut send,
-        &Frame {
-            request_id: 0,
-            message: Message::TunnelOpen {
-                target: ta.local_addr().unwrap(),
+        &crate::node::core::wire::NodeFrame {
+            version: crate::node::core::wire::VERSION,
+            request_id: 1,
+            message: crate::node::core::wire::NodeMessage::OpenTcp {
+                service_id: service_id(ta.local_addr().unwrap()),
             },
         },
     )
@@ -1556,14 +1602,19 @@ async fn directional_business_fixture(relay_enabled: bool) {
             error
                 .get_ref()
                 .and_then(|error| error.downcast_ref::<quinn::WriteError>()),
-            Some(&quinn::WriteError::Stopped(4u32.into())),
+            Some(&quinn::WriteError::Stopped(
+                crate::node::core::dispatch::RESET_UNAUTHORIZED.into()
+            )),
         );
     }
     assert!(
-        time::timeout(Duration::from_secs(5), protocol::read(&mut recv))
-            .await
-            .unwrap()
-            .is_err()
+        time::timeout(
+            Duration::from_secs(5),
+            crate::node::core::wire::read(&mut recv)
+        )
+        .await
+        .unwrap()
+        .is_err()
     );
     assert!(
         time::timeout(Duration::from_millis(100), ta.accept())
@@ -1692,21 +1743,25 @@ async fn directional_business_fixture(relay_enabled: bool) {
     })
     .await
     .unwrap();
-    let (mut send_a, mut recv_a) = conn_a.open_bi().await.unwrap();
-    protocol::write(
+    let (mut send_a, mut recv_a) = service_stream(&conn_a).await;
+    crate::node::core::wire::write(
         &mut send_a,
-        &Frame {
-            request_id: 0,
-            message: Message::TunnelOpen {
-                target: tb.local_addr().unwrap(),
+        &crate::node::core::wire::NodeFrame {
+            version: crate::node::core::wire::VERSION,
+            request_id: 1,
+            message: crate::node::core::wire::NodeMessage::OpenTcp {
+                service_id: service_id(tb.local_addr().unwrap()),
             },
         },
     )
     .await
     .unwrap();
     assert!(matches!(
-        protocol::read(&mut recv_a).await.unwrap().message,
-        Message::TunnelReady
+        crate::node::core::wire::read(&mut recv_a)
+            .await
+            .unwrap()
+            .message,
+        crate::node::core::wire::NodeMessage::TcpReady
     ));
     drop(tb.accept().await.unwrap());
     drop((send_a, recv_a));
@@ -1736,21 +1791,25 @@ async fn directional_business_fixture(relay_enabled: bool) {
         b"reverse"
     );
     let new_b = inspect(&hb).await[&a.node_id()].1.clone();
-    let (mut send, mut recv) = new_b.open_bi().await.unwrap();
-    protocol::write(
+    let (mut send, mut recv) = service_stream(&new_b).await;
+    crate::node::core::wire::write(
         &mut send,
-        &Frame {
-            request_id: 0,
-            message: Message::TunnelOpen {
-                target: ta.local_addr().unwrap(),
+        &crate::node::core::wire::NodeFrame {
+            version: crate::node::core::wire::VERSION,
+            request_id: 1,
+            message: crate::node::core::wire::NodeMessage::OpenTcp {
+                service_id: service_id(ta.local_addr().unwrap()),
             },
         },
     )
     .await
     .unwrap();
     assert!(matches!(
-        protocol::read(&mut recv).await.unwrap().message,
-        Message::TunnelReady
+        crate::node::core::wire::read(&mut recv)
+            .await
+            .unwrap()
+            .message,
+        crate::node::core::wire::NodeMessage::TcpReady
     ));
     drop(ta.accept().await.unwrap());
     drop((send, recv));
@@ -2004,8 +2063,10 @@ async fn auto_resume_real_sessions_restore_same_task_over_fresh_authenticated_tr
         let b = Identity::generate();
         let mut ca = local_config(signal);
         ca.transfer = Some(sa.clone());
+        grant_files(&mut ca, b.node_id());
         let mut cb = local_config(signal);
         cb.transfer = Some(sb.clone());
+        grant_files(&mut cb, a.node_id());
         let (ha, mut ea) = spawn(a.clone(), ca).unwrap();
         let (hb, mut eb) = spawn(b.clone(), cb).unwrap();
         wait_signal_online(&mut ea).await;
@@ -2457,7 +2518,7 @@ async fn unexpected_authenticated_target_fails_before_connected() {
 }
 
 #[tokio::test]
-async fn authenticated_legacy_peer_is_rejected_by_desktop_negotiation() {
+async fn authenticated_non_node_peer_is_rejected_by_node_negotiation() {
     time::timeout(Duration::from_secs(10), async {
         let local = Identity::generate();
         let remote = Identity::generate();
@@ -2484,10 +2545,14 @@ async fn authenticated_legacy_peer_is_rejected_by_desktop_negotiation() {
         let connection = authenticate_outgoing(&client, address, &local, expected)
             .await
             .unwrap();
-        let error = crate::node::core::protocol::negotiate(&connection, true)
-            .await
-            .unwrap_err();
-        assert!(error.to_string().contains("桌面版本或能力不兼容"));
+        let error = crate::node::core::wire::negotiate(
+            &connection,
+            true,
+            crate::node::core::wire::capabilities(true, true, true),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("节点"));
         assert!(connection.close_reason().is_some());
         client.close(0u32.into(), b"test complete");
         client.wait_idle().await;
@@ -2734,8 +2799,6 @@ async fn offline_rule_waits_without_a_listener_and_reports_lookup_failure() {
 
 #[tokio::test]
 async fn authenticated_transfer_dispatch_checks_peer_and_live_target_revocation() {
-    use crate::node::core::config::AllowedForwardTarget;
-    use crate::node::core::protocol::{self, Frame, Message};
     use crate::node::core::task_store::TaskStore;
     use crate::node::core::transfer::TransferService;
     let root = std::env::temp_dir().join(format!("p2p-tunnel-auth-{}", rand::random::<u128>()));
@@ -2755,7 +2818,7 @@ async fn authenticated_transfer_dispatch_checks_peer_and_live_target_revocation(
             });
         }
     });
-    let grant = AllowedForwardTarget::new("echo", target, vec![a.node_id().to_hex()]);
+    let grant = service_grant("echo", target, vec![a.node_id().to_hex()]);
     let mut config = local_config(signal);
     config.transfer = Some(TransferService::new(store, root.join("receive")));
     config.allowed_forward_targets = vec![grant.clone()];
@@ -2774,36 +2837,46 @@ async fn authenticated_transfer_dispatch_checks_peer_and_live_target_revocation(
     async fn open(
         connection: &quinn::Connection,
         target: SocketAddr,
-    ) -> (quinn::SendStream, quinn::RecvStream, Message) {
-        let (mut send, mut recv) = connection.open_bi().await.unwrap();
-        protocol::write(
+    ) -> (
+        quinn::SendStream,
+        quinn::RecvStream,
+        crate::node::core::wire::NodeMessage,
+    ) {
+        let (mut send, mut recv) = service_stream(connection).await;
+        crate::node::core::wire::write(
             &mut send,
-            &Frame {
-                request_id: 0,
-                message: Message::TunnelOpen { target },
+            &crate::node::core::wire::NodeFrame {
+                version: crate::node::core::wire::VERSION,
+                request_id: 1,
+                message: crate::node::core::wire::NodeMessage::OpenTcp {
+                    service_id: service_id(target),
+                },
             },
         )
         .await
         .unwrap();
-        let message = time::timeout(Duration::from_secs(2), protocol::read(&mut recv))
-            .await
-            .unwrap()
-            .unwrap()
-            .message;
+        let message = time::timeout(
+            Duration::from_secs(2),
+            crate::node::core::wire::read(&mut recv),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .message;
         (send, recv, message)
     }
     let (mut established_send, mut established_recv, message) = open(&a_connection, target).await;
-    assert_eq!(message, Message::TunnelReady);
+    assert_eq!(message, crate::node::core::wire::NodeMessage::TcpReady);
     assert!(matches!(
         open(&b_connection, target).await.2,
-        Message::TunnelError { .. }
+        crate::node::core::wire::NodeMessage::Error { .. }
     ));
     let mut disabled = grant.clone();
     disabled.enabled = false;
     owner_handle.restrict_forward_targets(&[disabled]);
     assert!(matches!(
         open(&a_connection, target).await.2,
-        Message::TunnelError { .. }
+        crate::node::core::wire::NodeMessage::Error { .. }
     ));
     // Revocation does not kill already established streams.
     established_send.write_all(b"kept").await.unwrap();
@@ -2813,7 +2886,10 @@ async fn authenticated_transfer_dispatch_checks_peer_and_live_target_revocation(
     owner_handle
         .update_tunnel_settings(vec![grant.clone()], Vec::new())
         .unwrap();
-    assert_eq!(open(&a_connection, target).await.2, Message::TunnelReady);
+    assert_eq!(
+        open(&a_connection, target).await.2,
+        crate::node::core::wire::NodeMessage::TcpReady
+    );
     owner_handle.restrict_forward_targets(&[]);
     let mut unsaved =
         crate::node::core::config::SettingsDraft::defaults(Some(root.join("receive")));
@@ -2823,13 +2899,13 @@ async fn authenticated_transfer_dispatch_checks_peer_and_live_target_revocation(
     assert!(unsaved.save_atomic(&root.join("receive")).is_err());
     assert!(matches!(
         open(&a_connection, target).await.2,
-        Message::TunnelError { .. }
+        crate::node::core::wire::NodeMessage::Error { .. }
     ));
     // Unsaved re-enable cannot restore grants revoked from the applied configuration.
     owner_handle.restrict_forward_targets(&[grant]);
     assert!(matches!(
         open(&a_connection, target).await.2,
-        Message::TunnelError { .. }
+        crate::node::core::wire::NodeMessage::Error { .. }
     ));
     drop((a_handle, b_handle, owner_handle));
     echo_task.abort();
@@ -2878,7 +2954,7 @@ async fn auto_started_bound_peer_tunnel_is_independent_and_reports_real_errors()
     let mut config_a = local_config(signal);
     config_a.tunnel_rules = vec![auto_rule.clone(), conflict_rule.clone()];
     let mut config_b = local_config(signal);
-    config_b.allowed_forward_targets = vec![crate::node::core::config::AllowedForwardTarget::new(
+    config_b.allowed_forward_targets = vec![service_grant(
         "echo",
         target,
         vec![identity_a.node_id().to_hex()],
@@ -2952,7 +3028,7 @@ async fn auto_started_bound_peer_tunnel_is_independent_and_reports_real_errors()
             if let SessionEvent::TunnelError { rule_id, detail } = event
                 && rule_id == auto_rule.id
             {
-                assert!(detail.contains("不在允许转发的列表里"), "{detail}");
+                assert!(detail.contains("服务不存在或不可访问"), "{detail}");
                 return;
             }
         }
@@ -3032,8 +3108,10 @@ async fn native_drop_batch_command_sends_mixed_selection_to_the_bound_peer() {
     let ib = Identity::generate();
     let mut ca = local_config(address);
     ca.transfer = Some(a.clone());
+    grant_files(&mut ca, ib.node_id());
     let mut cb = local_config(address);
     cb.transfer = Some(b.clone());
+    grant_files(&mut cb, ia.node_id());
     let (ha, mut ea) = spawn(ia.clone(), ca).unwrap();
     let (hb, mut eb) = spawn(ib.clone(), cb).unwrap();
     wait_signal_online(&mut ea).await;
@@ -3122,8 +3200,10 @@ async fn session_command_sends_to_passive_peer_using_owned_transfer_service() {
     let ib = Identity::generate();
     let mut ca = local_config(address);
     ca.transfer = Some(a.clone());
+    grant_files(&mut ca, ib.node_id());
     let mut cb = local_config(address);
     cb.transfer = Some(b.clone());
+    grant_files(&mut cb, ia.node_id());
     let (ha, mut ea) = spawn(ia.clone(), ca).unwrap();
     let (hb, mut eb) = spawn(ib.clone(), cb).unwrap();
     wait_signal_online(&mut ea).await;
@@ -3378,9 +3458,15 @@ async fn explicit_trust_requires_inbound_password_and_failed_save_cannot_grant()
     )
     .await
     .unwrap();
+    time::timeout(Duration::from_secs(3), connection.closed())
+        .await
+        .unwrap();
+    assert!(connection.close_reason().is_some());
+    ha.connect_peer_with_password(b.node_id(), test_password())
+        .unwrap();
     wait_grants(&mut ea, b.node_id(), expected_a).await;
     wait_grants(&mut eb, a.node_id(), expected_b).await;
-    assert!(connection.close_reason().is_none());
+    let generation = inspect(&hb).await[&a.node_id()].0;
     hb.change_trusted_device(TrustedDeviceChange::Trust {
         peer: a.node_id(),
         generation,
@@ -3634,7 +3720,7 @@ async fn dead_session_allows_durable_rename_revoke_but_never_trust_or_restart_gr
 }
 #[tokio::test]
 async fn restart_auto_start_uses_fresh_identity_bound_trust_and_revoke_closes_running_tunnel() {
-    use crate::node::core::config::{AllowedForwardTarget, DesktopConfig, TunnelRule};
+    use crate::node::core::config::{DesktopConfig, TunnelRule};
     use crate::node::core::remote_auth::AuthorizationGrant;
     use crate::node::core::trusted_devices::TrustedDevice;
     let root = std::env::temp_dir().join(format!(
@@ -3674,7 +3760,7 @@ async fn restart_auto_start_uses_fresh_identity_bound_trust_and_revoke_closes_ru
         .map(crate::node::core::config::SettingsDraft::from_config)
         .unwrap()
         .trusted_devices;
-    cb.allowed_forward_targets = vec![AllowedForwardTarget::new(
+    cb.allowed_forward_targets = vec![service_grant(
         "echo",
         target.local_addr().unwrap(),
         vec![a.node_id().to_hex()],
@@ -3725,7 +3811,7 @@ async fn restart_auto_start_uses_fresh_identity_bound_trust_and_revoke_closes_ru
     let result = time::timeout(Duration::from_secs(3), tcp.read_to_end(&mut tail)).await;
     assert!(result.is_ok());
     assert!(tail.is_empty());
-    assert!(connection.close_reason().is_none()); // Unrelated reverse rights are not killed by closing the whole transport.
+    assert!(connection.close_reason().is_some()); // Strong revocation closes the authenticated transport.
     assert!(
         crate::node::core::config::SettingsDraft::from_config(
             DesktopConfig::load(&path).unwrap().unwrap()
@@ -3753,7 +3839,7 @@ async fn restart_auto_start_uses_fresh_identity_bound_trust_and_revoke_closes_ru
     std::fs::remove_dir_all(root).unwrap();
 }
 #[tokio::test]
-async fn revoking_trusted_file_direction_keeps_reverse_password_transfer_alive() {
+async fn revoking_trust_interrupts_both_file_directions_until_fresh_authentication() {
     use crate::node::core::remote_auth::AuthorizationGrant;
     use crate::node::core::task_model::TaskState;
     use crate::node::core::task_store::TaskStore;
@@ -3775,8 +3861,10 @@ async fn revoking_trusted_file_direction_keeps_reverse_password_transfer_alive()
     let (signal, server) = start_local_server().await;
     let mut ca = auth_config(signal);
     ca.transfer = Some(a_service.clone());
+    grant_files(&mut ca, b.node_id());
     let mut cb = auth_config(signal);
     cb.transfer = Some(b_service.clone());
+    grant_files(&mut cb, a.node_id());
     cb.trusted_devices = vec![device];
     cb.config_path = Some(path);
     let (ha, mut ea) = spawn(a.clone(), ca).unwrap();
@@ -3825,8 +3913,37 @@ async fn revoking_trusted_file_direction_keeps_reverse_password_transfer_alive()
     })
     .await
     .unwrap();
+    let connection = inspect(&hb).await[&a.node_id()].1.clone();
     hb.change_trusted_device(TrustedDeviceChange::Revoke { peer: a.node_id() })
         .await
+        .unwrap();
+    time::timeout(Duration::from_secs(3), connection.closed())
+        .await
+        .unwrap();
+    assert!(connection.close_reason().is_some());
+    let _ = a_release.send(());
+    let _ = b_release.send(());
+    time::timeout(Duration::from_secs(10), async {
+        loop {
+            let a_tasks = a_service.snapshot().await.unwrap();
+            let b_tasks = b_service.snapshot().await.unwrap();
+            if a_tasks.len() == 2
+                && b_tasks.len() == 2
+                && a_tasks
+                    .iter()
+                    .chain(&b_tasks)
+                    .all(|task| task.state() == TaskState::Interrupted)
+            {
+                break;
+            }
+            time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!root.join("a-receive/password.bin").exists());
+    assert!(!root.join("b-receive/trusted.bin").exists());
+    hb.connect_peer_with_password(a.node_id(), test_password())
         .unwrap();
     wait_grants(
         &mut ea,
@@ -3837,20 +3954,29 @@ async fn revoking_trusted_file_direction_keeps_reverse_password_transfer_alive()
         },
     )
     .await;
-    a_release.send(()).unwrap();
+    wait_grants(
+        &mut eb,
+        a.node_id(),
+        RemoteAuthorization {
+            inbound: AuthorizationGrant::default(),
+            outbound: AuthorizationGrant::password(true),
+        },
+    )
+    .await;
+    let resume = b_service
+        .snapshot()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|task| task.direction() == crate::node::core::task_model::TaskDirection::Send)
+        .unwrap();
+    hb.resume_task(a.node_id(), resume.task_id().clone())
+        .unwrap();
     time::timeout(Duration::from_secs(10), async {
         loop {
-            let tasks = a_service.snapshot().await.unwrap();
-            let remote = b_service.snapshot().await.unwrap();
-            let kept = tasks.iter().any(|t| {
-                t.direction() == crate::node::core::task_model::TaskDirection::Receive
-                    && t.state() == TaskState::Completed
-            });
-            let revoked = remote.iter().any(|t| {
-                t.direction() == crate::node::core::task_model::TaskDirection::Receive
-                    && t.state() == TaskState::Interrupted
-            });
-            if kept && revoked {
+            if b_service.snapshot().await.unwrap().iter().any(|task| {
+                task.task_id() == resume.task_id() && task.state() == TaskState::Completed
+            }) {
                 break;
             }
             time::sleep(Duration::from_millis(10)).await;
@@ -3858,13 +3984,11 @@ async fn revoking_trusted_file_direction_keeps_reverse_password_transfer_alive()
     })
     .await
     .unwrap();
-    assert!(b_release.send(()).is_err());
     assert_eq!(
         std::fs::read(root.join("a-receive/password.bin")).unwrap(),
         bytes
     );
     assert!(!root.join("b-receive/trusted.bin").exists());
-    assert!(inspect(&ha).await[&b.node_id()].1.close_reason().is_none());
     ha.shutdown();
     hb.shutdown();
     drop((ha, hb));

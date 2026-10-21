@@ -6,7 +6,7 @@
 
 Ubuntu Server无需GUI：`cargo build --locked --release --bin p2p-agent --bin p2p-node`。桌面包的三平台构建入口现同时构建桌面、Agent和管理CLI；Mac三者在同一`Contents/MacOS`目录。不要只复制桌面二进制。
 
-新安装先运行`p2p-node init`，已有旧桌面身份先停止旧端，然后执行`p2p-node migrate-preview --config-file <旧settings.json绝对路径> --source-data-dir <旧data目录绝对路径>`，核对NodeId和限制后，以同样路径及`--expected-preview <返回指纹>`执行`migrate-desktop`。工具不删除源数据，备份位于目标私有目录。中断时使用`migrate-resume --expected-preview <原指纹>`，目标有变化则拒绝覆盖。
+新安装先运行 `p2p-node init`。旧桌面迁移命令已删除。当前节点采用 P2PN v2，两端须同步升级；旧节点配置中的 `peer_modes` 字段需在停机备份后移除，每条转发必须具有 `service_ids` 映射。保留既有身份、密码验证器、资源授权和任务库；不要用重新初始化来处理升级错误。
 
 首次信令配置可从Agent运行后的原生窗口“保存信令并停止节点”，再启动；CLI可`config`导出响应里的`result.settings`，通过`offline-apply <草稿.json> --revision 0`停机应用。密码由`p2p-node password --revision <当前revision>`从stdin输入；不要放进进程参数。服务与转发通过原生窗口、Web或`apply <草稿.json> --revision N`管理。
 
