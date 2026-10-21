@@ -156,7 +156,9 @@ impl Diagnostics {
     }
     pub fn network(&mut self, state: &NetworkLifecycle, now: Instant) {
         match state {
-            NetworkLifecycle::Unconfigured => self.signal = Signal::Unconfigured,
+            NetworkLifecycle::Unconfigured | NetworkLifecycle::LocalOnly => {
+                self.signal = Signal::Unconfigured
+            }
             NetworkLifecycle::ConnectingSignal => {
                 self.signal = if self.families.is_none() {
                     Signal::Preparing

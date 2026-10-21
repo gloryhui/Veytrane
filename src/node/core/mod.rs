@@ -5,6 +5,7 @@ pub mod authorization;
 pub(crate) mod auto_resume;
 pub mod bandwidth;
 pub mod config;
+pub mod connectivity;
 pub mod control;
 pub mod diagnostics;
 pub mod dispatch;

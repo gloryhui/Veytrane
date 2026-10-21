@@ -32,6 +32,8 @@ pub struct PeerSnapshot {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct NodeSnapshot {
+    #[serde(default)]
+    pub connectivity: crate::node::core::connectivity::ConnectivitySnapshot,
     pub configuration_revision: u64,
     pub sequence: u64,
     pub node_id: String,
@@ -130,9 +132,14 @@ impl ControlState {
             return;
         };
         let change = match event {
+            SessionEvent::Connectivity(value) => {
+                state.connectivity = value.clone();
+                NodeEvent::Changed
+            }
             SessionEvent::Lifecycle(lifecycle) => {
                 let phase = match lifecycle {
                     N::Unconfigured => Some("unconfigured"),
+                    N::LocalOnly => Some("disabled"),
                     N::ConnectingSignal => Some("connecting"),
                     N::SignalOnline => Some("online"),
                     N::ReconnectingSignal { .. } => Some("reconnecting"),

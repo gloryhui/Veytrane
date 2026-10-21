@@ -20,6 +20,7 @@ pub const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NetworkLifecycle {
     Unconfigured,
+    LocalOnly,
     ConnectingSignal,
     SignalOnline,
     ReconnectingSignal {
@@ -51,6 +52,7 @@ impl NetworkLifecycle {
     pub fn label(&self) -> String {
         match self {
             Self::Unconfigured => "未配置网络".into(),
+            Self::LocalOnly => "无信令模式：局域网 / IP直连".into(),
             Self::ConnectingSignal => "正在连接信令".into(),
             Self::SignalOnline => "信令在线；等待对端".into(),
             Self::ReconnectingSignal { attempt, .. } => {

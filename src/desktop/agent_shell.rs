@@ -144,6 +144,7 @@ struct AgentShell {
     signal: Entity<TextField>,
     management_peer: Entity<TextField>,
     management_password: Entity<TextField>,
+    management_address: Entity<TextField>,
     management_local_password: Entity<TextField>,
     management_signal: Entity<TextField>,
     state: Value,
@@ -181,6 +182,7 @@ impl AgentShell {
             signal: cx.new(|cx| TextField::new(cx, "信令地址，如signal.example:9000")),
             management_peer: cx.new(|cx| TextField::new(cx, "远端设备完整 ID")),
             management_password: cx.new(|cx| TextField::new_password(cx, "远端访问密码")),
+            management_address: cx.new(|cx| TextField::new(cx, "可选：IP:端口或[IPv6]:端口")),
             management_local_password: cx.new(|cx| TextField::new_password(cx, "本机访问密码")),
             management_signal: cx.new(|cx| TextField::new(cx, "信令地址，如signal.example:9000")),
             state: Value::Null,
@@ -492,6 +494,48 @@ impl AgentShell {
             cx.notify();
         }
     }
+    fn nearby_devices(&self, cx: &Context<Self>) -> gpui::Div {
+        let value = &self.state["node"]["connectivity"];
+        let mut view = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(div().text_xs().child(format!(
+                "直连监听：{} · 局域网发现：{}（刷新状态查看）",
+                value["listen"],
+                value["discovery"].as_str().unwrap_or("等待状态")
+            )));
+        if let Some(peers) = value["nearby"].as_array() {
+            for peer in peers.iter().take(64) {
+                let Some(id) = peer["node_id"].as_str() else {
+                    continue;
+                };
+                let id = id.to_owned();
+                let label = format!("选择附近设备 {} · {}（尚未认证）", id, peer["addresses"]);
+                view = view.child(
+                    ui_components::primary_button(label, !self.busy && !self.exiting).on_click(
+                        cx.listener(move |shell, _, _, cx| {
+                            for input in [&shell.peer, &shell.management_peer] {
+                                input.update(cx, |field, cx| {
+                                    field.content = id.clone().into();
+                                    field.selected_range = 0..0;
+                                    cx.notify();
+                                });
+                            }
+                            shell.management_address.update(cx, |field, cx| {
+                                field.content = "".into();
+                                field.selected_range = 0..0;
+                                cx.notify();
+                            });
+                            shell.message = "已选择附近设备；请核对完整ID并填写密码后连接。".into();
+                            cx.notify();
+                        }),
+                    ),
+                );
+            }
+        }
+        view
+    }
     fn save(&mut self, restart: bool, cx: &mut Context<Self>) {
         let Some(mut settings) = self.draft.clone() else {
             return;
@@ -675,6 +719,9 @@ impl AgentShell {
                             .child(field("远端设备 ID", &self.management_peer))
                             .child(field("远端密码", &self.management_password)),
                     )
+                    .child(field("直连地址（可选，无需信令）", &self.management_address))
+                    .child(div().text_xs().child("未填地址时会先尝试已保存地址或附近设备。发现不等于信任，需核对完整设备ID。"))
+                    .child(self.nearby_devices(cx))
                     .child(
                         div()
                             .flex()
@@ -689,13 +736,14 @@ impl AgentShell {
                                         cx.notify();
                                     });
                                     s.send(
-                                        Command::Connect {
-                                            peer,
-                                            password: if password.is_empty() {
-                                                None
-                                            } else {
-                                                Some(password)
-                                            },
+                                        if Self::text(&s.management_address, cx).is_empty() {
+                                            Command::Connect { peer, password: (!password.is_empty()).then_some(password) }
+                                        } else {
+                                            let address = match Self::text(&s.management_address, cx).parse() {
+                                                Ok(address) => address,
+                                                Err(_) => { s.message = "请填写IP:端口，IPv6使用[地址]:端口".into(); cx.notify(); return; }
+                                            };
+                                            Command::ConnectAddress { peer, addresses: vec![address], password: (!password.is_empty()).then_some(password) }
                                         },
                                         Kind::Action,
                                         cx,

@@ -27,14 +27,14 @@
 <div class="arch-toolbar"><div class="arch-tabs" role="tablist" aria-label="架构图视图"></div><div class="arch-search"><label for="arch-search">查找模块</label><input id="arch-search" type="search" placeholder="模块、职责或源码路径" autocomplete="off"></div></div>
 <div id="arch-results" hidden aria-live="polite"></div>
 <div class="arch-map-layout"><div class="panel arch-canvas-panel"><div class="arch-map-head"><p id="arch-description"></p><button type="button" class="btn" id="arch-fit" aria-pressed="false">放大阅读</button></div><div class="arch-legend"><span class="control">管理 / 控制</span><span class="data">业务数据</span><span class="store">状态 / 存储</span><span class="dependency">源码依赖</span></div><div id="arch-canvas" tabindex="0" aria-label="可横向滚动的交互架构图"></div><p class="small arch-hint">点击任意节点展开内部职责 · Tab / Enter 可操作 · 实线为控制、数据与存储，虚线为源码依赖</p></div><aside class="panel arch-detail" id="arch-detail" aria-label="选中模块详情" aria-live="polite"></aside></div>
-<div class="arch-boundary"><strong>分层整理后的源码视图</strong><span>22 个模块 · 4 个可切换视图 · 不依赖外部库</span><p>通用 Agent 与专用版共享核心，分别持有运行时和状态。核心不依赖界面或宿主；桌面统一通过 IPC 管理 Agent。下方部署关系记录 2026-10-21 19:56 的 Veytrane 更名与重新部署验收，包含主节点、专用网关及 Windows 包交付；不能据此判断当前实时状态。</p><a href="REPOSITORY_LAYOUT.md">查看分层与清理依据 ↗</a> · <a href="task-reports/NODE_PROTOCOL_UNIFICATION.md">查看回归验证记录 ↗</a> · <a href="task-reports/P2PN_V2_DEPLOYMENT.md">查看部署验收记录 ↗</a></div></section>
+<div class="arch-boundary"><strong>分层整理后的源码视图</strong><span>23 个模块 · 4 个可切换视图 · 不依赖外部库</span><p>通用 Agent 与专用版共享核心，分别持有运行时和状态。核心不依赖界面或宿主；桌面统一通过 IPC 管理 Agent。下方部署关系记录 2026-10-21 19:56 的 Veytrane 更名与重新部署验收，包含主节点、专用网关及 Windows 包交付；不能据此判断当前实时状态。</p><a href="REPOSITORY_LAYOUT.md">查看分层与清理依据 ↗</a> · <a href="task-reports/NODE_PROTOCOL_UNIFICATION.md">查看回归验证记录 ↗</a> · <a href="task-reports/P2PN_V2_DEPLOYMENT.md">查看部署验收记录 ↗</a></div></section>
 <section id="topology"><div class="section-title"><span class="index">02</span><h2>通用节点：进程关系</h2></div><p class="small">点击任意模块查看职责与源码。上半部分为本机；下半部分为远端节点与网络基础设施。</p><div class="architecture"><div class="diagram">
 <div class="boundary"><div class="boundary-title">本机 · 管理入口 / 独立进程</div><div class="nodes"><button class="node" data-node="desktop"><strong>原生桌面</strong><span>主窗口 + 二级窗口 + 托盘</span></button><button class="node" data-node="cli"><strong>p2p-node</strong><span>命令行管理客户端</span></button><button class="node" data-node="web"><strong>可选 Web 网关</strong><span>浏览器 → loopback HTTP</span></button></div></div>
 <div class="flow-label"><b>↓ ↑</b> 本地管理：版本化 JSON 请求 / 响应<br>Windows 命名管道 · Unix Domain Socket</div>
 <div class="boundary agent-boundary"><div class="boundary-title">本机 · p2p-agent / 同一数据目录的唯一业务宿主</div><button class="node full selected" data-node="agent"><strong>Agent 宿主与统一控制接口</strong><span>生命周期 / IPC / revision / 幂等请求 / 事件快照</span></button><div class="nodes"><button class="node" data-node="session"><strong>会话与授权</strong><span>多设备 / 身份校验 / 流分发</span></button><button class="node" data-node="business"><strong>文件 · TCP · 测速</strong><span>任务调度 / 服务目录 / 限额</span></button><button class="node" data-node="state"><strong>持久化状态</strong><span>私钥 / 配置 / 任务 / 检查点</span></button></div></div>
 <div class="flow-label"><b>↓ ↑</b> 端到端认证 QUIC / UDP<br>业务数据走设备连接，管理 IPC 留在本机</div>
-<div class="boundary"><div class="boundary-title">远端设备与基础设施 · 按角色部署</div><div class="nodes"><button class="node" data-node="peer"><strong>远端 Agent</strong><span>相同核心 / 对称节点能力</span></button><button class="node" data-node="signal"><strong>信令 + STUN</strong><span>登记 / 寻址 / 候选 / NAT 探测</span></button><button class="node" data-node="relay"><strong>可选 UDP Relay</strong><span>转发加密 QUIC 数据报</span></button></div></div>
-</div><aside class="panel detail" id="node-detail" aria-live="polite"></aside></div><p class="caption">图中的信令与 STUN 是两种服务职责：信令交换设备信息，STUN 探测地址映射；它们不处理文件任务。Relay 可与信令服务共同部署。</p>
+<div class="boundary"><div class="boundary-title">远端设备与基础设施 · 按角色部署</div><div class="nodes"><button class="node" data-node="peer"><strong>远端 Agent</strong><span>相同核心 / 对称节点能力</span></button><button class="node" data-node="signal"><strong>可选信令 + STUN</strong><span>跨网寻址 / 候选 / NAT 探测</span></button><button class="node" data-node="relay"><strong>可选 UDP Relay</strong><span>转发加密 QUIC 数据报</span></button></div></div>
+</div><aside class="panel detail" id="node-detail" aria-live="polite"></aside></div><p class="caption">通用 Agent 新增无信令模式：mDNS 局域网发现或完整 NodeId + IP:端口直连，所有路径仍执行相同认证和授权。无信令时不探测公共 STUN / Relay；专用 Sub2API 组合保持原有信令路径。此为源码能力，不表示现有部署已升级。图中的信令与 STUN 是两种服务职责：信令交换设备信息，STUN 探测地址映射；它们不处理文件任务。Relay 可与信令服务共同部署。</p>
 <div class="scroll-table"><table><thead><tr><th>可执行程序</th><th>职责与使用方式</th><th>部署位置</th></tr></thead><tbody><tr><td><code>p2p-desktop.exe</code></td><td>GPUI 原生界面。默认附着同目录 Agent；有现存配置且后台未运行时尝试启动同目录的 <code>p2p-agent</code>。首次初始化为显式动作。</td><td>有界面的 Windows / macOS / Linux 设备</td></tr><tr><td><code>p2p-agent.exe</code></td><td>无图形业务进程；装配节点核心、独占身份和存储、监听本地 IPC。</td><td>桌面设备后台或无界面服务器</td></tr><tr><td><code>p2p-node.exe</code></td><td>管理 CLI；通过 IPC 查询和控制 Agent；亦提供初始化、离线配置与可选 Web 网关入口。</td><td>与 Agent 相同机器、相同用户上下文</td></tr><tr><td><code>p2p_file</code></td><td>仓库保留的独立 CLI；含 <code>signal-server</code> 和可选 Relay 服务端，也保留历史发送、接收、隧道等入口。</td><td>基础设施服务器或显式历史使用场景；不在本次三程序精简桌面包内</td></tr><tr><td><code>Sub2API.exe</code></td><td>sub2api-client 专用构建；BAT 启动、固定 18081、独立设备身份。</td><td>朋友的 Windows x64</td></tr><tr><td><code>p2p-sub2api-gateway</code></td><td>sub2api-gateway 专用构建；隔离身份与凭证，只发布 Sub2API。</td><td>Ubuntu 独立 systemd 用户服务</td></tr></tbody></table></div></section>
 
 <section id="distribution"><div class="section-title"><span class="index">03</span><h2>Sub2API 专用发行版</h2></div><p class="small">专用入口、授权与配置单独维护；通信核心和统一节点协议共用。点击模块可查看源码。</p><div class="architecture"><div class="diagram">
@@ -52,6 +52,7 @@
 <article class="panel lane"><div class="boundary-title">Veytrane 已部署 · Mac ↔ Ubuntu 主节点</div><strong>Mac 浏览器 / Finder / 桌面</strong><div class="flow-label">↓ loopback 监听 · 7 条映射</div><strong>Mac Agent ↔ Ubuntu 主 Agent</strong><div class="flow-label">P2PN v2 · ec72ed4 · 认证 QUIC / 服务 ID</div><strong>管理 Web / 应用 / 路由器 / 文件共享</strong><p class="small">Mac：Agent、CLI / Web 与 Veytrane.app 已更新，主窗口启动与渲染通过，launchd 保留 managed 模式。Ubuntu：主 Agent、CLI / Web 已更新，systemd 用户服务 active / enabled。</p></article>
 <article class="panel lane special"><div class="boundary-title">Veytrane 网关已部署 · Windows 包已生成</div><strong>Windows 浏览器 → 18081</strong><div class="flow-label">↓ P2PN v2 专用客户端包 · 实机安装待验</div><strong>Windows ↔ Ubuntu 独立专用网关</strong><div class="flow-label">网关已部署 ec72ed4 · 只准 sub2api</div><strong>Ubuntu Sub2API → 8080</strong><p class="small">19:56 核对：独立网关 enabled / active、信令 online，身份与授权校验值保留。Windows x64 新包完成交叉构建与制品检查；朋友电脑未接入，未宣称已安装或实机验收。</p></article>
 </div>
+<div class="callout"><strong>新增源码能力：</strong>无信令局域网发现及 IP 直连已接入通用 Agent；尚未更新现有 Mac / Ubuntu 安装，以下保留原部署快照。</div>
 <div class="callout"><strong>2026-10-21 19:56（Asia/Shanghai）验收：</strong>两端运行构建均为 <code>ec72ed4</code>，信令 online、对端 connected、双向信任有效；Mac 的 7 条转发监听且 peer_ready。双向各传输 1 MiB 随机文件，发送与接收均完成，SHA-256 一致。这是当时的实机结果，页面不进行实时探测。</div>
 <div class="callout"><strong>专用路径 · 19:56 补充验收：</strong>Mac 独立身份接入实际 v2 网关，Sub2API 返回 200，其他 3 个服务开流被拒绝；Linux 共享客户端实现经网关重启后原进程恢复 200，客户端重启身份不变。8 项专用/恢复测试及 1 项实际网关测试通过。Windows 包仅导入系统 DLL，实机安装待验。<a href="task-reports/VEYTRANE_DEPLOYMENT.md">查看本次部署与分发证据 ↗</a></div>
 <p>本次更名中，两端配置、身份密钥、管理令牌及网关身份/授权校验值与备份逐字节一致；revision、原有任务和 7 条映射均保留。测试产生的接收文件与任务记录已清理，原任务记录复核一致。私有配置、备份与真实凭据均留在各自主机。</p>
@@ -89,8 +90,8 @@
 
 <section id="protocol"><div class="section-title"><span class="index">08</span><h2>协议、认证与信任边界</h2></div><div class="scroll-table"><table><thead><tr><th>边界</th><th>实现</th><th>保证与限制</th></tr></thead><tbody><tr><td>本机管理 → Agent</td><td>Windows 当前用户私有 ACL 命名管道；Unix socket 权限 <code>0600</code>，校验对端 UID。</td><td>原生 IPC 不监听 TCP。保护边界是本机用户权限；不用于公开互联网管理。</td></tr><tr><td>浏览器 → Web 网关</td><td>Axum 仅监听 loopback；管理 API 校验 token、Host / Origin 等边界，令牌保存在 <code>admin.token</code>。</td><td>可选本地入口，随后桥接同一个 IPC；浏览器不运行 P2P 核心。</td></tr><tr><td>节点 → 信令</td><td>注册与查找、签名挑战、候选交换、九位短 ID；支持配置 TLS。</td><td>短 ID 便于寻址，最终身份以 NodeId / 密钥认证为准。TLS 需配置，不能假设所有信令部署均开启。</td></tr><tr><td>节点 → 节点</td><td>QUIC 加密 + Ed25519 身份与连接绑定校验，统一能力协商与远端密码 / 信任认证。</td><td>“支持某能力”和“被授权使用”分别检查。认证失败不触发自动降级。</td></tr><tr><td>业务 → 本机资源</td><td>文件方向权限、接收根目录约束、TCP 服务 ID 与允许设备、限额和撤销。</td><td>授权访问明确的资源，不等于任意远程文件系统或任意网络目标访问。</td></tr><tr><td>节点 → Relay</td><td>经配对认证与限额的 UDP 数据报转发，内层仍是设备间加密 QUIC。</td><td>Relay 转发密文，仍能观察连接元数据与流量规模；未配置时不提供中继兜底。</td></tr></tbody></table></div><div class="grid two"><article class="panel"><h3>本地管理协议</h3><ul><li><code>api_version = 1</code>；JSON 外层为 4 字节大端长度，帧上限 1 MiB。</li><li>请求带 <code>request_id</code>、<code>timeout_ms</code> 和有类型的命令；响应携带结果或错误。</li><li>变更请求以 ID + 命令摘要去重；同 ID 不同内容拒绝，结果未知时应以相同 ID 重试。</li><li>配置使用 <code>expected_revision</code> 防止多个入口相互覆盖；最近配置提交 ID 持久保存。</li><li>事件使用 epoch / sequence，断档需要重新读取快照。桌面当前主要轮询 Status / Tasks，而非持续事件流订阅。</li></ul></article><article class="panel"><h3>设备间统一协议</h3><ul><li>唯一 <code>P2PN v2</code>，协商 magic <code>P2PN\x01</code>；服务控制使用版本化、有界帧。</li><li>业务流类型为 File / Service / Speed；能力位决定是否支持，资源策略决定是否准入；持续授权通道为必需能力。</li><li>文件领域使用 P2PF 专门控制消息、清单和分片数据，不把文件内容塞入节点服务目录消息。</li><li>文件完成以持久回执为准；管理命令返回 <code>accepted</code> 仅代表接纳。</li><li>业务流队列和帧头处理均有界，繁忙或非法请求显式拒绝。</li></ul></article></div></section>
 
-<section id="storage"><div class="section-title"><span class="index">09</span><h2>配置、持久状态与数据所有权</h2></div><p>通用 Agent 默认数据根：Windows 为 <code>%LOCALAPPDATA%\p2p-file\node</code>，Mac 为 <code>~/Library/Application Support/p2p-file/node</code>，Linux 通常为 <code>~/.local/share/p2p-file/node</code>（遵循 XDG）；可用 <code>--data-dir</code> 指定。业务接收根 <code>receive_root</code> 独立配置。专用版使用下表中的独立目录，不读取通用节点的身份或配置。</p><div class="scroll-table"><table><thead><tr><th>文件 / 状态</th><th>内容</th><th>所有权与恢复规则</th></tr></thead><tbody><tr><td><code>identity.key</code></td><td>稳定设备私钥；NodeId 由身份派生。</td><td>Agent 持有身份租约；同身份不能靠更换目录绕开重复运行保护。</td></tr><tr><td><code>node.json</code></td><td>schema、revision、最近配置请求、信令 / Relay、接收根、信任 / 资源、服务 / 规则、限速等。</td><td>在线经 Agent 提交；先校验并原子持久化，再发布生效状态。通用配置查询移除密码验证器。</td></tr><tr><td><code>tasks.json</code> + 任务锁</td><td>文件任务、状态、绑定身份 / 路径、恢复和完成信息。</td><td>Agent 的任务服务写入，管理入口不直接编辑。恢复依赖检查点和重新认证。</td></tr><tr><td><code>agent.lock</code> + 身份租约</td><td>目录独占、同身份独占；任务库还有独立锁。</td><td>启动、退出和离线编辑均要尊重实际持有者。</td></tr><tr><td>业务临时文件 / 位图 / 最终文件</td><td>文件内容、分片确认和发布所需状态，绑定任务接收位置。</td><td>校验后安全发布；路径约束与目录 capability 防止越界。修改接收根只影响新任务。</td></tr><tr><td><code>admin.token</code>（可选）</td><td>本机 Web 管理令牌。</td><td>仅 Web 网关启用时需要，作为私有文件保存。</td></tr><tr><td>专用客户端目录</td><td><code>%LOCALAPPDATA%\Sub2API-Client</code>：<code>identity.key</code> 和 <code>client.lock</code>。</td><td>每设备 / 当前 Windows 用户独立生成身份，不保存可编辑的运行时路由配置。锁避免重复实例。</td></tr><tr><td>专用网关目录</td><td>本次 Ubuntu 部署为 <code>~/.local/share/p2p-sub2api-gateway</code>：<code>identity.key</code>、<code>gateway.json</code>、<code>gateway.lock</code>、<code>runtime.json</code>。</td><td>gateway.json 保存密码校验值；runtime.json 为代次与恢复状态快照，不是管理 API。升级和恢复不覆盖身份 / 校验值。</td></tr><tr><td>发行者构建 profile</td><td><code>P2P_SUB2API_PROFILE_FILE</code> 指定私有 JSON：网关、信令、专用访问凭证等。</td><td>私有构建输入不提交仓库、不放入 ZIP；凭证嵌入 EXE 后可由持有者提取。</td></tr><tr><td>内存快照 / 事件 / 预览</td><td>peer 状态、epoch、事件日志、队列、限时目录预览、界面草稿。</td><td>均不是持久任务完成证据；Agent 重启后客户端需重新同步。</td></tr></tbody></table></div>
-<div class="grid two"><article class="panel"><h3>可在线应用</h3><p class="small">资源权限、可信设备及来源、服务和转发规则映射、发送并发、自动恢复、接收安全余量、文件限速、接收根目录。密码通过专用命令更新。</p><p class="small">接收根先验证可写；既有任务保留原绑定位置。规则监听先准备，配置提交失败不发布新权限。</p></article><article class="panel"><h3>需要停止并重新启动</h3><p class="small">信令地址 / TLS、Relay 和业务能力开关等网络运行时配置。使用显式重启配置流程，提交后进入 restart pending 并停止，不承诺透明热切换。</p><p class="small">各管理入口共享 revision；冲突时重新读取并处理草稿，不直接覆盖其他入口的更新。</p></article></div></section>
+<section id="storage"><div class="section-title"><span class="index">09</span><h2>配置、持久状态与数据所有权</h2></div><p>通用 Agent 默认数据根：Windows 为 <code>%LOCALAPPDATA%\p2p-file\node</code>，Mac 为 <code>~/Library/Application Support/p2p-file/node</code>，Linux 通常为 <code>~/.local/share/p2p-file/node</code>（遵循 XDG）；可用 <code>--data-dir</code> 指定。业务接收根 <code>receive_root</code> 独立配置。专用版使用下表中的独立目录，不读取通用节点的身份或配置。</p><div class="scroll-table"><table><thead><tr><th>文件 / 状态</th><th>内容</th><th>所有权与恢复规则</th></tr></thead><tbody><tr><td><code>identity.key</code></td><td>稳定设备私钥；NodeId 由身份派生。</td><td>Agent 持有身份租约；同身份不能靠更换目录绕开重复运行保护。</td></tr><tr><td><code>node.json</code></td><td>schema、revision、最近配置请求、信令 / Relay、直连监听 / 发现 / 已保存地址、接收根、信任 / 资源、服务 / 规则、限速等。</td><td>在线经 Agent 提交；先校验并原子持久化，再发布生效状态。通用配置查询移除密码验证器。</td></tr><tr><td><code>tasks.json</code> + 任务锁</td><td>文件任务、状态、绑定身份 / 路径、恢复和完成信息。</td><td>Agent 的任务服务写入，管理入口不直接编辑。恢复依赖检查点和重新认证。</td></tr><tr><td><code>agent.lock</code> + 身份租约</td><td>目录独占、同身份独占；任务库还有独立锁。</td><td>启动、退出和离线编辑均要尊重实际持有者。</td></tr><tr><td>业务临时文件 / 位图 / 最终文件</td><td>文件内容、分片确认和发布所需状态，绑定任务接收位置。</td><td>校验后安全发布；路径约束与目录 capability 防止越界。修改接收根只影响新任务。</td></tr><tr><td><code>admin.token</code>（可选）</td><td>本机 Web 管理令牌。</td><td>仅 Web 网关启用时需要，作为私有文件保存。</td></tr><tr><td>专用客户端目录</td><td><code>%LOCALAPPDATA%\Sub2API-Client</code>：<code>identity.key</code> 和 <code>client.lock</code>。</td><td>每设备 / 当前 Windows 用户独立生成身份，不保存可编辑的运行时路由配置。锁避免重复实例。</td></tr><tr><td>专用网关目录</td><td>本次 Ubuntu 部署为 <code>~/.local/share/p2p-sub2api-gateway</code>：<code>identity.key</code>、<code>gateway.json</code>、<code>gateway.lock</code>、<code>runtime.json</code>。</td><td>gateway.json 保存密码校验值；runtime.json 为代次与恢复状态快照，不是管理 API。升级和恢复不覆盖身份 / 校验值。</td></tr><tr><td>发行者构建 profile</td><td><code>P2P_SUB2API_PROFILE_FILE</code> 指定私有 JSON：网关、信令、专用访问凭证等。</td><td>私有构建输入不提交仓库、不放入 ZIP；凭证嵌入 EXE 后可由持有者提取。</td></tr><tr><td>内存快照 / 事件 / 预览</td><td>peer 状态、epoch、事件日志、队列、限时目录预览、界面草稿。</td><td>均不是持久任务完成证据；Agent 重启后客户端需重新同步。</td></tr></tbody></table></div>
+<div class="grid two"><article class="panel"><h3>可在线应用</h3><p class="small">已保存的直连地址、资源权限、可信设备及来源、服务和转发规则映射、发送并发、自动恢复、接收安全余量、文件限速、接收根目录。密码通过专用命令更新。</p><p class="small">接收根先验证可写；既有任务保留原绑定位置。规则监听先准备，配置提交失败不发布新权限。</p></article><article class="panel"><h3>需要停止并重新启动</h3><p class="small">直连接入 / 局域网发现开关及 UDP 监听端口、信令地址 / TLS、Relay 和业务能力开关等网络运行时配置。使用显式重启配置流程，提交后进入 restart pending 并停止，不承诺透明热切换。</p><p class="small">各管理入口共享 revision；冲突时重新读取并处理草稿，不直接覆盖其他入口的更新。</p></article></div></section>
 
 <section id="operations"><div class="section-title"><span class="index">10</span><h2>生命周期、并发与自动恢复</h2></div><div class="panel recovery-map"><div class="lane-grid"><div class="lane"><div class="boundary-title">外部宿主管理 · 进程退出兜底</div><strong>Mac launchd / Ubuntu systemd</strong><p class="small">登录 / 开机启动，异常退出后重启。通用 Mac Agent 的 <code>--managed</code> 检测恢复条件后优雅退出，交由 launchd 拉起。</p></div><div class="lane special"><div class="boundary-title">专用进程内部 · 不替换身份</div><strong>宿主监测 + Client / GatewayRecovery</strong><p class="small">采样接口、停顿、核心、通道和服务状态 → 有界决策 → 停止旧核心 → 等待 2 秒 → 新核心重新登记和连接。</p></div></div><div class="flow-label">↓ 保持身份、配置、授权边界  ·  重新收集候选 ↓</div><div class="core-strip"><strong>共享 Session / QUIC 网络层</strong><span>信令重连保留健康 peer · 已连接 QUIC keepalive · IPv4 STUN 映射 15 秒保活</span></div></div>
 <div class="scroll-table"><table><thead><tr><th>范围 / 触发</th><th>恢复动作与保护条件</th></tr></thead><tbody><tr><td>宿主采样</td><td>每 5 秒观察一次。停顿 ≥30 秒、接口变化连续确认或核心连续 3 次停止触发恢复。通用 Mac managed 模式退出等待 launchd；专用版在进程内重建核心。</td></tr><tr><td>共享 NAT 映射保活</td><td>每 15 秒向产生 IPv4 公网映射的 STUN 地址发送 Binding Indication，使用原 QUIC UDP socket；无需响应，由 Quinn 独占接收。网络重配置时替换保活任务。</td></tr><tr><td>专用客户端通道缺失</td><td>无设备通道持续 60 秒后重建网络；健康 QUIC 通道不在每次就绪轮询时重复请求信令配对。</td></tr><tr><td>专用客户端业务卡住</td><td>HTTP 未就绪时，每 15 秒探测服务目录，超时 3 秒；连续 3 次失败触发恢复。目录健康而后端 HTTP 异常时等待 Sub2API，不拆除健康通道。</td></tr><tr><td>专用网关空闲</td><td>无人连接且没有待连接时，实际空闲 300 秒刷新候选。存在已连接用户时，不触发空闲 / 失败刷新。</td></tr><tr><td>专用网关失败 / 停滞</td><td>核心至少运行 60 秒；90 秒内 3 次传输失败、待连接阶段 45 秒无进展，或信令 150 秒未确认时重建。密码失败不算传输失败；健康用户优先保留。</td></tr><tr><td>长 TCP 流控制配额</td><td>TcpReady 协商结束立即释放每 peer 的服务控制槽位；HTTP keep-alive、WebSocket、SMB 持续流改由 TCP 总预算持有，不再占满 8 个控制槽导致新请求 RESET_BUSY。</td></tr></tbody></table></div><div class="callout warn"><strong>恢复语义：</strong>重建后接受新的 TCP 请求；已断开的 TCP 字节流不能透明续接。朋友版窗口关闭后需再次启动 BAT；自动重连不等于开机自启，也不会绕过凭证撤销或持续网络阻断。</div>
@@ -113,12 +114,13 @@ session:{tag:'CORE / CONNECTION',title:'会话与流分发',text:'Session 管理
 business:{tag:'CORE / DOMAIN',title:'三类核心业务',text:'文件 / 目录、TCP 转发与测速共享认证连接，使用独立业务流和领域状态机。',items:['文件：清单、分片、续传、队列、限速、安全发布。','TCP：按服务 ID 开流，本地 loopback 监听。','测速：独立流统计传输率与 RTT。'],sources:[['../src/node/core/transfer.rs','文件服务'],['../src/node/core/services.rs','TCP 服务'],['../src/node/core/speed.rs','测速']]},
 state:{tag:'LOCAL / PERSISTENCE',title:'配置与任务状态',text:'node.json、identity.key、tasks.json 由后台及离线生命周期工具按锁保护操作。',items:['revision 比较防止多个入口覆盖。','原子写、检查点和持久完成回执。','目录锁 + 身份租约 + 任务库锁约束单一所有权。'],sources:[['../src/node/local/paths.rs','路径'],['../src/node/core/settings.rs','配置'],['../src/node/core/task_store.rs','任务库']]},
 peer:{tag:'REMOTE / SYMMETRIC',title:'远端节点',text:'远端运行同一套 Agent 核心。可以无界面常驻，也可以通过自己的桌面 / CLI 管理。',items:['一个节点可主动连接，也可接受授权连接。','远端声明服务，访问方按服务 ID 使用。','本机权限与远端权限分别生效。'],sources:[['../src/node/core/authorization.rs','资源策略'],['../src/node/core/services.rs','服务目录']]},
-signal:{tag:'INFRASTRUCTURE / DISCOVERY',title:'信令与地址探测',text:'信令负责节点登记、九位短 ID 查找和候选交换；STUN 负责探测 UDP 公网映射。',items:['设备仍需自行完成身份认证。','双栈候选、同端口探测与打洞服务于直连。','信令地址可以配置 TLS；短 ID 不是访问凭据。'],sources:[['../src/discovery/signal.rs','信令'],['../src/discovery/short_id.rs','短 ID'],['../src/net/mod.rs','网络路径']]},
+signal:{tag:'INFRASTRUCTURE / DISCOVERY',title:'信令与地址探测',text:'可选的跨网协调路径：信令负责登记、九位短 ID 与候选交换，STUN 探测映射；通用 Agent 的局域网发现和已知 IP 直连无需信令。',items:['设备仍需自行完成身份认证。','双栈候选、同端口探测与打洞服务于直连。','信令地址可以配置 TLS；短 ID 不是访问凭据。'],sources:[['../src/discovery/signal.rs','信令'],['../src/discovery/short_id.rs','短 ID'],['../src/net/mod.rs','网络路径']]},
 relay:{tag:'INFRASTRUCTURE / OPTIONAL',title:'UDP Relay 兜底',text:'配置 Relay 后，Direct 未及时认证成功时，可延迟尝试中继。',items:['转发设备间端到端加密 QUIC 数据报。','票据、配对、超时及资源额度约束中继使用。','与信令基础设施可共同部署，业务授权仍在节点。'],sources:[['../src/relay/client.rs','Relay 客户端'],['../src/relay/server.rs','Relay 服务端'],['../src/cli.rs','部署参数']]}
 };
 const flows={
 "restricted":{"name": "专用接入", "steps": [["BAT 启动", "Windows → 专用进程", "首次生成当前用户的设备身份并持锁。读取编译期嵌入 profile，只监听 127.0.0.1:18081，不提供配置入口。", "../src/bin/sub2api-client.rs"], ["信令与直连", "客户端 ↔ 信令 / STUN ↔ 专用网关", "登记设备并交换候选，完成同端口打洞与 QUIC 身份绑定。当前分发配置未启用 Relay。", "../src/node/core/session.rs"], ["专用凭证授权", "网关 → 当前连接的内存 ACL", "完成专用密码认证后，才将该设备加入 sub2api 的授权名单；认证断开后回收。", "../src/node/products/sub2api.rs"], ["应用请求", "浏览器 → 18081 → Service 流 → 8080", "网关按 sub2api 服务 ID 再次检查权限并连接固定目标；Sub2API 自身继续检查应用账号。", "../src/node/core/services.rs"]]},"recover":{"name": "自动恢复", "steps": [["观察故障", "宿主监测 + 业务就绪探测", "区分信令、设备通道、服务目录、HTTP 后端；健康用户与健康通道优先保留。", "../src/node/products/sub2api.rs"], ["有界决策", "ClientRecovery / GatewayRecovery", "客户端通道持续缺失或目录探测连续失败；网关无人在线时闲置刷新或连接失败刷新。认证失败不计入传输失败。", "../src/node/products/recovery.rs"], ["停止旧核心", "停止监听 / 会话 → 等待回收", "专用进程保留目录锁和设备身份，优雅收尾核心；等待 2 秒后重建。通用 Mac managed 模式由 launchd 拉起进程。", "../src/node/host/recovery.rs"], ["重新登记与服务恢复", "新候选 → 信令 → 授权 → 本地入口", "复用身份与凭证重新连接，恢复新业务请求；不透明续接已断开的 TCP 字节流，不改写持久配置。", "../src/node/products/sub2api.rs"]]},
-connect:{name:'连接设备',steps:[['输入设备 ID','桌面 / CLI → 本地 IPC','输入完整 NodeId 或九位短 ID，可附带访问密码。前端只提交 Connect 命令，不直接拨号。','../src/node/api/protocol.rs'],['查找与打洞','Agent → 信令 / STUN → 对端','短 ID 解析到节点身份，交换候选。每个地址族路径复用探测、打洞和 QUIC 所需的本地 socket；优先建立可认证直连，已配置时允许 Relay 兜底。','../src/net/mod.rs'],['身份与权限','双方 Agent → 认证 / 能力 / 策略','校验目标身份与连接绑定，协商统一能力；执行密码或可信设备认证，并按资源策略授予方向与服务权限。','../src/node/core/session.rs'],['呈现状态','NodeSnapshot → IPC → 所有窗口','Agent 更新 peer 快照；前端读取状态并刷新共享模型。短 ID、信令在线、链路连通和业务授权是不同状态。','../src/node/core/control.rs']]},
+direct:{name:'无信令直连',steps:[['取得地址','附近设备 / IP → 管理IPC','mDNS公告或用户输入完整NodeId与IP:端口。发现仅作地址提示，不自动连接、信任或授予权限。','../src/node/core/connectivity.rs'],['身份接纳','原生IPv4 / IPv6 QUIC → 预期NodeId','未知来源先通过QUIC Retry；有界身份握手校验Ed25519及TLS绑定，外连固定预期身份并选择成功地址。','../src/node/core/session/direct.rs'],['统一授权','P2PN v2 → 密码 / 可信设备 → 资源策略','复用相同协商、方向权限和持续授权，成功后才发布业务连接。无信令时不查询公共STUN或Relay。','../src/node/core/session.rs'],['现有业务','NodeSnapshot → 文件 / TCP / 测速','状态标识无信令模式，文件及服务流仍走原处理器；禁用设备和撤销授权继续生效。','../src/node/core/control.rs']]},
+connect:{name:'信令连接',steps:[['输入设备 ID','桌面 / CLI → 本地 IPC','输入完整 NodeId 或九位短 ID，可附带访问密码。前端只提交 Connect 命令，不直接拨号。','../src/node/api/protocol.rs'],['查找与打洞','Agent → 信令 / STUN → 对端','短 ID 解析到节点身份，交换候选。每个地址族路径复用探测、打洞和 QUIC 所需的本地 socket；优先建立可认证直连，已配置时允许 Relay 兜底。','../src/net/mod.rs'],['身份与权限','双方 Agent → 认证 / 能力 / 策略','校验目标身份与连接绑定，协商统一能力；执行密码或可信设备认证，并按资源策略授予方向与服务权限。','../src/node/core/session.rs'],['呈现状态','NodeSnapshot → IPC → 所有窗口','Agent 更新 peer 快照；前端读取状态并刷新共享模型。短 ID、信令在线、链路连通和业务授权是不同状态。','../src/node/core/control.rs']]},
 send:{name:'发送文件',steps:[['选择与提交','主工作台 → Send(peer, paths)','选择文件或目录，前端向 Agent 提交本机绝对路径。accepted 仅代表任务被接纳。','../src/desktop/agent_shell/workbench.rs'],['调度与校验','TransferService → 队列 → 认证连接','后台扫描并形成任务，按 FIFO 和发送并发额度调度；校验 peer 身份、连接代际、能力及文件方向权限。','../src/node/core/transfer.rs'],['分片与落盘','发送端 → QUIC 文件流 → 接收端','交换清单和分片状态，BLAKE3 校验，写入接收临时位置并维护检查点；限速与可用空间预算持续约束传输。','../src/node/core/transfer_files.rs'],['发布与回执','接收端安全发布 → 持久收据 → 状态','接收端验证完整数据并安全发布；任务完成由持久回执推动，窗口根据任务快照显示结果。暂停续传保留已确认进度。','../src/node/core/publish.rs']]},
 directory:{name:'增量目录',steps:[['请求预览','工作台 → PreviewDirectory','Agent 扫描指定目录，并与授权对端生成差异预览；目录源路径留在本机。','../src/node/core/incremental.rs'],['展示差异','Agent Tasks → 独立目录预览窗口','列出新增、变更和不变项。预览有存活期限，是需要确认的候选计划。','../src/desktop/agent_shell/workbench.rs'],['确认并复核','ConfirmDirectory → Agent','用户确认后，后台复核源内容与当前权限，再接纳实际发送任务，避免预览后变化直接绕过校验。','../src/node/core/incremental.rs'],['差量传输','文件任务 → 对端接收根','复用文件服务，只发送需要的内容，跳过不变项；不会因此删除接收端额外文件。','../src/node/core/transfer.rs']]},
 tcp:{name:'TCP 转发',steps:[['远端发布服务','远端配置 → services / resources','服务端明确配置服务 ID、目标地址和允许设备；连接通过认证并不自动获得所有 TCP 目标权限。','../src/node/core/authorization.rs'],['本机创建规则','管理入口 → 配置协调 → ForwardManager','本机规则将 loopback 监听地址映射到 peer + service ID；监听准备成功后随配置提交启用。','../src/node/host/forwarding.rs'],['请求业务流','本地 TCP 连接 → QUIC Service 流','应用连接本机监听，节点发起 OpenTcp(service_id)。远端校验服务和权限后建立目标 TCP 连接。','../src/node/core/services.rs'],['双向转发','本地应用 ↔ QUIC ↔ 远端服务','字节在 TCP 与加密 QUIC 流之间双向搬运，受总流数、规则额度和撤销策略约束。','../src/tunnel/mod.rs']]},
@@ -372,7 +374,7 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
       "title": "直连网络 / QUIC",
       "tag": "TRANSPORT",
       "path": "src/net/mod.rs",
-      "summary": "发现候选后进行双栈竞速、打洞和身份绑定，业务数据使用加密 QUIC。",
+      "summary": "局域网提示、已知IP或信令候选进入原生IPv4/IPv6 QUIC；所有路径均认证身份。",
       "rules": [
         "信令断流不等于既有业务流立即失效。",
         "UPnP / NAT-PMP / PCP 仍未实现，占位代码已删除。"
@@ -430,7 +432,7 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
       "title": "信令 / 短 ID",
       "tag": "DISCOVERY",
       "path": "src/discovery/signal.rs",
-      "summary": "负责节点登记、短 ID 查找和候选交换，帮助设备找到彼此。",
+      "summary": "可选的跨网发现与打洞协调；九位短ID依赖该服务，局域网发现及已知IP直连无需使用。",
       "rules": [
         "直连成功时不承载文件或 TCP 业务字节。",
         "短 ID 是寻址工具，不是访问凭据。"
@@ -551,7 +553,7 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
         {
           "name": "会话循环",
           "path": "src/node/core/session.rs",
-          "detail": "信令与 QUIC 生命周期。"
+          "detail": "信令与无信令直连的代际、认证、权限与业务发布。"
         },
         {
           "name": "统一协议",
@@ -770,13 +772,43 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
         }
       ],
       "section": "desktop"
+    },
+    {
+      "id": "connectivity",
+      "title": "局域网发现 / IP直连",
+      "tag": "CORE / LOCAL DISCOVERY",
+      "path": "src/node/core/connectivity.rs",
+      "summary": "mDNS提供有界且会过期的地址提示；完整NodeId与IP直连走原有身份和授权，不依赖信令。",
+      "rules": [
+        "发现不等于信任；不自动连接、不生成授权。",
+        "无信令时不查询公网STUN或Relay；监听及发现开关需重启，保存的设备地址支持在线提交。",
+        "未知入站先通过QUIC Retry与有界身份握手，再执行原P2PN v2协商和远程认证。"
+      ],
+      "parts": [
+        {
+          "name": "发现与地址校验",
+          "path": "src/node/core/connectivity.rs",
+          "detail": "独立_veytrane._udp.local.命名空间、双地址族端口、64条发现缓存、过期和移除。"
+        },
+        {
+          "name": "直连认证路径",
+          "path": "src/node/core/session/direct.rs",
+          "detail": "预期身份校验、超时与并发上限；复用统一授权完成和业务发布门禁。"
+        },
+        {
+          "name": "Agent进程验收",
+          "path": "tests/node_agent_process/direct.rs",
+          "detail": "无信令发现、文件校验、TCP、测试节点重启和权限撤销。"
+        }
+      ],
+      "section": "protocol"
     }
   ],
   "views": [
     {
       "id": "system",
       "title": "系统全景",
-      "description": "管理请求进入唯一宿主；业务数据经核心与 QUIC 到达远端。图中只呈现主要关系，箭头不表示部署是否在线。",
+      "description": "统一Agent支持局域网发现、已知IP直连与可选信令协调；所有业务共用身份和授权。部署快照与新增源码能力分别记录。",
       "nodes": [
         {
           "id": "desktop",
@@ -842,6 +874,11 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
           "id": "core",
           "x": 330,
           "y": 605
+        },
+        {
+          "id": "connectivity",
+          "x": 620,
+          "y": 605
         }
       ],
       "edges": [
@@ -903,6 +940,16 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
         {
           "source": "products",
           "target": "core",
+          "kind": "dependency"
+        },
+        {
+          "source": "connectivity",
+          "target": "network",
+          "kind": "control"
+        },
+        {
+          "source": "core",
+          "target": "connectivity",
           "kind": "dependency"
         }
       ]
@@ -1070,6 +1117,11 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
           "id": "network",
           "x": 620,
           "y": 655
+        },
+        {
+          "id": "connectivity",
+          "x": 475,
+          "y": 295
         }
       ],
       "edges": [
@@ -1127,6 +1179,16 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
           "source": "speed",
           "target": "network",
           "kind": "data"
+        },
+        {
+          "source": "session",
+          "target": "connectivity",
+          "kind": "control"
+        },
+        {
+          "source": "connectivity",
+          "target": "network",
+          "kind": "control"
         }
       ]
     },

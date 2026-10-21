@@ -70,6 +70,11 @@ impl Agent {
         // never tear down a healthy node merely to learn whether it can start.
         let mut before = serde_json::to_value(&current.settings).map_err(|e| e.to_string())?;
         let mut after = serde_json::to_value(&settings).map_err(|e| e.to_string())?;
+        for value in [&mut before, &mut after] {
+            if let Some(direct) = value.get_mut("direct").and_then(Value::as_object_mut) {
+                direct.remove("peers");
+            }
+        }
         for key in [
             "resources",
             "services",

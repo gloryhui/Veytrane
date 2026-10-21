@@ -90,3 +90,9 @@ python3 scripts/node-host-tests.py
 本次清理与验证见 [遗留代码清理记录](task-reports/LEGACY_CLEANUP.md)；首次分层证据见 [分层整理验证记录](task-reports/REPOSITORY_REORGANIZATION.md)。
 
 当前节点只有 `wire.rs` 协商和 `dispatch.rs` 分发入口。`protocol.rs` 是 P2PF 文件/测速载荷；`services.rs` 负责服务 ID 开流，字节搬运复用 `src/tunnel/mod.rs`。旧 `core/tunnel.rs`、PeerWireMode 与双路入站循环已删除。
+
+## 无信令连接入口
+
+`core/connectivity.rs` 维护直连配置、独立 mDNS 命名空间、地址校验和有界过期缓存；`core/session/direct.rs` 负责 IP 直连的身份接纳与超时。局域网、手动地址和信令共用 `finish_peer_transport`，不复制文件、服务或认证实现。`nearby` 及 `connect-address` 经同一管理 API 接入桌面、CLI 和 Web。
+
+发现记录不授予权限，完整 NodeId 固定预期身份，原密码/可信设备、资源 ACL 和代际门禁保留。无信令时跳过公网 STUN/Relay，专用 Sub2API 组合显式禁用通用节点发现与直连接入。流程与配置见[无信令连接说明](SIGNAL_FREE_CONNECTIVITY.md)。

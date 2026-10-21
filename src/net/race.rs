@@ -72,6 +72,21 @@ impl PreparedTransport {
         identity: &Identity,
         expected: NodeId,
     ) -> Result<Self> {
+        let (_, prepared) = Self::accept_checked(incoming, identity, Some(expected)).await?;
+        Ok(prepared)
+    }
+    /// Identity is verified before it is returned. This does not grant resources.
+    pub async fn accept_identified(
+        incoming: quinn::Incoming,
+        identity: &Identity,
+    ) -> Result<(NodeId, Self)> {
+        Self::accept_checked(incoming, identity, None).await
+    }
+    async fn accept_checked(
+        incoming: quinn::Incoming,
+        identity: &Identity,
+        expected: Option<NodeId>,
+    ) -> Result<(NodeId, Self)> {
         let connection = incoming
             .await
             .map_err(|e| Error::Transport(e.to_string()))?;
@@ -86,15 +101,19 @@ impl PreparedTransport {
             &mut send, &mut recv, identity, &binding,
         )
         .await?;
-        if verified.outcome.peer_node_id != expected {
+        let peer = verified.outcome.peer_node_id;
+        if expected.is_some_and(|id| id != peer) {
             return Err(Error::Identity("unexpected Relay peer NodeId".into()));
         }
         verified.finish(&mut send).await?;
-        Ok(Self {
-            guard,
-            send,
-            _recv: recv,
-        })
+        Ok((
+            peer,
+            Self {
+                guard,
+                send,
+                _recv: recv,
+            },
+        ))
     }
     pub fn own_relay_endpoint(&mut self, endpoint: quinn::Endpoint) {
         self.guard.own_relay_endpoint(endpoint);

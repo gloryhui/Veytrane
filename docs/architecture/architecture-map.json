@@ -236,7 +236,7 @@
       "title": "直连网络 / QUIC",
       "tag": "TRANSPORT",
       "path": "src/net/mod.rs",
-      "summary": "发现候选后进行双栈竞速、打洞和身份绑定，业务数据使用加密 QUIC。",
+      "summary": "局域网提示、已知IP或信令候选进入原生IPv4/IPv6 QUIC；所有路径均认证身份。",
       "rules": [
         "信令断流不等于既有业务流立即失效。",
         "UPnP / NAT-PMP / PCP 仍未实现，占位代码已删除。"
@@ -294,7 +294,7 @@
       "title": "信令 / 短 ID",
       "tag": "DISCOVERY",
       "path": "src/discovery/signal.rs",
-      "summary": "负责节点登记、短 ID 查找和候选交换，帮助设备找到彼此。",
+      "summary": "可选的跨网发现与打洞协调；九位短ID依赖该服务，局域网发现及已知IP直连无需使用。",
       "rules": [
         "直连成功时不承载文件或 TCP 业务字节。",
         "短 ID 是寻址工具，不是访问凭据。"
@@ -415,7 +415,7 @@
         {
           "name": "会话循环",
           "path": "src/node/core/session.rs",
-          "detail": "信令与 QUIC 生命周期。"
+          "detail": "信令与无信令直连的代际、认证、权限与业务发布。"
         },
         {
           "name": "统一协议",
@@ -634,13 +634,43 @@
         }
       ],
       "section": "desktop"
+    },
+    {
+      "id": "connectivity",
+      "title": "局域网发现 / IP直连",
+      "tag": "CORE / LOCAL DISCOVERY",
+      "path": "src/node/core/connectivity.rs",
+      "summary": "mDNS提供有界且会过期的地址提示；完整NodeId与IP直连走原有身份和授权，不依赖信令。",
+      "rules": [
+        "发现不等于信任；不自动连接、不生成授权。",
+        "无信令时不查询公网STUN或Relay；监听及发现开关需重启，保存的设备地址支持在线提交。",
+        "未知入站先通过QUIC Retry与有界身份握手，再执行原P2PN v2协商和远程认证。"
+      ],
+      "parts": [
+        {
+          "name": "发现与地址校验",
+          "path": "src/node/core/connectivity.rs",
+          "detail": "独立_veytrane._udp.local.命名空间、双地址族端口、64条发现缓存、过期和移除。"
+        },
+        {
+          "name": "直连认证路径",
+          "path": "src/node/core/session/direct.rs",
+          "detail": "预期身份校验、超时与并发上限；复用统一授权完成和业务发布门禁。"
+        },
+        {
+          "name": "Agent进程验收",
+          "path": "tests/node_agent_process/direct.rs",
+          "detail": "无信令发现、文件校验、TCP、测试节点重启和权限撤销。"
+        }
+      ],
+      "section": "protocol"
     }
   ],
   "views": [
     {
       "id": "system",
       "title": "系统全景",
-      "description": "管理请求进入唯一宿主；业务数据经核心与 QUIC 到达远端。图中只呈现主要关系，箭头不表示部署是否在线。",
+      "description": "统一Agent支持局域网发现、已知IP直连与可选信令协调；所有业务共用身份和授权。部署快照与新增源码能力分别记录。",
       "nodes": [
         {
           "id": "desktop",
@@ -706,6 +736,11 @@
           "id": "core",
           "x": 330,
           "y": 605
+        },
+        {
+          "id": "connectivity",
+          "x": 620,
+          "y": 605
         }
       ],
       "edges": [
@@ -767,6 +802,16 @@
         {
           "source": "products",
           "target": "core",
+          "kind": "dependency"
+        },
+        {
+          "source": "connectivity",
+          "target": "network",
+          "kind": "control"
+        },
+        {
+          "source": "core",
+          "target": "connectivity",
           "kind": "dependency"
         }
       ]
@@ -934,6 +979,11 @@
           "id": "network",
           "x": 620,
           "y": 655
+        },
+        {
+          "id": "connectivity",
+          "x": 475,
+          "y": 295
         }
       ],
       "edges": [
@@ -991,6 +1041,16 @@
           "source": "speed",
           "target": "network",
           "kind": "data"
+        },
+        {
+          "source": "session",
+          "target": "connectivity",
+          "kind": "control"
+        },
+        {
+          "source": "connectivity",
+          "target": "network",
+          "kind": "control"
         }
       ]
     },

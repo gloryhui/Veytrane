@@ -206,6 +206,7 @@ impl AgentShell {
                 &self.management_signal,
                 &self.management_peer,
                 &self.management_password,
+                &self.management_address,
                 &self.management_local_password,
                 &self.name,
                 &self.service,
@@ -419,6 +420,7 @@ impl AgentShell {
         } else {
             match self.state["node"]["signal"].as_str().unwrap_or("") {
                 "online" => ("信令在线", ui_components::StatusTone::Success),
+                "disabled" => ("局域网 / IP直连", ui_components::StatusTone::Info),
                 "connecting" | "reconnecting" => ("连接中", ui_components::StatusTone::Info),
                 "failed" => ("网络异常", ui_components::StatusTone::Danger),
                 _ => ("未配置", ui_components::StatusTone::Neutral),

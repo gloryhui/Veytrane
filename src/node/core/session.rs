@@ -41,6 +41,10 @@ use crate::node::core::network_state::{
     reconnect_delay, should_initiate_quic,
 };
 
+mod direct;
+#[cfg(test)]
+mod direct_tests;
+
 const COMMAND_CAPACITY: usize = 64;
 const EVENT_CAPACITY: usize = 128;
 const SESSION_INPUT_CAPACITY: usize = 64;
@@ -59,6 +63,7 @@ fn is_current_signal_generation(current: u64, result_generation: u64) -> bool {
 
 #[derive(Clone, Debug)]
 pub struct NodeSessionConfig {
+    pub direct: crate::node::core::connectivity::DirectSettings,
     pub service_ids: HashMap<String, String>,
     pub resources: crate::node::core::authorization::ResourcePolicy,
     pub trust_sources: HashMap<NodeId, crate::node::core::authorization::TrustSource>,
@@ -81,6 +86,10 @@ pub struct NodeSessionConfig {
 impl NodeSessionConfig {
     pub fn new(signal_server: impl Into<String>) -> Self {
         Self {
+            direct: crate::node::core::connectivity::DirectSettings {
+                enabled: false,
+                ..Default::default()
+            },
             service_ids: HashMap::new(),
             resources: Default::default(),
             trust_sources: HashMap::new(),
@@ -113,6 +122,7 @@ pub enum TunnelRuntimeState {
 
 #[derive(Clone, Debug)]
 pub enum SessionEvent {
+    Connectivity(crate::node::core::connectivity::ConnectivitySnapshot),
     SignalSecurity {
         tls: bool,
     },
@@ -330,6 +340,26 @@ impl NodeSessionHandle {
     #[cfg(test)]
     pub fn connect_peer(&self, peer: NodeId) -> std::result::Result<(), String> {
         self.connect_peer_with_password(peer, test_password())
+    }
+    pub async fn connect_address(
+        &self,
+        peer: NodeId,
+        addresses: Vec<SocketAddr>,
+        password: Option<SecretPassword>,
+    ) -> std::result::Result<(), String> {
+        crate::node::core::connectivity::validate_addresses(&addresses)
+            .map_err(|e| e.to_string())?;
+        let (done, result) = oneshot::channel();
+        self.commands
+            .send(SessionCommand::ConnectAddress {
+                peer,
+                addresses,
+                password,
+                done,
+            })
+            .await
+            .map_err(|_| "节点已停止".to_owned())?;
+        result.await.map_err(|_| "节点已停止".to_owned())?
     }
     pub fn connect_peer_with_password(
         &self,
@@ -658,6 +688,12 @@ pub async fn change_trusted_device(
     }
 }
 enum SessionCommand {
+    ConnectAddress {
+        peer: NodeId,
+        addresses: Vec<SocketAddr>,
+        password: Option<SecretPassword>,
+        done: oneshot::Sender<std::result::Result<(), String>>,
+    },
     ListServices {
         peer: NodeId,
         done: oneshot::Sender<
@@ -803,6 +839,11 @@ impl SessionCommand {
 }
 
 enum SessionInput {
+    DirectIdentified {
+        peer: NodeId,
+        prepared: PreparedTransport,
+        permit: tokio::sync::OwnedSemaphorePermit,
+    },
     AuthorizationChanged {
         peer: NodeId,
         generation: u64,
@@ -1006,14 +1047,22 @@ async fn run_session(
     let unconfigured = config.signal_server.trim().is_empty();
     emit_lifecycle(
         &events,
-        if unconfigured {
+        if unconfigured && config.direct.enabled {
+            NetworkLifecycle::LocalOnly
+        } else if unconfigured {
             NetworkLifecycle::Unconfigured
         } else {
             NetworkLifecycle::ConnectingSignal
         },
     )
     .await;
-    let prepared = if unconfigured {
+    let mut preparation = config.network.clone();
+    if unconfigured {
+        // Signal-free mode must not query public STUN, Relay, or DNS services.
+        preparation.stun_servers.clear();
+        preparation.relay_server = None;
+    }
+    let prepared = if unconfigured && !config.direct.enabled {
         Ok(crate::net::DesktopNetwork {
             relay: None,
             paths: Vec::new(),
@@ -1021,7 +1070,7 @@ async fn run_session(
             diagnostics: Vec::new(),
         })
     } else {
-        prepare_desktop_network(&config.network).await
+        prepare_desktop_network(&preparation).await
     };
     let mut network = match prepared {
         Ok(network) => network,
@@ -1059,6 +1108,32 @@ async fn run_session(
         config.transfer.is_some() && config.enable_speed,
         config.enable_tcp,
     );
+    let mut nearby = crate::node::core::connectivity::NearbyCache::new(identity.node_id());
+    let (mut discovery, mut discovery_state) =
+        if config.direct.enabled && config.direct.lan_discovery {
+            match crate::node::core::connectivity::Discovery::start(identity.node_id(), &network) {
+                Ok(d) => (Some(d), "active".to_owned()),
+                Err(error) => {
+                    warn!(%error, "局域网发现不可用，IP直连仍可使用");
+                    (None, "unavailable".to_owned())
+                }
+            }
+        } else {
+            (None, "disabled".to_owned())
+        };
+    let mut connectivity = crate::node::core::connectivity::snapshot(
+        &network,
+        config.direct.enabled,
+        discovery_state.clone(),
+        &nearby,
+    );
+    let _ = events
+        .send(SessionEvent::Connectivity(connectivity.clone()))
+        .await;
+    let mut direct_routes = config.direct.peers.clone();
+    let mut configured_direct_routes = config.direct.peers.clone();
+    let mut direct_dialing = HashSet::new();
+    let direct_slots = Arc::new(Semaphore::new(MAX_PENDING_PEERS));
     let mut manually_disconnected = HashSet::new();
     let mut remote_verifier = config.remote_auth.clone();
     let auth_context = AuthContext::default();
@@ -1196,6 +1271,7 @@ async fn run_session(
             Retry,
             ReconnectProbe(NodeId, usize, bool),
             Maintenance,
+            Discovery(std::result::Result<mdns_sd::ServiceEvent, String>),
             QueueChanged,
             Shutdown,
             EventsClosed,
@@ -1225,6 +1301,12 @@ async fn run_session(
                 }
             } => Wake::Signal(message),
             input = inputs.recv() => Wake::Input(input),
+            message = async {
+                match discovery.as_ref() {
+                    Some(d) => d.receiver.recv_async().await.map_err(|e| e.to_string()),
+                    None => std::future::pending().await,
+                }
+            } => Wake::Discovery(message),
             _ = async {
                 match reconnect_sleep.as_mut() {
                     Some(sleep) => sleep.as_mut().await,
@@ -1236,6 +1318,43 @@ async fn run_session(
             task = tunnel_tasks.join_next(), if !tunnel_tasks.is_empty() => Wake::TunnelTask(task),
         };
 
+        if let Wake::Discovery(message) = wake {
+            match message {
+                Ok(event) => nearby.observe(event, std::time::Instant::now()),
+                Err(_) => {
+                    discovery = None;
+                    discovery_state = "unavailable".into();
+                }
+            }
+            let updated = crate::node::core::connectivity::snapshot(
+                &network,
+                config.direct.enabled,
+                discovery_state.clone(),
+                &nearby,
+            );
+            if updated != connectivity {
+                connectivity = updated;
+                let _ = events
+                    .send(SessionEvent::Connectivity(connectivity.clone()))
+                    .await;
+            }
+            continue;
+        }
+        if matches!(wake, Wake::Maintenance) {
+            nearby.expire(std::time::Instant::now());
+            let updated = crate::node::core::connectivity::snapshot(
+                &network,
+                config.direct.enabled,
+                discovery_state.clone(),
+                &nearby,
+            );
+            if updated != connectivity {
+                connectivity = updated;
+                let _ = events
+                    .send(SessionEvent::Connectivity(connectivity.clone()))
+                    .await;
+            }
+        }
         let wake = match wake {
             Wake::Command(Some(SessionCommand::RetryCandidates {
                 peer,
@@ -1385,6 +1504,30 @@ async fn run_session(
                         continue;
                     }
                 };
+                if configured_direct_routes != record.settings.direct.peers {
+                    for peer in configured_direct_routes.keys() {
+                        direct_routes.remove(peer);
+                    }
+                    configured_direct_routes = record.settings.direct.peers.clone();
+                    // Persisted routes take priority over bounded ephemeral hints.
+                    while direct_routes
+                        .keys()
+                        .filter(|key| !configured_direct_routes.contains_key(*key))
+                        .count()
+                        + configured_direct_routes.len()
+                        > 128
+                    {
+                        let Some(key) = direct_routes
+                            .keys()
+                            .find(|key| !configured_direct_routes.contains_key(*key))
+                            .cloned()
+                        else {
+                            break;
+                        };
+                        direct_routes.remove(&key);
+                    }
+                    direct_routes.extend(configured_direct_routes.clone());
+                }
                 let password_changed = remote_verifier != record.settings.remote_auth;
                 let previous = resource_policy.borrow().clone();
                 let old_trusted = trusted_devices.clone();
@@ -1425,6 +1568,7 @@ async fn run_session(
                     credential_retries.clear();
                 }
                 for peer in revoke {
+                    direct_dialing.remove(&peer);
                     credentials.remove(&peer);
                     credential_retries.remove(&peer);
                     deferred_candidates.remove(&peer);
@@ -1504,6 +1648,7 @@ async fn run_session(
                 });
             }
             Wake::Command(Some(SessionCommand::DisconnectPeer { peer, done })) => {
+                direct_dialing.remove(&peer);
                 if manually_disconnected.len() >= 128 && !manually_disconnected.contains(&peer) {
                     let _ = done.send(Err("显式断开记录已达上限；请复用现有节点或重启宿主".into()));
                     continue;
@@ -1660,6 +1805,7 @@ async fn run_session(
                         );
                     }
                     for peer in revoked {
+                        direct_dialing.remove(&peer);
                         // Strong revocation invalidates password and trust grants alike.
                         credentials.remove(&peer);
                         credential_retries.remove(&peer);
@@ -1804,6 +1950,7 @@ async fn run_session(
             Wake::Command(Some(SessionCommand::RetryCandidates { .. })) => {
                 unreachable!("candidate retry normalized before dispatch")
             }
+            Wake::Discovery(_) => unreachable!("discovery handled above"),
             Wake::Command(None) => {
                 session_shutdown = true;
             }
@@ -2119,6 +2266,31 @@ async fn run_session(
                     }
                 });
             }
+            Wake::Command(Some(SessionCommand::ConnectAddress {
+                peer,
+                addresses,
+                password,
+                done,
+            })) => {
+                let result = if !config.direct.enabled {
+                    Err("IP直连已禁用".to_owned())
+                } else if peer == local_node || resource_policy.borrow().for_peer(peer).disabled {
+                    Err("不能连接本机或已禁用的设备".to_owned())
+                } else if direct_routes.len() >= 128 && !direct_routes.contains_key(&peer.to_hex())
+                {
+                    Err("直连设备地址缓存已满".to_owned())
+                } else {
+                    direct_routes.insert(peer.to_hex(), addresses);
+                    let command = password
+                        .map_or(SessionCommand::ConnectTrusted(peer), |password| {
+                            SessionCommand::ConnectAuthenticated { peer, password }
+                        });
+                    command_tx
+                        .try_send(command)
+                        .map_err(|_| "连接队列已满".to_owned())
+                };
+                let _ = done.send(result);
+            }
             Wake::Command(Some(SessionCommand::ConnectAuthenticated { peer, password })) => {
                 manually_disconnected.remove(&peer);
                 if credentials.len() >= crate::node::core::network_state::MAX_PEERS
@@ -2257,6 +2429,78 @@ async fn run_session(
                         emit_peer_state(&events, peer, generation, PeerLifecycle::PeerPending)
                             .await;
                         emit_lifecycle(&events, NetworkLifecycle::PeerPending { peer }).await;
+                        let addresses = if config.direct.enabled {
+                            direct_routes
+                                .get(&peer.to_hex())
+                                .cloned()
+                                .unwrap_or_else(|| nearby.addresses(peer))
+                        } else {
+                            Vec::new()
+                        };
+                        if !addresses.is_empty() {
+                            match direct_slots.clone().try_acquire_owned() {
+                                Ok(permit) => {
+                                    let task = direct::dial(
+                                        &network,
+                                        addresses,
+                                        peer,
+                                        generation,
+                                        local_node,
+                                        identity.clone(),
+                                        input_tx.clone(),
+                                        auth_context.clone(),
+                                        remote_verifier.clone(),
+                                        local_capabilities,
+                                        credentials.get(&peer).cloned().or_else(|| {
+                                            #[cfg(test)]
+                                            {
+                                                config.test_outgoing_password.clone()
+                                            }
+                                            #[cfg(not(test))]
+                                            {
+                                                None
+                                            }
+                                        }),
+                                        permit,
+                                    );
+                                    let abort = peer_tasks.spawn(task);
+                                    peer_attempts.insert(peer, (PunchToken::random(), abort));
+                                    direct_dialing.insert(peer);
+                                }
+                                Err(_) => {
+                                    peers.transition(
+                                        peer,
+                                        generation,
+                                        PeerLifecycle::Failed("直连握手并发已满".into()),
+                                    );
+                                    emit_peer_state(
+                                        &events,
+                                        peer,
+                                        generation,
+                                        PeerLifecycle::Failed("直连握手并发已满".into()),
+                                    )
+                                    .await;
+                                }
+                            }
+                            continue;
+                        }
+                        if signal_server.trim().is_empty() {
+                            let detail = "未找到直连地址；请选择附近设备或提供完整NodeId与IP:端口"
+                                .to_owned();
+                            peers.transition(
+                                peer,
+                                generation,
+                                PeerLifecycle::Failed(detail.clone()),
+                            );
+                            emit_peer_state(
+                                &events,
+                                peer,
+                                generation,
+                                PeerLifecycle::Failed(detail),
+                            )
+                            .await;
+                            continue;
+                        }
                         if let Some(client) = signal.as_ref() {
                             if client.request_lookup(peer).await.is_err() {
                                 queued_lookups.push_back((peer, generation));
@@ -2389,6 +2633,7 @@ async fn run_session(
                     connection.close(0u32.into(), b"desktop network reconfigured");
                 }
                 peer_attempts.clear();
+                direct_dialing.clear();
                 deferred_candidates.clear();
                 peer_tasks.abort_all();
                 while peer_tasks.join_next().await.is_some() {}
@@ -2928,25 +3173,80 @@ async fn run_session(
             Wake::Input(Some(SessionInput::Incoming(family, incoming))) => {
                 let incoming = *incoming;
                 let remote = incoming.remote_address();
-                let Some((peer, generation)) = network
+                let route = network
                     .path(family)
                     .and_then(|path| path.punch_socket.claim_authorized_peer(remote))
-                    .or_else(|| pending_ipv6_route(remote, local_node, &peers, &peer_candidates))
-                else {
-                    incoming.refuse();
+                    .or_else(|| pending_ipv6_route(remote, local_node, &peers, &peer_candidates));
+                if let Some((peer, generation)) = route
+                    && peers.is_current(peer, generation)
+                    && !should_initiate_quic(local_node, peer)
+                    && let Some(waiting) = pending_inbound.get(&(peer, generation))
+                {
+                    if let Err(error) = waiting.try_send(incoming) {
+                        error.into_inner().refuse();
+                    }
                     continue;
-                };
-                if !peers.is_current(peer, generation) || should_initiate_quic(local_node, peer) {
+                }
+                if !config.direct.enabled {
                     incoming.refuse();
                     continue;
                 }
-                let Some(waiting) = pending_inbound.get(&(peer, generation)) else {
+                // Unknown public sources must first prove return routability using
+                // Quinn's stateless Retry; no identity worker is allocated before it.
+                if !incoming.remote_address_validated() {
+                    let _ = incoming.retry();
+                    continue;
+                }
+                if let Ok(permit) = direct_slots.clone().try_acquire_owned() {
+                    let identity = identity.clone();
+                    let inputs = input_tx.clone();
+                    peer_tasks.spawn(async move {
+                        direct::identify(incoming, identity, inputs, permit).await;
+                    });
+                } else {
                     incoming.refuse();
+                }
+            }
+            Wake::Input(Some(SessionInput::DirectIdentified {
+                peer,
+                prepared,
+                permit,
+            })) => {
+                if peer == local_node
+                    || manually_disconnected.contains(&peer)
+                    || resource_policy.borrow().for_peer(peer).disabled
+                    || peers.state(peer).is_some_and(PeerLifecycle::is_connected)
+                    || (direct_dialing.contains(&peer) && should_initiate_quic(local_node, peer))
+                {
+                    continue;
+                }
+                if let Some((_, attempt)) = peer_attempts.remove(&peer) {
+                    attempt.abort();
+                }
+                direct_dialing.remove(&peer);
+                if let Some(generation) = peers.generation(peer) {
+                    peers.transition(peer, generation, PeerLifecycle::Disconnected);
+                    pending_inbound.remove(&(peer, generation));
+                }
+                let BeginPeerAttempt::Started(generation) = peers.begin_attempt(peer) else {
                     continue;
                 };
-                if let Err(error) = waiting.try_send(incoming) {
-                    error.into_inner().refuse();
-                }
+                queued_lookups.retain(|(id, _)| *id != peer);
+                emit_peer_state(&events, peer, generation, PeerLifecycle::Authenticating).await;
+                let task = direct::accept(
+                    prepared,
+                    peer,
+                    generation,
+                    local_node,
+                    input_tx.clone(),
+                    auth_context.clone(),
+                    remote_verifier.clone(),
+                    local_capabilities,
+                    credentials.get(&peer).cloned(),
+                    permit,
+                );
+                let abort = peer_tasks.spawn(task);
+                peer_attempts.insert(peer, (PunchToken::random(), abort));
             }
             Wake::Input(Some(SessionInput::PeerPath {
                 peer,
@@ -3018,6 +3318,7 @@ async fn run_session(
                     })
                     .await;
                 peer_attempts.remove(&peer);
+                direct_dialing.remove(&peer);
                 if credential_retries.remove(&peer) {
                     connection.close(
                         0u32.into(),
@@ -3283,6 +3584,9 @@ async fn run_session(
                 generation,
                 detail,
             })) => {
+                if peers.is_current(peer, generation) {
+                    direct_dialing.remove(&peer);
+                }
                 pending_inbound.remove(&(peer, generation));
                 if peers.is_current(peer, generation) {
                     peer_attempts.remove(&peer);
@@ -4364,7 +4668,7 @@ async fn run_peer_attempt(
             state: PeerLifecycle::Authenticating,
         })
         .await;
-    let mut guard = race_peer_paths(
+    let guard = race_peer_paths(
         paths,
         token,
         peer,
@@ -4376,6 +4680,25 @@ async fn run_peer_attempt(
     )
     .await
     .map_err(|error| error.to_string())?;
+    finish_peer_transport(
+        peer, generation, local_node, guard, relay, inputs, auth, verifier, options, password,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn finish_peer_transport(
+    peer: NodeId,
+    generation: u64,
+    local_node: NodeId,
+    mut guard: ConnectionGuard,
+    relay: Option<crate::relay::client::Fallback>,
+    inputs: mpsc::Sender<SessionInput>,
+    auth: AuthContext,
+    verifier: Option<RemoteVerifier>,
+    options: AttemptOptions,
+    password: Option<SecretPassword>,
+) -> std::result::Result<(), String> {
     let connection = guard.connection();
 
     let _ = inputs

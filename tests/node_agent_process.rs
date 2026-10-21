@@ -832,7 +832,8 @@ async fn agent_process_config_transaction_idempotency_restart_and_ownership() {
     assert!(TcpListener::bind(a).is_err(), "failed update removed A");
     assert!(TcpListener::bind(b).is_err(), "failed update removed B");
     let status = node.ok(Api::Status).await;
-    assert_eq!(status["node"]["signal"], "unconfigured");
+    assert_eq!(status["node"]["signal"], "disabled");
+    assert_eq!(status["node"]["connectivity"]["enabled"], true);
     assert!(status["diagnostics"].as_array().unwrap().is_empty());
     assert!(status["last_error"].is_string());
     assert_eq!(status["forwards"]["rules"].as_array().unwrap().len(), 2);
@@ -935,3 +936,6 @@ async fn agent_process_config_transaction_idempotency_restart_and_ownership() {
         "NODE_AGENT_PROOF config rollback A/B, occupied C, revision/idempotency, manual stop, restart, locks"
     );
 }
+
+#[path = "node_agent_process/direct.rs"]
+mod direct;

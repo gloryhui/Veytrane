@@ -29,3 +29,12 @@
 ## 后置验收
 
 两管理入口并发、超大/截断帧、重复ID、超时后查询、跨用户IPC、remote pipe、目录/身份双启动、复制密钥、事件断档、离线管理与干净退出。Windows/Unix 均需真实进程实测；本轮仅编译/static 检查。
+
+## 无信令发现与 IP 直连
+
+- 查询 `nearby` 返回 `enabled`、`discovery`、`listen` 与 `nearby` 数组；相同快照也位于 `status.node.connectivity`。发现项是未经认证的地址提示，不触发连接或授权。
+- `connect_address` 请求字段：`peer` 为规范完整 NodeId，`addresses` 为 1～8 个 IP:端口字符串，`password` 为可选远程密码。IPv6 使用 `[地址]:端口`，不接受域名、未指定/组播/IPv6链路本地、IPv4映射IPv6及零端口。
+- 请求仍由 Agent 独占执行，入队不等于认证成功；通过状态事件确认连接及方向权限。地址缓存限当前会话，持久地址使用原 revision 配置事务的 `settings.direct.peers`。
+- `settings.direct.enabled/lan_discovery/listen_port` 变更需停止后应用，`direct.peers` 允许在线提交。短 ID 查询仍需要信令，不将其猜测为 IP 或完整身份。
+
+详见[使用与授权边界](../SIGNAL_FREE_CONNECTIVITY.md)。

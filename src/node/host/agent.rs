@@ -64,6 +64,31 @@ impl Agent {
                     json!({"core_running":self.control.is_running(),"build":crate::node::api::build_info::value("p2p-agent"),"diagnostics":diagnostics,"restart_pending":self.restart_pending.load(std::sync::atomic::Ordering::Acquire),"budgets":{"peers":16,"pending_peers":8,"tcp_streams":256,"tcp_per_rule":32,"management_connections":32,"service_controls_per_peer":8},"data_dir":self.paths.root,"epoch":self.epoch,"revision":configuration.revision,"node":node,"last_error":last_error,"forwards":forwards}),
                 )
             }
+            Command::Nearby => Ok(serde_json::to_value(
+                self.control
+                    .snapshot()
+                    .map_err(|e| e.to_string())?
+                    .connectivity,
+            )
+            .map_err(|e| e.to_string())?),
+            Command::ConnectAddress {
+                peer,
+                addresses,
+                password,
+            } => {
+                let password = password
+                    .map(crate::node::core::remote_auth::SecretPassword::new)
+                    .transpose()
+                    .map_err(|e| e.to_string())?;
+                self.control
+                    .connect_address(
+                        NodeId::from_hex(&peer).map_err(|e| e.to_string())?,
+                        addresses,
+                        password,
+                    )
+                    .await?;
+                Ok(json!({"accepted":true}))
+            }
             Command::Config => {
                 let record = self.config.lock().await;
                 Ok(

@@ -53,6 +53,8 @@ fn error(message: impl ToString) -> io::Error {
 
 fn fixed_settings(root: PathBuf, signal: String) -> NodeSettings {
     let mut settings = NodeSettings::initial(root);
+    settings.direct.enabled = false;
+    settings.direct.lan_discovery = false;
     settings.signal_server = signal;
     settings.enable_files = false;
     settings.enable_speed = false;
@@ -415,6 +417,7 @@ mod tests {
         let settings = parsed.settings(std::env::temp_dir()).unwrap();
         assert!(!settings.enable_files && !settings.enable_speed);
         assert!(settings.services.is_empty() && settings.trusted_devices.is_empty());
+        assert!(!settings.direct.enabled && !settings.direct.lan_discovery);
         assert_eq!(settings.forwards.len(), 1);
         assert_eq!(settings.forwards[0].listen.to_string(), LISTEN);
         assert_eq!(settings.service_ids[&settings.forwards[0].id], SERVICE);

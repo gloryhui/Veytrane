@@ -29,6 +29,16 @@ pub enum Action {
         listen: std::net::SocketAddr,
     },
     Status,
+    /// List untrusted LAN discovery hints and the actual direct listening addresses.
+    Nearby,
+    /// Dial a literal IP:port, pinning the expected full NodeId. IPv6 uses [IP]:port.
+    ConnectAddress {
+        peer: String,
+        #[arg(required = true)]
+        addresses: Vec<std::net::SocketAddr>,
+        #[arg(long)]
+        password_stdin: bool,
+    },
     Config,
     Tasks {
         #[arg(long, default_value_t = 0)]
@@ -249,6 +259,20 @@ pub async fn run(args: Args) -> io::Result<Response> {
                 .await;
         }
         Action::Status => Command::Status,
+        Action::Nearby => Command::Nearby,
+        Action::ConnectAddress {
+            peer,
+            addresses,
+            password_stdin: use_password,
+        } => Command::ConnectAddress {
+            peer,
+            addresses,
+            password: if use_password {
+                Some(password_stdin()?)
+            } else {
+                None
+            },
+        },
         Action::Config => Command::Config,
         Action::Tasks { offset } => Command::Tasks { offset },
         Action::Services { peer } => Command::Services { peer },

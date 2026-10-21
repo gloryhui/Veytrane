@@ -46,6 +46,12 @@ impl Request {
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
     Status,
+    Nearby,
+    ConnectAddress {
+        peer: String,
+        addresses: Vec<std::net::SocketAddr>,
+        password: Option<String>,
+    },
     Config,
     Tasks {
         #[serde(default)]
@@ -139,6 +145,7 @@ impl Command {
         matches!(
             self,
             Self::Status
+                | Self::Nearby
                 | Self::Config
                 | Self::Tasks { .. }
                 | Self::Events { .. }

@@ -16,6 +16,8 @@ use std::{
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeSettings {
+    #[serde(default)]
+    pub direct: crate::node::core::connectivity::DirectSettings,
     pub signal_server: String,
     pub signal_tls: Option<crate::discovery::signal_tls::SignalTlsClient>,
     pub relay_server: Option<String>,
@@ -38,6 +40,7 @@ pub struct NodeSettings {
 impl NodeSettings {
     pub fn initial(receive_root: PathBuf) -> Self {
         Self {
+            direct: Default::default(),
             signal_server: String::new(),
             signal_tls: None,
             relay_server: None,
@@ -59,6 +62,7 @@ impl NodeSettings {
         }
     }
     pub fn validate(&self) -> Result<()> {
+        self.direct.validate()?;
         if !self.receive_root.is_absolute() || self.receive_root.as_os_str().len() > 4096 {
             return Err(Error::Protocol("接收根必须是绝对路径".into()));
         }
@@ -149,6 +153,8 @@ impl NodeSettings {
     pub fn session(&self) -> Result<crate::node::core::control::NodeSessionConfig> {
         self.validate()?;
         let mut config = crate::node::core::control::NodeSessionConfig::new(&self.signal_server);
+        config.direct = self.direct.clone();
+        config.network.local_port = self.direct.listen_port;
         config.signal_tls = self.signal_tls.clone();
         config.network.relay_server = self.relay_server.clone();
         config.remote_auth = self.remote_auth.clone();
