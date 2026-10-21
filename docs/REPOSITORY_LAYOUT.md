@@ -6,7 +6,7 @@
 
 ```text
 src/bin/p2p-desktop.rs → desktop/agent_shell → node/api + node/local
-src/bin/p2p-node.rs   → node/adapters（CLI、HTTP、离线迁移）
+src/bin/p2p-node.rs   → node/adapters（CLI、HTTP）
 src/bin/p2p-agent.rs  → node/host → node/core + node/api + node/local
 src/bin/sub2api-*.rs / p2p-sub2api-gateway.rs → node/products
 src/main.rs          → 既有独立 CLI（admin、tunnel、transfer 等）
@@ -18,7 +18,7 @@ node/host → core、api、local
 node/adapters / node/products → 以上服务与契约
 ```
 
-没有新增 crate，也没有更改二进制名称、默认 feature、配置 schema、IPC JSON 或线上字节协议。`node/mod.rs` 保留原有 **public** 路径重导出，旧库调用方可以继续编译；仓库内部新增代码使用明确的分层路径。私有内部路径不作为兼容 API。
+当前只维护现有调用方：`node/mod.rs` 只声明六个分层模块，旧 public 路径别名已删除，源码和集成测试均使用所属层路径。二进制名称、默认 feature、node.json、IPC JSON 和线上字节协议未变。
 
 ## 源码职责
 
@@ -29,7 +29,7 @@ node/adapters / node/products → 以上服务与契约
 | `src/node/host/` | Agent 进程所有权、管理命令执行、配置协调、转发监听和运行恢复。 |
 | `src/node/local/` | 当前 OS 用户的节点路径、IPC socket/pipe 连接与监听；权限实现由通用存储层提供。 |
 | `src/node/api/` | 管理请求/响应、版本信息与客户端。客户端不持有 Agent 实例、身份或网络会话。 |
-| `src/node/adapters/` | 管理 CLI、HTTP 网关、内嵌 Web HTML、显式离线迁移。Web 是 Agent 的客户端。 |
+| `src/node/adapters/` | 管理 CLI、HTTP 网关、内嵌 Web HTML。Web 是 Agent 的客户端。 |
 | `src/node/products/` | Sub2API 限定用途组合及其恢复策略；复用核心与监听机制。 |
 | `src/desktop/agent_shell/` | 唯一 IPC 桌面及其工作台、窗口、托盘宿主。 |
 | `src/desktop/ui/` | 工作台与二级窗口共用控件、文本输入、视觉主题、品牌。无业务运行时所有权。 |
@@ -38,7 +38,7 @@ node/adapters / node/products → 以上服务与契约
 | `src/discovery/`、`nat/`、`net/`、`transport/`、`relay/` | 共用的发现、打洞、连接竞速、QUIC、Relay。 |
 | `src/protocol/`、`transfer/`、`tunnel/`、`admin/` | 原独立 CLI 仍在使用的协议与执行路径；不能因与 node 同名就删除。 |
 
-`core/config.rs` 保留历史 `DesktopConfig` 读写与共享规则校验，`core/settings.rs` 定义当前 `node.json`；旧 schema 仍由导入流程和核心回归夹具读取，不能直接合并或删除。
+`core/settings.rs` 定义当前 `node.json`。`core/config.rs` 仍有共享规则校验、测速类型和独立核心配置读写调用；已移除旧 schema 1–10 升级、历史目录发现、通知/后台偏好及无生产调用的偏好写入接口。旧桌面导入适配器与对应 CLI / UI 已删除。
 
 `core/process_tests.rs` 保留原先位于旧桌面目录的真实进程业务回归，直接依赖核心，随 node 特性测试执行。
 
@@ -54,15 +54,17 @@ node/adapters / node/products → 以上服务与契约
 | 通用身份锁和存储反向调用 node 的权限/文件安全函数 | 通用权限与安全文件操作移入 storage，协议相对路径校验保持同一实现和原有拒绝规则。 |
 | `nat/portmap.rs` 没有生产调用，恒定返回不支持 | 删除占位模块及伪实现测试；UPnP/NAT-PMP/PCP 仍是未实现能力。该未实现模块的 Rust 导出不再保留。 |
 | 恢复查询 DTO/访问器只有旧回归使用 | 保留为 `cfg(test)` 的回归辅助；实际启动恢复仍正常编译运行。 |
+| 根模块兼容别名、导入与偏好遗留 | 删除别名、migration.rs、preferences.rs、旧导入规格及专属 UI/CLI；不再支持 schema 1–10 升级。 |
+| 未实现的 LegacyCliV3 模式 | 移除占位枚举和三处不可达分支；配置边界直接拒绝，不进行连接。 |
 | 内嵌旧桌面与 Agent 工作台并存 | 移除 `--legacy`、旧窗口/通知/登录启动及专属依赖；进程业务回归迁入 `core/process_tests.rs`。独立 CLI 的仍在使用路径另行维护。 |
 
 ## 其他目录如何维护
 
-- `scripts/`：打包、宿主管理、回归工具及手动导航同步。`node_smoke.py` 是脚本公共夹具；不是废弃启动入口。现有命令路径保持稳定。
+- `scripts/`：打包、宿主管理、回归工具及手动导航同步。`node_smoke.py` 是脚本公共夹具；不是废弃启动入口。核心进程矩阵入口为 `node-core-e2e.py`，无需 GPUI；旧 `desktop-e2e.py` 已移除。
 - `packaging/`：各平台安装模板与入口。它们由打包脚本消费，不能仅根据本机 OS 判定无用。
 - `tests/`：独立进程、真实协议和 CLI 集成测试；模块内部细节测试与源码同域放置。
 - `examples/`：可执行测试/演示入口，受 Cargo feature 约束。
-- `docs/specs/`：冻结契约及兼容约束；物理路径以本文为准。
+- `docs/specs/`：现行契约与历史设计约束；物理路径以本文为准。
 - `docs/task-reports/`、`docs/gpui-mvp/`：历史任务和验收证据，保留来源与链接；不代表当前全部功能已上线。`THIRD_PARTY_NOTICES.md` 仍承载共享文本控件的归属说明。
 - `assets/`：源码内嵌及打包使用的图标。使用方仍经编译和打包验证。
 - `target/`、`release/`：已被 Git 忽略的生成物；本次不删除缓存、已安装二进制或发布包。
@@ -85,4 +87,4 @@ python3 scripts/node-host-tests.py
 
 边界脚本检查显式 crate 路径，覆盖测试与当前主机未激活的条件分支，已接入现有 GPUI CI；它不替代 Rust 名称解析或运行验收。跨层导入采用规范路径，不绕过公共层级重导出来隐藏依赖。桌面核心中的会话与文件执行仍是较大的状态机；进一步拆业务算法需连同并发、事务及协议负例独立验证，不能只按行数切碎。
 
-本次验证结果见 [分层整理验证记录](task-reports/REPOSITORY_REORGANIZATION.md)。
+本次清理与验证见 [遗留代码清理记录](task-reports/LEGACY_CLEANUP.md)；首次分层证据见 [分层整理验证记录](task-reports/REPOSITORY_REORGANIZATION.md)。

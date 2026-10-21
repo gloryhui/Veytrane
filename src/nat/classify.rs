@@ -120,13 +120,6 @@ impl MappingBehavior {
     }
 }
 
-impl MappingBehavior {
-    /// 兼容旧调用点；Filtering 未测量时不把 ADM 当作无条件可打洞。
-    pub fn is_punchable(self) -> bool {
-        self.punchable()
-    }
-}
-
 /// 由若干观测推断映射行为。
 ///
 /// 判定顺序：先看映射是否始终不变，再看变化是否只发生在跨 IP 时。
@@ -422,10 +415,10 @@ mod tests {
 
     #[test]
     fn 可打洞性判定() {
-        assert!(MappingBehavior::EndpointIndependent.is_punchable());
-        assert!(!MappingBehavior::AddressDependent.is_punchable());
-        assert!(!MappingBehavior::AddressAndPortDependent.is_punchable());
-        assert!(!MappingBehavior::Unknown.is_punchable());
+        assert!(MappingBehavior::EndpointIndependent.punchable());
+        assert!(!MappingBehavior::AddressDependent.punchable());
+        assert!(!MappingBehavior::AddressAndPortDependent.punchable());
+        assert!(!MappingBehavior::Unknown.punchable());
     }
 
     #[test]

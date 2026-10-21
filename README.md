@@ -206,7 +206,7 @@ cargo run --locked --features gui --bin p2p-desktop
 
 接收边界由当前会话的身份和远程访问授权控制。接收目录修改只影响新任务，对端输入框修改不改变旧任务绑定。Linux 系统文件选择器需要可用的 desktop portal。原生窗口操作与截图见 [T010 验证证据](docs/gpui-mvp/evidence/t010-ui-validation.md)；跨物理平台、Wayland、中文 IME、双 NAT 和安装包验收仍在后续流水线中记录。
 
-桌面进程恢复与故障验证：`python3 scripts/desktop-e2e.py --output /tmp/desktop-e2e-new-evidence`；支持 Linux/Windows/macOS 的测试二进制，输出可审计矩阵。它验证真实 Session/OS 进程与 loopback，不代表物理设备或双 NAT；细节见 [T011 矩阵](docs/gpui-mvp/evidence/t011-process-matrix.md)。端点重启后显式连接、再继续原任务，不自动恢复文件。
+节点核心进程恢复与故障验证：`python3 scripts/node-core-e2e.py --output /tmp/node-core-e2e-new-evidence`；仅需 node 特性，不依赖 GPUI；支持 Linux/Windows/macOS 的测试二进制，输出可审计矩阵。它验证真实 Session/OS 进程与 loopback，不代表物理设备或双 NAT；细节见 [T011 矩阵](docs/gpui-mvp/evidence/t011-process-matrix.md)。矩阵分别验证显式连接后手动继续，以及满足授权与恢复策略时的自动恢复。
 
 桌面原生候选包：Linux x86_64（Ubuntu24.04）、Windows x64（目标 Win10 22H2/Win11）、macOS13+ Apple Silicon arm64 / Intel x86_64（分别打包）。构建/安装/自建信令/恢复/许可证及签名状态见 [候选运行文档](packaging/RUNNING.md)，实测与下载记录见 [T012 证据](docs/gpui-mvp/evidence/t012-candidate-validation.md) 和 [Issue #24](https://github.com/gloryhui/p2p_file/issues/24)。三平台CI生成真实优化包、版本/完整源码SHA、SHA256、依赖材料；只产出候选，不创建正式Release标签。物理最低系统、真实IME/Wayland与跨真实双NAT/Apple互传仍是外部验收门禁，未满足时保持 FINAL_BLOCKED_EXTERNAL_VALIDATION。
 

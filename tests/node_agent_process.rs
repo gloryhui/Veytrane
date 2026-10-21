@@ -3,10 +3,10 @@
 use p2p_file::{
     identity::Identity,
     node::{
-        agent_client::AgentClient,
-        agent_config::ConfigRecord,
-        agent_paths::AgentPaths,
-        ipc::{Command as Api, Request, Response},
+        api::client::AgentClient,
+        api::protocol::{Command as Api, Request, Response},
+        core::settings::ConfigRecord,
+        local::paths::AgentPaths,
     },
 };
 use serde_json::{Value, json};
@@ -35,132 +35,30 @@ impl Sandbox {
 }
 impl Drop for Sandbox {
     fn drop(&mut self) {
-        #[cfg(windows)]
-        #[allow(clippy::permissions_set_readonly_false)] // Windows-only cleanup of synthetic read-only migration backups.
-        fn writable(path: &Path) {
-            if let Ok(metadata) = fs::symlink_metadata(path) {
-                if metadata.file_type().is_symlink() {
-                    return;
-                }
-                if metadata.is_dir() {
-                    if let Ok(entries) = fs::read_dir(path) {
-                        for entry in entries.flatten() {
-                            writable(&entry.path());
-                        }
-                    }
-                } else if metadata.permissions().readonly() {
-                    let mut permissions = metadata.permissions();
-                    permissions.set_readonly(false);
-                    let _ = fs::set_permissions(path, permissions);
-                }
-            }
-        }
-        #[cfg(windows)]
-        writable(&self.0);
         let _ = fs::remove_dir_all(&self.0);
     }
 }
 
 #[test]
-fn migration_process_preserves_identity_raw_tasks_source_and_rejects_stale_preview() {
+fn initialization_preserves_existing_identity_and_refuses_to_replace_configuration() {
     let sandbox = Sandbox::new();
-    let source = sandbox.0.join("old");
-    fs::create_dir(&source).unwrap();
-    let received = source.join("receive");
-    fs::create_dir(&received).unwrap();
+    let root = sandbox.0.join("node");
+    fs::create_dir(&root).unwrap();
     let identity = Identity::generate();
-    identity.save(&source.join("identity.key")).unwrap();
-    let peer = Identity::generate().node_id().to_hex();
-    let configuration = source.join("settings.json");
-    let mut config = json!({"schema_version":11,"signal":null,"receive_directory":received,"send_concurrency":1,"speedtest_seconds":30,"speedtest_direction":"both","trusted_devices":[{"node_id":peer,"display_name":"legacy fixture","last_short_id":null,"trusted_at":1,"updated_at":1}]});
-    fs::write(&configuration, serde_json::to_vec(&config).unwrap()).unwrap();
-    use p2p_file::node::task_model::{ManifestIdentity, PeerId, TaskRecord};
-    let record = TaskRecord::new_sender(
-        PeerId::from_node_id(p2p_file::identity::NodeId::from_hex(&peer).unwrap()),
-        source.join("cancelled.bin"),
-        ManifestIdentity::blake3([7; 32], 10, 4).unwrap(),
-    )
-    .unwrap();
-    let mut cancelled = serde_json::to_value(&record).unwrap();
-    cancelled["state"] = json!("failed");
-    cancelled["diagnostic"] = json!({"code":"user_cancelled","retryable":false});
-    let raw =
-        serde_json::to_vec_pretty(&json!({"format_version":1,"generation":42,"tasks":[cancelled]}))
-            .unwrap();
-    fs::write(source.join("tasks.json"), &raw).unwrap();
-    let target = sandbox.0.join("imported");
-    let args = [
-        "migrate-preview",
-        "--config-file",
-        configuration.to_str().unwrap(),
-        "--source-data-dir",
-        source.to_str().unwrap(),
-    ];
-    let initial_preview = cli_ok(&target, &args);
-    assert_eq!(initial_preview["result"]["tasks"], 1);
-    let preview = initial_preview["result"]["preview"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    config["send_concurrency"] = json!(2);
-    fs::write(&configuration, serde_json::to_vec(&config).unwrap()).unwrap();
-    assert!(
-        !cli(
-            &target,
-            &[
-                "migrate-desktop",
-                "--config-file",
-                configuration.to_str().unwrap(),
-                "--source-data-dir",
-                source.to_str().unwrap(),
-                "--expected-preview",
-                &preview
-            ]
-        )
-        .status
-        .success()
-    );
-    assert!(!target.join("identity.key").exists());
-    let before = fs::read(&configuration).unwrap();
-    let preview = cli_ok(&target, &args)["result"]["preview"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    cli_ok(
-        &target,
-        &[
-            "migrate-desktop",
-            "--config-file",
-            configuration.to_str().unwrap(),
-            "--source-data-dir",
-            source.to_str().unwrap(),
-            "--expected-preview",
-            &preview,
-        ],
-    );
+    identity.save(&root.join("identity.key")).unwrap();
+    let key_before = fs::read(root.join("identity.key")).unwrap();
+    let initialized = cli_ok(&root, &["init"]);
     assert_eq!(
-        Identity::load(&target.join("identity.key"))
-            .unwrap()
-            .node_id(),
-        identity.node_id()
+        initialized["result"]["node_id"],
+        identity.node_id().to_hex()
     );
-    assert_eq!(fs::read(target.join("tasks.json")).unwrap(), raw);
-    assert_eq!(fs::read(source.join("tasks.json")).unwrap(), raw);
-    assert_eq!(fs::read(&configuration).unwrap(), before);
-    let record = ConfigRecord::load(&target.join("node.json")).unwrap();
-    assert_eq!(record.settings.send_concurrency, 2);
-    assert_eq!(
-        record.settings.trust_sources[&peer],
-        p2p_file::node::authorization::TrustSource::LegacyImport
-    );
-    assert_eq!(
-        record.settings.peer_modes[&peer],
-        p2p_file::node::wire::PeerWireMode::LegacyDesktopV1
-    );
-    let key_before = fs::read(target.join("identity.key")).unwrap();
-    assert!(!cli(&target, &["init"]).status.success());
-    assert_eq!(fs::read(target.join("identity.key")).unwrap(), key_before);
+    let config_before = fs::read(root.join("node.json")).unwrap();
+    ConfigRecord::load(&root.join("node.json")).unwrap();
+    assert!(!cli(&root, &["init"]).status.success());
+    assert_eq!(fs::read(root.join("identity.key")).unwrap(), key_before);
+    assert_eq!(fs::read(root.join("node.json")).unwrap(), config_before);
 }
+
 struct Process(Child);
 impl Drop for Process {
     fn drop(&mut self) {
@@ -784,7 +682,7 @@ async fn three_agent_processes_unified_files_directory_four_forwards_and_revocat
     assert!(!home.root.join("receive/pause-cancel.bin").exists());
     mac.ok(Api::StartSpeed {
         peer: home_id.clone(),
-        direction: p2p_file::node::config::SpeedtestDirection::Upload,
+        direction: p2p_file::node::core::config::SpeedtestDirection::Upload,
         seconds: 30,
     })
     .await;
@@ -882,16 +780,18 @@ async fn agent_process_config_transaction_idempotency_restart_and_ownership() {
     let paths = AgentPaths::new(&node.root).unwrap();
     let mut invalid = Request::new(Api::Status);
     invalid.api_version = 99;
-    let mut raw = p2p_file::node::ipc_transport::connect(&paths)
+    let mut raw = p2p_file::node::local::transport::connect(&paths)
         .await
         .unwrap();
-    p2p_file::node::ipc::write(&mut *raw, &invalid)
+    p2p_file::node::api::protocol::write(&mut *raw, &invalid)
         .await
         .unwrap();
-    let rejected: Response = p2p_file::node::ipc::read(&mut *raw).await.unwrap();
+    let rejected: Response = p2p_file::node::api::protocol::read(&mut *raw)
+        .await
+        .unwrap();
     assert_eq!(rejected.error.unwrap().code, "invalid_request");
     drop(raw);
-    let mut raw = p2p_file::node::ipc_transport::connect(&paths)
+    let mut raw = p2p_file::node::local::transport::connect(&paths)
         .await
         .unwrap();
     raw.write_u32(1024 * 1024 + 1).await.unwrap();

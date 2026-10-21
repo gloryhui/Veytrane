@@ -28,8 +28,6 @@ pub(super) struct Workbench {
     state_filter: u8,
     peer_filter: bool,
     selected: Option<String>,
-    migration_preview: Option<Value>,
-    migrating: bool,
 }
 
 fn set_text(input: &Entity<TextField>, text: String, cx: &mut Context<AgentShell>) {
@@ -41,9 +39,6 @@ fn set_text(input: &Entity<TextField>, text: String, cx: &mut Context<AgentShell
 }
 
 impl Workbench {
-    pub(super) fn migrating(&self) -> bool {
-        self.migrating
-    }
     pub fn new(cx: &mut Context<AgentShell>) -> Self {
         Self {
             task_page: Value::Null,
@@ -58,8 +53,6 @@ impl Workbench {
             state_filter: 0,
             peer_filter: false,
             selected: None,
-            migration_preview: None,
-            migrating: false,
         }
     }
 
@@ -231,108 +224,10 @@ impl AgentShell {
         };
         window.focus(&fields[next].focus_handle(cx));
     }
-    fn migrate_desktop(&mut self, import: bool, cx: &mut Context<Self>) {
-        if self.exiting || self.ui.migrating || self.attached || self.paths.config().exists() {
-            return;
-        }
-        let expected = self
-            .ui
-            .migration_preview
-            .as_ref()
-            .and_then(|p| p["preview"].as_str())
-            .map(str::to_owned);
-        if import && expected.is_none() {
-            return;
-        }
-        self.ui.migrating = true;
-        let destination = self.paths.clone();
-        let background = cx.background_executor().clone();
-        cx.spawn(async move |shell, cx| {
-            let result = background
-                .spawn(async move {
-                    let source = crate::node::core::config::AppPaths::discover()
-                        .map_err(|e| e.to_string())?;
-                    if let Some(expected) = expected.filter(|_| import) {
-                        crate::node::adapters::migration::import(
-                            &destination,
-                            &source.config_file(),
-                            &source.data_dir,
-                            &expected,
-                        )
-                    } else {
-                        crate::node::adapters::migration::preview(
-                            &destination,
-                            &source.config_file(),
-                            &source.data_dir,
-                        )
-                    }
-                    .map_err(|e| e.to_string())
-                })
-                .await;
-            let _ = shell.update(cx, |s, cx| {
-                s.ui.migrating = false;
-                match result {
-                    Ok(value) if !import => {
-                        s.ui.migration_preview = Some(value);
-                        s.message = "迁移预览已就绪；确认后导入原身份、设置和任务记录。".into();
-                    }
-                    Ok(_) => {
-                        s.ui.migration_preview = None;
-                        match start_agent(&s.paths, false) {
-                            Ok(exit) => {
-                                s.child_exit = Some(exit);
-                                s.message = "原身份、设置和任务已导入；正在启动后台节点。".into();
-                            }
-                            Err(error) => {
-                                s.message = format!("导入已完成，启动失败：{error}").into()
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        s.ui.migration_preview = None;
-                        s.message =
-                            format!("迁移未完成：{error}；请关闭旧版窗口后重试，原数据保持保留。")
-                                .into();
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-        cx.notify();
-    }
-
     fn first_run_card(&self, cx: &Context<Self>) -> gpui::Div {
-        let mut card = ui_components::card()
+        ui_components::card()
             .child(self.connection_note.clone())
-            .child(self.lifecycle_button(cx));
-        if !self.paths.config().exists() {
-            card = card.child(
-                ui_components::secondary_button("预览迁移原版身份和设置", !self.ui.migrating)
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(|s, _, _, cx| s.migrate_desktop(false, cx)),
-                    ),
-            );
-            if let Some(preview) = &self.ui.migration_preview {
-                card = card
-                    .child(format!(
-                        "原设备：{} · {} 个任务 · {} 台可信设备；保留原接收目录及原文件。",
-                        preview["node_id"].as_str().unwrap_or(""),
-                        preview["tasks"],
-                        preview["trusted_devices"]
-                    ))
-                    .child(
-                        ui_components::secondary_button("确认迁移并启动", !self.ui.migrating)
-                            .on_mouse_up(
-                                MouseButton::Left,
-                                cx.listener(|s, _, _, cx| s.migrate_desktop(true, cx)),
-                            ),
-                    );
-            }
-            card = card.child("已有旧版身份时请先关闭旧版并预览迁移；不会自动创建替代身份。");
-        }
-        card
+            .child(self.lifecycle_button(cx))
     }
     fn available(&self) -> bool {
         !self.exiting

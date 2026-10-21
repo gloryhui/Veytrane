@@ -24,24 +24,6 @@ pub enum Action {
     Init,
     /// Prove directory, identity and task ownership are all released.
     OwnershipStatus,
-    MigratePreview {
-        #[arg(long)]
-        config_file: PathBuf,
-        #[arg(long)]
-        source_data_dir: PathBuf,
-    },
-    MigrateDesktop {
-        #[arg(long)]
-        config_file: PathBuf,
-        #[arg(long)]
-        source_data_dir: PathBuf,
-        #[arg(long)]
-        expected_preview: String,
-    },
-    MigrateResume {
-        #[arg(long)]
-        expected_preview: String,
-    },
     Web {
         #[arg(long, default_value = "127.0.0.1:8787")]
         listen: std::net::SocketAddr,
@@ -168,7 +150,6 @@ pub fn initialize(paths: &AgentPaths) -> io::Result<Value> {
     if paths.config().try_exists()? {
         return Err(io::Error::other("节点配置已存在"));
     }
-    crate::node::adapters::migration::guard_initialization(paths)?;
     let identity =
         crate::identity::Identity::load_or_create(&paths.identity()).map_err(io::Error::other)?;
     let _identity = AgentPaths::identity_lock(identity.node_id())?;
@@ -249,36 +230,6 @@ pub async fn run(args: Args) -> io::Result<Response> {
             return Ok(Response::ok(
                 "ownership_status",
                 json!({"running":false,"node_id":identity.map(|id|id.node_id().to_hex())}),
-            ));
-        }
-        Action::MigratePreview {
-            config_file,
-            source_data_dir,
-        } => {
-            return Ok(Response::ok(
-                "migrate_preview",
-                crate::node::adapters::migration::preview(&paths, &config_file, &source_data_dir)?,
-            ));
-        }
-        Action::MigrateDesktop {
-            config_file,
-            source_data_dir,
-            expected_preview,
-        } => {
-            return Ok(Response::ok(
-                "migrate_desktop",
-                crate::node::adapters::migration::import(
-                    &paths,
-                    &config_file,
-                    &source_data_dir,
-                    &expected_preview,
-                )?,
-            ));
-        }
-        Action::MigrateResume { expected_preview } => {
-            return Ok(Response::ok(
-                "migrate_resume",
-                crate::node::adapters::migration::resume(&paths, &expected_preview)?,
             ));
         }
         Action::Web { listen } => {

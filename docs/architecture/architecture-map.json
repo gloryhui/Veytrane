@@ -40,18 +40,13 @@
       "summary": "p2p-node 提供状态查询、配置和离线生命周期入口。",
       "rules": [
         "在线动作使用统一管理契约。",
-        "离线迁移必须检查所有权和预览指纹。"
+        "初始化与离线编辑检查目录和身份所有权。"
       ],
       "parts": [
         {
           "name": "CLI 适配",
           "path": "src/node/adapters/cli.rs",
           "detail": "解析命令并调用管理客户端。"
-        },
-        {
-          "name": "迁移",
-          "path": "src/node/adapters/migration.rs",
-          "detail": "停机后导入身份、配置和任务。"
         }
       ],
       "section": "topology"
@@ -378,10 +373,10 @@
     },
     {
       "id": "adapters",
-      "title": "CLI / HTTP / 迁移",
+      "title": "CLI / HTTP",
       "tag": "APPLICATION ADAPTERS",
       "path": "src/node/adapters/mod.rs",
-      "summary": "面向用户的管理协议适配与显式离线导入。",
+      "summary": "管理 CLI 和 Web 网关把本机操作接入 Agent API。",
       "rules": [
         "在线入口使用统一客户端。",
         "离线操作与在线配置协调的所有权边界分开。"
@@ -396,11 +391,6 @@
           "name": "Web",
           "path": "src/node/adapters/web.rs",
           "detail": "HTTP 管理桥。"
-        },
-        {
-          "name": "迁移",
-          "path": "src/node/adapters/migration.rs",
-          "detail": "预览、校验与导入。"
         }
       ],
       "section": "topology"
@@ -553,7 +543,7 @@
       "summary": "配置、任务模型和恢复状态属于核心契约，不依赖宿主协调器。",
       "rules": [
         "CommitOptions 已下沉到核心。",
-        "历史 DesktopConfig 仅由导入与核心回归夹具读取。"
+        "当前 Agent 使用 node.json；共享设置校验不再升级 schema 1–10。"
       ],
       "parts": [
         {
@@ -562,9 +552,9 @@
           "detail": "node.json 的 schema 和提交记录。"
         },
         {
-          "name": "旧配置兼容",
+          "name": "共享设置校验",
           "path": "src/node/core/config.rs",
-          "detail": "旧偏好和共享规则校验。"
+          "detail": "服务规则、测速设置及独立核心配置读写；不再提供旧桌面导入。"
         },
         {
           "name": "任务存储",

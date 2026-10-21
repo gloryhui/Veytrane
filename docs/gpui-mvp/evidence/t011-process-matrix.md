@@ -1,5 +1,7 @@
 # T011 进程恢复、兼容与故障矩阵
 
+> 本文保留历史证据；2026-10-21 起核心进程矩阵入口为 `scripts/node-core-e2e.py`（node 特性，无 GPUI），旧脚本已退役。
+
 GPUI-0016 / T011 attempt 1；base `c96fc0759123e3fcb24e021ec020e566463b704a`；固定验收 ref `2041a38756b87ba7856dcd343624d98df2283c5a`。最终候选 SHA、完整本地门禁及 exact-head 三平台结果以 Issue #24 的 REPORT/ACCEPTED/MERGED 为准，不预填未来通过。
 
 本地最终代码门禁：fmt、GUI 全库 426、desktop 155（由脚本执行并汇总）、核心库 271+二进制 1、核心/GUI Clippy（-D warnings）、signal/net/transport 专项、GUI check/build 和 CLI build，共 12 项，全部 0 failed / 0 ignored。13 组矩阵 PASS、21 条进程证明；最终候选 head 的脚本与 CLI E2E 另在 REPORT 记录，不提前填 CI。

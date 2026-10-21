@@ -48,7 +48,7 @@ def violations(root):
                 if dependency not in ALLOWED[layer]:
                     line = code.count("\n", 0, match.start()) + 1
                     errors.append(f"{relative}:{line}: {layer} -> {dependency} is forbidden; use the owning layer")
-            reject(r"\bcrate::node::\s*\{", "flat compatibility imports are for external consumers only")
+            reject(r"\bcrate::node::\s*\{", "use explicit layer imports")
         if parts[1] in FOUNDATION:
             reject(r"\b(?:node|desktop)\s*::", "foundation must not depend on node/desktop")
         if parts[1:3] == ("desktop", "agent_shell") or relative.as_posix() == "src/desktop/agent_shell.rs":

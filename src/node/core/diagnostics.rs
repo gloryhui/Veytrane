@@ -427,7 +427,8 @@ pub fn export(path: &std::path::Path, text: &str) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{identity::Identity, node::remote_auth::RemoteAuthorization};
+    use crate::identity::Identity;
+    use crate::node::core::remote_auth::RemoteAuthorization;
     #[test]
     fn signaling_tls_diagnostic_claims_verification_only_after_current_registration() {
         let now = Instant::now();

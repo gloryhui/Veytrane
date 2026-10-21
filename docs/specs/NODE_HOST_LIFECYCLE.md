@@ -1,12 +1,14 @@
 # T27：宿主、管理入口与升级
 
+> 2026-10-21：旧桌面导入已退役，不再提供 migrate-preview / migrate-desktop / migrate-resume。当前目录见 [仓库分层](../REPOSITORY_LAYOUT.md)。
+
 本轮编码规格；发布仍受T34实测门槛约束。
 
 ## 目录与进程
 
 二进制：`p2p-agent`持有业务，`p2p-node`提供结构化CLI管理/初始化/离线配置，`p2p-desktop`默认原生Agent管理窗口，`p2p-node web`是可选loopback HTTP→IPC网关。四者通过`--data-dir`选同一AgentPaths；默认用户模式为本机用户数据目录`p2p-file/node`。GUI不得读取私钥/TaskStore，不解析CLI输出。原桌面仅显式`--legacy`暂留，不与同身份Agent并行。旧CLI子命令保留原线格式/退出码，取得统一身份锁；旧协议转换不支持时明确说明，禁止暗开第二个宿主。
 
-新增模块：`node/management_cli.rs`、`node/agent_web.rs`、`desktop/agent_shell.rs`、`node/migration.rs`；二进制`src/bin/p2p-node.rs`。现有原生输入组件可复用；新桌面后台线程只运行IPC客户端，不能拥有网络节点业务。关窗口只停止管理轮询，显式“停止节点”才发Stop。离线编辑持目录锁与身份锁，revision加1并原子替换，运行中拒绝，不根据连接失败就假定Agent已停止。
+新增模块：`node/adapters/cli.rs`、`node/adapters/web.rs`、`desktop/agent_shell.rs`；二进制`src/bin/p2p-node.rs`。现有原生输入组件可复用；新桌面后台线程只运行IPC客户端，不能拥有网络节点业务。关窗口只停止管理轮询，显式“停止节点”才发Stop。离线编辑持目录锁与身份锁，revision加1并原子替换，运行中拒绝，不根据连接失败就假定Agent已停止。
 
 ## 管理行为
 

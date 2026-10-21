@@ -102,9 +102,9 @@ impl NodeSettings {
         self.resources.validate()?;
         crate::node::core::trusted_devices::validate(&self.trusted_devices)
             .map_err(|e| Error::Protocol(e.to_string()))?;
-        for (id, mode) in &self.peer_modes {
-            if NodeId::from_hex(id)?.to_hex() != *id || *mode == PeerWireMode::LegacyCliV3 {
-                return Err(Error::Protocol("设备模式无效或尚不支持旧CLI适配".into()));
+        for id in self.peer_modes.keys() {
+            if NodeId::from_hex(id)?.to_hex() != *id {
+                return Err(Error::Protocol("设备 ID 无效".into()));
             }
         }
         if self.peer_modes.len() > 128 || self.services.len() > 128 || self.forwards.len() > 256 {

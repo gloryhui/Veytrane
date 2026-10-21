@@ -11,16 +11,11 @@ use std::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-const APP_DIR_NAME: &str = "p2p_file";
 const CONFIG_SCHEMA_VERSION: u32 = 11;
 static CONFIG_MUTATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-const LEGACY_CONFIG_SCHEMA_VERSION: u32 = 1;
-
 #[derive(Debug, Error)]
 pub enum ConfigError {
-    #[error("系统没有提供{0}目录")]
-    DirectoryUnavailable(&'static str),
     #[error("配置文件损坏且原文件已保留：{0}")]
     Corrupt(String),
     #[error("设置无效：{0}")]
@@ -35,47 +30,6 @@ pub enum ConfigError {
     Io(#[from] io::Error),
     #[error("JSON 配置读写失败：{0}")]
     Json(#[from] serde_json::Error),
-}
-
-#[derive(Clone, Debug)]
-pub struct AppPaths {
-    pub config_dir: PathBuf,
-    pub data_dir: PathBuf,
-    pub downloads_dir: Option<PathBuf>,
-}
-
-impl AppPaths {
-    pub fn discover() -> Result<Self, ConfigError> {
-        let config_base = dirs::config_dir().ok_or(ConfigError::DirectoryUnavailable("配置"))?;
-        let data_base =
-            dirs::data_local_dir().ok_or(ConfigError::DirectoryUnavailable("应用数据"))?;
-        let downloads_dir = dirs::download_dir().filter(|path| {
-            path.is_absolute()
-                && path.to_str().is_some()
-                && fs::metadata(path).is_ok_and(|metadata| metadata.is_dir())
-        });
-
-        Ok(Self {
-            config_dir: config_base.join(APP_DIR_NAME),
-            // On macOS dirs::config_dir and data_local_dir both resolve to
-            // Library/Application Support. Keep identity/lock material in a
-            // dedicated child directory so settings and key files stay separate.
-            data_dir: data_base.join(APP_DIR_NAME).join("data"),
-            downloads_dir,
-        })
-    }
-
-    pub fn config_file(&self) -> PathBuf {
-        self.config_dir.join("settings.json")
-    }
-
-    pub fn identity_file(&self) -> PathBuf {
-        self.data_dir.join("identity.key")
-    }
-
-    pub fn instance_lock_file(&self) -> PathBuf {
-        self.data_dir.join("instance.lock")
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -100,9 +54,7 @@ impl SpeedtestDirection {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SettingsDraft {
     pub signal_tls: Option<crate::discovery::signal_tls::SignalTlsClient>,
-    pub background: crate::node::core::preferences::BackgroundOptions,
     pub file_limits: crate::node::core::bandwidth::FileLimits,
-    pub notifications: bool,
     pub auto_resume: bool,
     pub receive_safety_mib: u16,
     pub relay_server: Option<String>,
@@ -155,16 +107,6 @@ impl TunnelRule {
     }
 }
 
-impl SettingsDraft {
-    pub fn enabled_forward_targets(&self) -> Vec<AllowedForwardTarget> {
-        self.allowed_forward_targets
-            .iter()
-            .filter(|entry| entry.enabled)
-            .cloned()
-            .collect()
-    }
-}
-
 fn new_rule_id() -> String {
     format!("{:032x}", rand::random::<u128>())
 }
@@ -172,9 +114,7 @@ fn new_rule_id() -> String {
 impl SettingsDraft {
     pub fn defaults(downloads_dir: Option<PathBuf>) -> Self {
         Self {
-            background: Default::default(),
             file_limits: Default::default(),
-            notifications: false,
             auto_resume: false,
             receive_safety_mib: crate::node::core::receive_policy::DEFAULT_SAFETY_MIB,
             signal_tls: None,
@@ -193,16 +133,8 @@ impl SettingsDraft {
     }
 
     pub fn from_config(config: DesktopConfig) -> Self {
-        // Upload was the previous default. Treat that legacy value as the new default
-        // so upgraded installations start with bidirectional testing.
-        let speedtest_direction = match config.speedtest_direction {
-            SpeedtestDirection::Upload => SpeedtestDirection::Both,
-            direction => direction,
-        };
         Self {
-            background: config.background,
             file_limits: config.file_limits,
-            notifications: config.notifications,
             auto_resume: config.auto_resume,
             receive_safety_mib: config.receive_safety_mib,
             signal_tls: config.signal_tls,
@@ -220,7 +152,7 @@ impl SettingsDraft {
             receive_directory: config.receive_directory,
             send_concurrency: config.send_concurrency,
             speedtest_seconds: config.speedtest_seconds,
-            speedtest_direction,
+            speedtest_direction: config.speedtest_direction,
             allowed_forward_targets: config.allowed_forward_targets,
             tunnel_rules: config.tunnel_rules,
             remote_auth: config.remote_auth,
@@ -251,9 +183,7 @@ impl SettingsDraft {
 
         let config = DesktopConfig {
             signal_tls: self.signal_tls.clone(),
-            background: self.background,
             file_limits: self.file_limits,
-            notifications: self.notifications,
             auto_resume: self.auto_resume,
             receive_safety_mib: self.receive_safety_mib,
             relay_server: self.relay_server.clone(),
@@ -289,9 +219,7 @@ impl SettingsDraft {
         }
         if let Some(saved) = DesktopConfig::load(path)? {
             // A settings draft predating a trust/password mutation must not undo it.
-            config.background = saved.background;
             config.file_limits = saved.file_limits;
-            config.notifications = saved.notifications;
             config.auto_resume = saved.auto_resume;
             config.receive_safety_mib = saved.receive_safety_mib;
             config.trusted_devices = saved.trusted_devices;
@@ -343,11 +271,7 @@ pub struct DesktopConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     signal_tls: Option<crate::discovery::signal_tls::SignalTlsClient>,
     #[serde(default)]
-    background: crate::node::core::preferences::BackgroundOptions,
-    #[serde(default)]
     file_limits: crate::node::core::bandwidth::FileLimits,
-    #[serde(default)]
-    notifications: bool,
     #[serde(default)]
     auto_resume: bool,
     #[serde(default = "crate::node::core::receive_policy::default_safety_mib")]
@@ -370,17 +294,6 @@ pub struct DesktopConfig {
     trusted_devices: Vec<crate::node::core::trusted_devices::TrustedDevice>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct LegacyDesktopConfig {
-    schema_version: u32,
-    signal: SignalConfig,
-    receive_directory: PathBuf,
-    send_concurrency: u8,
-    speedtest_seconds: u16,
-    speedtest_direction: SpeedtestDirection,
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct SignalConfig {
@@ -400,9 +313,7 @@ impl DesktopConfig {
         let mut config = match Self::load(path)? {
             Some(config) => config,
             None => Self {
-                background: Default::default(),
                 file_limits: Default::default(),
-                notifications: false,
                 auto_resume: false,
                 receive_safety_mib: crate::node::core::receive_policy::DEFAULT_SAFETY_MIB,
                 signal_tls: None,
@@ -420,52 +331,6 @@ impl DesktopConfig {
             },
         };
         config.remote_auth = Some(verifier);
-        config.write_atomic(path)
-    }
-    pub fn save_background_options(
-        path: &Path,
-        options: crate::node::core::preferences::BackgroundOptions,
-    ) -> Result<(), ConfigError> {
-        let _guard = config_mutation_lock()?;
-        let mut config = Self::load(path)?
-            .ok_or_else(|| ConfigError::Invalid("请先完成本机身份初始化".into()))?;
-        config.background = options;
-        config.write_atomic(path)
-    }
-    pub fn save_receive_safety_mib(path: &Path, value: u16) -> Result<(), ConfigError> {
-        crate::node::core::receive_policy::validate_safety_mib(value)
-            .map_err(|message| ConfigError::Invalid(message.into()))?;
-        let _guard = config_mutation_lock()?;
-        let mut config =
-            Self::load(path)?.ok_or_else(|| ConfigError::Invalid("请先保存基础设置".into()))?;
-        config.receive_safety_mib = value;
-        config.write_atomic(path)
-    }
-    pub fn save_auto_resume(path: &Path, enabled: bool) -> Result<(), ConfigError> {
-        let _guard = config_mutation_lock()?;
-        let mut config =
-            Self::load(path)?.ok_or_else(|| ConfigError::Invalid("请先保存基础设置".into()))?;
-        config.auto_resume = enabled;
-        config.write_atomic(path)
-    }
-    pub fn save_notifications(path: &Path, enabled: bool) -> Result<(), ConfigError> {
-        let _guard = config_mutation_lock()?;
-        let mut config = Self::load(path)?
-            .ok_or_else(|| ConfigError::Invalid("请先完成本机身份初始化".into()))?;
-        config.notifications = enabled;
-        config.write_atomic(path)
-    }
-    pub fn save_file_limits(
-        path: &Path,
-        limits: crate::node::core::bandwidth::FileLimits,
-    ) -> Result<(), ConfigError> {
-        let _guard = config_mutation_lock()?;
-        limits
-            .validate()
-            .map_err(|message| ConfigError::Invalid(message.into()))?;
-        let mut config = Self::load(path)?
-            .ok_or_else(|| ConfigError::Invalid("请先完成本机身份初始化".into()))?;
-        config.file_limits = limits;
         config.write_atomic(path)
     }
     pub fn save_trusted_devices(
@@ -545,84 +410,13 @@ impl DesktopConfig {
             .and_then(serde_json::Value::as_u64)
             .and_then(|value| u32::try_from(value).ok())
             .ok_or_else(|| ConfigError::Corrupt("缺少有效的 schema_version".into()))?;
-        let config = match version {
-            LEGACY_CONFIG_SCHEMA_VERSION => {
-                let legacy: LegacyDesktopConfig = serde_json::from_slice(bytes)
-                    .map_err(|error| ConfigError::Corrupt(error.to_string()))?;
-                if legacy.schema_version != LEGACY_CONFIG_SCHEMA_VERSION {
-                    return Err(ConfigError::Corrupt("旧配置版本字段不一致".into()));
-                }
-                Self {
-                    background: Default::default(),
-                    file_limits: Default::default(),
-                    notifications: false,
-                    auto_resume: false,
-                    receive_safety_mib: crate::node::core::receive_policy::DEFAULT_SAFETY_MIB,
-                    signal_tls: None,
-                    relay_server: None,
-                    schema_version: CONFIG_SCHEMA_VERSION,
-                    signal: Some(legacy.signal),
-                    receive_directory: Some(legacy.receive_directory),
-                    send_concurrency: legacy.send_concurrency,
-                    speedtest_seconds: legacy.speedtest_seconds,
-                    speedtest_direction: legacy.speedtest_direction,
-                    allowed_forward_targets: Vec::new(),
-                    tunnel_rules: Vec::new(),
-                    remote_auth: None,
-                    trusted_devices: Vec::new(),
-                }
-            }
-            2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | CONFIG_SCHEMA_VERSION => {
-                let mut config = serde_json::from_slice::<Self>(bytes)
-                    .map_err(|error| ConfigError::Corrupt(error.to_string()))?;
-                if version < 4 && (config.signal.is_none() || config.receive_directory.is_none()) {
-                    return Err(ConfigError::Corrupt("旧配置缺少信令或接收目录".into()));
-                }
-                if version < 5 && !config.trusted_devices.is_empty() {
-                    return Err(ConfigError::Corrupt(
-                        "旧配置版本不能声明可信设备授权".into(),
-                    ));
-                }
-                if version < 6 && config.background != Default::default() {
-                    return Err(ConfigError::Corrupt(
-                        "旧配置版本不能启用后台运行或登录启动".into(),
-                    ));
-                }
-                if version < 7 && config.file_limits != Default::default() {
-                    return Err(ConfigError::Corrupt("旧配置版本不能声明文件限速".into()));
-                }
-                if version < 8 && config.notifications {
-                    return Err(ConfigError::Corrupt("旧配置版本不能启用系统通知".into()));
-                }
-                if version < 9 && config.signal_tls.is_some() {
-                    return Err(ConfigError::Corrupt("旧配置版本不能启用信令 TLS".into()));
-                }
-                if version < 10 && config.auto_resume {
-                    return Err(ConfigError::Corrupt("旧配置版本不能启用自动恢复".into()));
-                }
-                if version < 11
-                    && config.receive_safety_mib
-                        != crate::node::core::receive_policy::DEFAULT_SAFETY_MIB
-                {
-                    return Err(ConfigError::Corrupt(
-                        "旧配置版本不能声明接收安全余量".into(),
-                    ));
-                }
-                // v2 had target-only grants. Preserve rows, but require explicit peer authorization.
-                if version == 2 {
-                    for entry in &mut config.allowed_forward_targets {
-                        entry.allowed_peers.clear();
-                    }
-                }
-                config.schema_version = CONFIG_SCHEMA_VERSION;
-                config
-            }
-            other => {
-                return Err(ConfigError::Corrupt(format!(
-                    "不支持的 schema_version {other}"
-                )));
-            }
-        };
+        if version != CONFIG_SCHEMA_VERSION {
+            return Err(ConfigError::Corrupt(format!(
+                "不支持的 schema_version {version}"
+            )));
+        }
+        let config: Self = serde_json::from_slice(bytes)
+            .map_err(|error| ConfigError::Corrupt(error.to_string()))?;
         config
             .validate()
             .map_err(|error| ConfigError::Corrupt(error.to_string()))?;
@@ -1043,6 +837,32 @@ fn config_mutation_lock() -> Result<std::sync::MutexGuard<'static, ()>, ConfigEr
 mod tests {
     use super::*;
 
+    #[test]
+    fn unsupported_schemas_are_rejected_without_rewriting_configuration() {
+        let root = temp_dir("unsupported-schema");
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("settings.json");
+        let draft = valid_draft(root.clone());
+        let current = serde_json::to_value(draft.to_config().unwrap()).unwrap();
+        for version in (0..CONFIG_SCHEMA_VERSION).chain([CONFIG_SCHEMA_VERSION + 1]) {
+            let mut unsupported = current.clone();
+            unsupported["schema_version"] = version.into();
+            let original = serde_json::to_vec(&unsupported).unwrap();
+            fs::write(&path, &original).unwrap();
+            let error = DesktopConfig::load(&path).unwrap_err();
+            assert!(error.to_string().contains("schema_version"));
+            assert!(draft.save_atomic(&path).is_err());
+            assert_eq!(fs::read(&path).unwrap(), original);
+        }
+        fs::remove_file(&path).unwrap();
+        draft.save_atomic(&path).unwrap();
+        assert_eq!(
+            DesktopConfig::load(&path).unwrap().unwrap(),
+            draft.to_config().unwrap()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn temp_dir(tag: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "p2p_file_desktop_config_{tag}_{}_{}",
@@ -1052,86 +872,13 @@ mod tests {
     }
 
     #[test]
-    fn receive_margin_migrates_validates_and_stale_drafts_preserve_saved_choice() {
-        let root = temp_dir("receive-margin");
-        fs::create_dir_all(&root).unwrap();
-        let path = root.join("settings.json");
-        let draft = valid_draft(root.clone());
-        for version in 2..=10 {
-            let mut old = serde_json::to_value(draft.to_config().unwrap()).unwrap();
-            old["schema_version"] = version.into();
-            old.as_object_mut().unwrap().remove("receive_safety_mib");
-            fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-            assert_eq!(
-                DesktopConfig::load(&path)
-                    .unwrap()
-                    .unwrap()
-                    .receive_safety_mib,
-                64
-            );
-            DesktopConfig::save_receive_safety_mib(&path, 0).unwrap();
-            draft.save_atomic(&path).unwrap();
-            assert_eq!(
-                DesktopConfig::load(&path)
-                    .unwrap()
-                    .unwrap()
-                    .receive_safety_mib,
-                0
-            );
-            let saved = fs::read(&path).unwrap();
-            assert!(DesktopConfig::save_receive_safety_mib(&path, 4097).is_err());
-            assert_eq!(fs::read(&path).unwrap(), saved);
-            old["receive_safety_mib"] = 1.into();
-            fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-            assert!(DesktopConfig::load(&path).is_err());
-        }
-        fs::remove_dir_all(root).unwrap();
-    }
-    #[test]
-    fn auto_resume_preference_migrates_off_and_stale_drafts_preserve_explicit_choice() {
-        let root = temp_dir("auto-resume");
-        fs::create_dir_all(&root).unwrap();
-        let path = root.join("settings.json");
-        let draft = valid_draft(root.clone());
-        for version in 2..=9 {
-            let mut old = serde_json::to_value(draft.to_config().unwrap()).unwrap();
-            old["schema_version"] = version.into();
-            old.as_object_mut().unwrap().remove("auto_resume");
-            fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-            assert!(!DesktopConfig::load(&path).unwrap().unwrap().auto_resume);
-            DesktopConfig::save_auto_resume(&path, true).unwrap();
-            draft.save_atomic(&path).unwrap();
-            assert!(DesktopConfig::load(&path).unwrap().unwrap().auto_resume);
-            old["auto_resume"] = true.into();
-            fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-            assert!(DesktopConfig::load(&path).is_err());
-            assert!(DesktopConfig::save_auto_resume(&path, false).is_err());
-        }
-        fs::remove_dir_all(root).unwrap();
-    }
-    #[test]
-    fn signaling_tls_configuration_migrates_plaintext_and_missing_ca_never_disables_tls() {
+    fn signaling_tls_configuration_preserves_policy_when_ca_disappears() {
         let dir = temp_dir("signaling-tls");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("settings.json");
         let draft = valid_draft(dir.clone());
         draft.save_atomic(&path).unwrap();
         let original = std::fs::read(&path).unwrap();
-        for version in 2..=8 {
-            let mut old: serde_json::Value = serde_json::from_slice(&original).unwrap();
-            old["schema_version"] = version.into();
-            std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-            assert!(
-                DesktopConfig::load(&path)
-                    .unwrap()
-                    .unwrap()
-                    .signal_tls
-                    .is_none()
-            );
-            old["signal_tls"] = serde_json::json!({"ca_file": null, "server_name": null});
-            std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-            assert!(DesktopConfig::load(&path).is_err());
-        }
         std::fs::write(&path, &original).unwrap();
         let fixture = crate::discovery::signal_tls::tests::Fixture::new(false);
         let mut secured = draft.clone();
@@ -1159,9 +906,7 @@ mod tests {
     }
     fn valid_draft(receive_directory: PathBuf) -> SettingsDraft {
         SettingsDraft {
-            background: Default::default(),
             file_limits: Default::default(),
-            notifications: false,
             auto_resume: false,
             receive_safety_mib: crate::node::core::receive_policy::DEFAULT_SAFETY_MIB,
             signal_tls: None,
@@ -1180,7 +925,7 @@ mod tests {
     }
 
     #[test]
-    fn security_only_initialization_migration_and_failed_rotation_preserve_settings() {
+    fn security_only_initialization_and_failed_rotation_preserve_settings() {
         let root =
             std::env::temp_dir().join(format!("p2p-auth-config-{:032x}", rand::random::<u128>()));
         fs::create_dir(&root).unwrap();
@@ -1218,21 +963,13 @@ mod tests {
         assert_eq!(rotated.signal, saved.signal);
         assert_eq!(rotated.receive_directory, saved.receive_directory);
         assert_eq!(rotated.remote_auth, Some(next));
-        // Schema 3 must retain identity-independent network/Tunnel settings, without inventing credentials.
-        let mut old = serde_json::to_value(saved).unwrap();
-        old["schema_version"] = 3.into();
-        old.as_object_mut().unwrap().remove("remote_auth");
-        fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-        let migrated = DesktopConfig::load(&path).unwrap().unwrap();
-        assert!(migrated.remote_auth.is_none());
-        assert_eq!(migrated.schema_version, CONFIG_SCHEMA_VERSION);
         fs::write(&path, b"corrupt").unwrap();
         assert!(DesktopConfig::save_remote_auth(&path, verifier).is_err());
         assert_eq!(fs::read(&path).unwrap(), b"corrupt");
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn speedtest_defaults_to_bidirectional_and_reads_legacy_directions() {
+    fn speedtest_defaults_to_bidirectional_and_preserves_explicit_direction() {
         assert_eq!(
             SettingsDraft::defaults(None).speedtest_direction,
             SpeedtestDirection::Both
@@ -1243,9 +980,7 @@ mod tests {
             SpeedtestDirection::Upload
         );
         let upgraded = SettingsDraft::from_config(DesktopConfig {
-            background: Default::default(),
             file_limits: Default::default(),
-            notifications: false,
             auto_resume: false,
             receive_safety_mib: crate::node::core::receive_policy::DEFAULT_SAFETY_MIB,
             signal_tls: None,
@@ -1264,66 +999,7 @@ mod tests {
             remote_auth: None,
             trusted_devices: Vec::new(),
         });
-        assert_eq!(upgraded.speedtest_direction, SpeedtestDirection::Both);
-    }
-
-    #[test]
-    fn native_app_directories_use_platform_standard_roots() {
-        let paths = AppPaths::discover().unwrap();
-        assert_eq!(
-            paths.config_dir,
-            dirs::config_dir().unwrap().join(APP_DIR_NAME)
-        );
-        assert_eq!(
-            paths.data_dir,
-            dirs::data_local_dir()
-                .unwrap()
-                .join(APP_DIR_NAME)
-                .join("data")
-        );
-        assert_eq!(
-            paths.downloads_dir,
-            dirs::download_dir().filter(|path| {
-                path.is_absolute()
-                    && path.to_str().is_some()
-                    && fs::metadata(path).is_ok_and(|metadata| metadata.is_dir())
-            })
-        );
-        assert!(paths.config_dir.is_absolute());
-        assert!(paths.data_dir.is_absolute());
-        assert_ne!(paths.config_dir, paths.data_dir);
-        #[cfg(target_os = "linux")]
-        {
-            let home = dirs::home_dir().unwrap();
-            let expected_config = std::env::var_os("XDG_CONFIG_HOME")
-                .map(PathBuf::from)
-                .filter(|path| path.is_absolute())
-                .unwrap_or_else(|| home.join(".config"));
-            let expected_data = std::env::var_os("XDG_DATA_HOME")
-                .map(PathBuf::from)
-                .filter(|path| path.is_absolute())
-                .unwrap_or_else(|| home.join(".local/share"));
-            assert_eq!(dirs::config_dir().unwrap(), expected_config);
-            assert_eq!(dirs::data_local_dir().unwrap(), expected_data);
-        }
-        #[cfg(target_os = "windows")]
-        {
-            // These native calls use SHGetKnownFolderPath in dirs-sys on Windows.
-            assert!(dirs::config_dir().unwrap().is_absolute());
-            assert!(dirs::data_local_dir().unwrap().is_absolute());
-        }
-        #[cfg(target_os = "macos")]
-        {
-            let home = dirs::home_dir().unwrap();
-            assert_eq!(
-                dirs::config_dir().unwrap(),
-                home.join("Library/Application Support")
-            );
-            assert_eq!(
-                dirs::data_local_dir().unwrap(),
-                home.join("Library/Application Support")
-            );
-        }
+        assert_eq!(upgraded.speedtest_direction, SpeedtestDirection::Upload);
     }
 
     #[test]
@@ -1501,10 +1177,6 @@ mod tests {
         assert_eq!(first.receive_directory, Some(receive.clone()));
         assert_eq!(first.allowed_forward_targets, draft.allowed_forward_targets);
         assert_eq!(first.tunnel_rules, draft.tunnel_rules);
-        assert_eq!(
-            draft.enabled_forward_targets(),
-            vec![draft.allowed_forward_targets[0].clone()]
-        );
 
         draft.send_concurrency = 3;
         draft.speedtest_seconds = 600;
@@ -1519,38 +1191,6 @@ mod tests {
             1
         );
         assert_eq!(fs::read_dir(&receive).unwrap().count(), 0);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn schema_one_config_migrates_with_empty_forward_lists_and_is_rewritten_as_schema_two() {
-        let root = temp_dir("schema_migration");
-        fs::create_dir_all(&root).unwrap();
-        let receive = root.join("Downloads");
-        fs::create_dir(&receive).unwrap();
-        let config_file = root.join("settings.json");
-        let legacy = serde_json::json!({
-            "schema_version": 1,
-            "signal": { "host": "relay.example.test", "port": 7000 },
-            "receive_directory": receive,
-            "send_concurrency": 1,
-            "speedtest_seconds": 30,
-            "speedtest_direction": "upload"
-        });
-        fs::write(&config_file, serde_json::to_vec(&legacy).unwrap()).unwrap();
-
-        let config = DesktopConfig::load(&config_file).unwrap().unwrap();
-        let (settings, _, can_save) = restore_saved_settings_with_validator(config, |_| Ok(()));
-        assert!(can_save);
-        assert!(settings.allowed_forward_targets.is_empty());
-        assert!(settings.tunnel_rules.is_empty());
-        settings.save_atomic(&config_file).unwrap();
-
-        let migrated: serde_json::Value =
-            serde_json::from_slice(&fs::read(&config_file).unwrap()).unwrap();
-        assert_eq!(migrated["schema_version"], CONFIG_SCHEMA_VERSION);
-        assert_eq!(migrated["allowed_forward_targets"], serde_json::json!([]));
-        assert_eq!(migrated["tunnel_rules"], serde_json::json!([]));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1589,44 +1229,6 @@ mod tests {
             auto_start: false,
         });
         assert!(matches!(draft.to_config(), Err(ConfigError::Invalid(_))));
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn schema_v2_target_only_grants_migrate_without_authorizing_peers() {
-        let root = temp_dir("v2-peer-migration");
-        fs::create_dir_all(&root).unwrap();
-        let path = root.join("settings.json");
-        let mut draft = valid_draft(root.clone());
-        draft
-            .allowed_forward_targets
-            .push(AllowedForwardTarget::new(
-                "ssh",
-                "127.0.0.1:22".parse().unwrap(),
-                vec![crate::identity::Identity::generate().node_id().to_hex()],
-            ));
-        let mut old = serde_json::to_value(draft.to_config().unwrap()).unwrap();
-        old["schema_version"] = 2.into();
-        old["allowed_forward_targets"][0]
-            .as_object_mut()
-            .unwrap()
-            .remove("allowed_peers");
-        fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-        let config = DesktopConfig::load(&path).unwrap().unwrap();
-        assert_eq!(config.schema_version, CONFIG_SCHEMA_VERSION);
-        assert_eq!(config.allowed_forward_targets.len(), 1);
-        assert!(config.allowed_forward_targets[0].allowed_peers.is_empty());
-        SettingsDraft::from_config(config)
-            .save_atomic(&path)
-            .unwrap();
-        assert!(
-            DesktopConfig::load(&path)
-                .unwrap()
-                .unwrap()
-                .allowed_forward_targets[0]
-                .allowed_peers
-                .is_empty()
-        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1912,8 +1514,8 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn v2_v3_v4_migrate_to_empty_trust_without_losing_network_rules_or_password() {
-        let root = temp_dir("trusted-migrations");
+    fn unsupported_schema_cannot_import_password_or_grant_trust() {
+        let root = temp_dir("unsupported-trust");
         fs::create_dir_all(&root).unwrap();
         let path = root.join("settings.json");
         let mut draft = valid_draft(root.clone());
@@ -1928,117 +1530,19 @@ mod tests {
             value["schema_version"] = version.into();
             value.as_object_mut().unwrap().remove("trusted_devices");
             fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
-            let saved = DesktopConfig::load(&path).unwrap().unwrap();
-            assert_eq!(saved.schema_version, CONFIG_SCHEMA_VERSION);
-            assert!(saved.trusted_devices.is_empty());
-            assert_eq!(saved.remote_auth, draft.remote_auth);
-            assert_eq!(saved.signal.unwrap().host, draft.signal_host);
+            let original = fs::read(&path).unwrap();
+            assert!(DesktopConfig::load(&path).is_err());
+            let device = crate::node::core::trusted_devices::TrustedDevice::new(
+                crate::identity::Identity::generate().node_id(),
+                "peer".into(),
+                None,
+            );
+            assert!(DesktopConfig::save_trusted_devices(&path, vec![device]).is_err());
+            assert!(
+                DesktopConfig::save_remote_auth(&path, draft.remote_auth.clone().unwrap()).is_err()
+            );
+            assert_eq!(fs::read(&path).unwrap(), original);
         }
-        fs::remove_dir_all(root).unwrap();
-    }
-    #[test]
-    fn background_migration_is_opt_in_and_stale_drafts_preserve_login_and_security() {
-        use crate::node::core::preferences::BackgroundOptions;
-        let root = temp_dir("background-migration");
-        fs::create_dir_all(&root).unwrap();
-        let path = root.join("settings.json");
-        let mut draft = valid_draft(root.clone());
-        draft.remote_auth = Some(
-            crate::node::core::remote_auth::RemoteVerifier::create(
-                &crate::node::core::remote_auth::SecretPassword::new("A9b8C7".into()).unwrap(),
-            )
-            .unwrap(),
-        );
-        draft.trusted_devices = vec![crate::node::core::trusted_devices::TrustedDevice::new(
-            crate::identity::Identity::generate().node_id(),
-            "kept".into(),
-            None,
-        )];
-        let baseline = draft.to_config().unwrap();
-        let mut old = serde_json::to_value(&baseline).unwrap();
-        old["schema_version"] = 5.into();
-        old.as_object_mut().unwrap().remove("background");
-        fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-        let migrated = DesktopConfig::load(&path).unwrap().unwrap();
-        assert_eq!(migrated.background, BackgroundOptions::default());
-        assert_eq!(migrated.remote_auth, baseline.remote_auth);
-        assert_eq!(migrated.trusted_devices, baseline.trusted_devices);
-        let enabled = BackgroundOptions {
-            close_to_tray: true,
-            launch_at_login: true,
-        };
-        DesktopConfig::save_background_options(&path, enabled).unwrap();
-        draft.save_atomic(&path).unwrap(); // Draft predates the dedicated preference mutation.
-        let saved = DesktopConfig::load(&path).unwrap().unwrap();
-        assert_eq!(saved.background, enabled);
-        assert_eq!(saved.remote_auth, baseline.remote_auth);
-        assert_eq!(saved.trusted_devices, baseline.trusted_devices);
-        old["background"] = serde_json::to_value(enabled).unwrap();
-        fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-        assert!(DesktopConfig::load(&path).is_err());
-        let corrupt = fs::read(&path).unwrap();
-        assert!(DesktopConfig::save_background_options(&path, enabled).is_err());
-        assert_eq!(fs::read(&path).unwrap(), corrupt);
-        fs::remove_dir_all(root).unwrap();
-    }
-    #[test]
-    fn file_limit_migration_and_stale_draft_preserve_live_preferences() {
-        let root = temp_dir("file-limits");
-        fs::create_dir_all(&root).unwrap();
-        let path = root.join("settings.json");
-        let draft = valid_draft(root.clone());
-        let mut old = serde_json::to_value(draft.to_config().unwrap()).unwrap();
-        old["schema_version"] = 6.into();
-        old.as_object_mut().unwrap().remove("file_limits");
-        fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-        assert_eq!(
-            DesktopConfig::load(&path).unwrap().unwrap().file_limits,
-            Default::default()
-        );
-        let limits = crate::node::core::bandwidth::FileLimits {
-            upload_kib: 64,
-            download_kib: 1024,
-        };
-        DesktopConfig::save_file_limits(&path, limits).unwrap();
-        draft.save_atomic(&path).unwrap();
-        let loaded = DesktopConfig::load(&path).unwrap().unwrap();
-        assert_eq!(loaded.file_limits, limits);
-        assert_eq!(loaded.signal.as_ref().unwrap().host, draft.signal_host);
-        let unchanged = fs::read(&path).unwrap();
-        assert!(
-            DesktopConfig::save_file_limits(
-                &path,
-                crate::node::core::bandwidth::FileLimits {
-                    upload_kib: u32::MAX,
-                    download_kib: 0
-                }
-            )
-            .is_err()
-        );
-        assert_eq!(fs::read(&path).unwrap(), unchanged);
-        old["file_limits"] = serde_json::to_value(limits).unwrap();
-        fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-        assert!(DesktopConfig::load(&path).is_err());
-        fs::remove_dir_all(root).unwrap();
-    }
-    #[test]
-    fn notification_migration_is_opt_in_and_stale_drafts_keep_live_preference() {
-        let root = temp_dir("notification-preference");
-        fs::create_dir_all(&root).unwrap();
-        let path = root.join("settings.json");
-        let draft = valid_draft(root.clone());
-        let mut old = serde_json::to_value(draft.to_config().unwrap()).unwrap();
-        old["schema_version"] = 7.into();
-        old.as_object_mut().unwrap().remove("notifications");
-        fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-        assert!(!DesktopConfig::load(&path).unwrap().unwrap().notifications);
-        DesktopConfig::save_notifications(&path, true).unwrap();
-        draft.save_atomic(&path).unwrap();
-        assert!(DesktopConfig::load(&path).unwrap().unwrap().notifications);
-        old["notifications"] = true.into();
-        fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
-        assert!(DesktopConfig::load(&path).is_err());
-        assert!(DesktopConfig::save_notifications(&path, true).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 }

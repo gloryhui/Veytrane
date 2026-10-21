@@ -2264,25 +2264,6 @@ async fn run_session(
                 let _ = command_tx.try_send(SessionCommand::ConnectPeer(peer));
             }
             Wake::Command(Some(SessionCommand::ConnectPeer(peer))) => {
-                if mode_for(peer) == crate::node::core::wire::PeerWireMode::LegacyCliV3 {
-                    credentials.remove(&peer);
-                    let detail =
-                        "统一 Agent 尚不支持旧 CLI v3；请升级对端或使用独立旧命令".to_owned();
-                    if let BeginPeerAttempt::Started(generation) = peers.begin_attempt(peer) {
-                        peers.transition(peer, generation, PeerLifecycle::Failed(detail.clone()));
-                        emit_peer_state(
-                            &events,
-                            peer,
-                            generation,
-                            PeerLifecycle::Failed(detail.clone()),
-                        )
-                        .await;
-                    }
-                    let _ = events.send(SessionEvent::Diagnostic(detail.clone())).await;
-                    fail_peer_tunnels(peer, &detail, &running_tunnels, &mut forced_tunnel_errors);
-                    continue;
-                }
-
                 if manually_disconnected.contains(&peer)
                     || resource_policy.borrow().for_peer(peer).disabled
                 {
@@ -4327,19 +4308,6 @@ async fn start_peer_attempt(
         },
     };
     let generation = generation?;
-    if options.mode == crate::node::core::wire::PeerWireMode::LegacyCliV3 {
-        let detail = "统一 Agent 尚不支持旧 CLI v3；请升级对端或使用独立旧命令".to_owned();
-        peers.transition(peer, generation, PeerLifecycle::Failed(detail.clone()));
-        emit_peer_state(
-            events,
-            peer,
-            generation,
-            PeerLifecycle::Failed(detail.clone()),
-        )
-        .await;
-        let _ = events.send(SessionEvent::Diagnostic(detail)).await;
-        return None;
-    }
 
     let Ok(permit) = Arc::clone(semaphore).try_acquire_owned() else {
         let detail = "待认证连接已达资源上限".to_owned();
@@ -4518,9 +4486,6 @@ async fn run_peer_attempt(
             )
             .await
         }
-        crate::node::core::wire::PeerWireMode::LegacyCliV3 => Err(Error::Protocol(
-            "此节点尚未启用旧 CLI v3 适配；请升级对端或使用明确受支持的旧命令".into(),
-        )),
     }
     .map_err(|error| error.to_string())?;
 

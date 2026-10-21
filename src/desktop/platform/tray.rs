@@ -219,10 +219,9 @@ impl ksni::Tray for LinuxTray {
     fn title(&self) -> String {
         self.snapshot.tooltip()
     }
-    #[allow(clippy::chunks_exact_to_as_chunks)] // Keep Rust 1.85 compatibility.
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
         let mut data = icon_rgba(self.snapshot.core, false);
-        for pixel in data.chunks_exact_mut(4) {
+        for pixel in data.as_chunks_mut::<4>().0 {
             pixel.rotate_right(1);
         } // SNI requires ARGB.
         vec![ksni::Icon {

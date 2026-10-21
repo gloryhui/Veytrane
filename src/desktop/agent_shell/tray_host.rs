@@ -261,14 +261,6 @@ fn request_quit(cx: &mut App) {
         return;
     }
     let shell = cx.global::<TrayRuntime>().shell.clone();
-    if shell.read(cx).ui.migrating() {
-        shell.update(cx, |s, cx| {
-            s.message = "正在迁移身份和任务，请完成后再退出。".into();
-            cx.notify();
-        });
-        show_main(cx);
-        return;
-    }
     cx.update_global::<TrayRuntime, _>(|runtime, _| runtime.quitting = true);
     let paths = shell.update(cx, |s, cx| {
         s.exiting = true;

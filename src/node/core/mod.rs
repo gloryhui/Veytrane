@@ -13,7 +13,6 @@ pub(crate) mod files;
 pub(crate) mod frame_budget;
 pub(crate) mod incremental;
 pub(crate) mod network_state;
-pub mod preferences;
 pub mod protocol;
 pub(crate) mod publish;
 pub(crate) mod queue;

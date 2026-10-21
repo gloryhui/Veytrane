@@ -464,9 +464,6 @@ pub async fn run_managed(paths: AgentPaths) -> io::Result<()> {
 async fn run_with_recovery(paths: AgentPaths, managed: bool) -> io::Result<()> {
     let _directory_lock =
         crate::instance_lock::InstanceLock::acquire(&paths.lock()).map_err(io::Error::other)?;
-    if paths.root.join("migration.pending.json").try_exists()? {
-        return Err(io::Error::other("存在未完成导入，请migrate-resume后启动"));
-    }
     let record = ConfigRecord::load(&paths.config()).map_err(io::Error::other)?;
     let identity = Identity::load(&paths.identity()).map_err(io::Error::other)?;
     let _identity_lock = AgentPaths::identity_lock(identity.node_id())?;

@@ -26,7 +26,6 @@ pub enum PeerWireMode {
     #[default]
     UnifiedV1,
     LegacyDesktopV1,
-    LegacyCliV3,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -353,6 +352,8 @@ mod tests {
 
     #[test]
     fn rejects_legacy_unknown_versions_oversized_directory_and_invalid_services() {
+        // Unsupported modes are rejected at the configuration boundary, before dialing.
+        assert!(serde_json::from_str::<PeerWireMode>("\"legacy_cli_v3\"").is_err());
         for bytes in [
             b"P2PD\x01\x01\x00\x01".as_slice(),
             b"P2PN\x01\x02\x00\x01",
