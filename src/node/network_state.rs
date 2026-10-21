@@ -6,7 +6,13 @@ use std::time::Duration;
 use super::remote_auth::RemoteAuthorization;
 use crate::identity::NodeId;
 
-pub const MAX_PEERS: usize = 16;
+// The isolated distribution gateway serves many recipients. General desktop
+// and Agent builds retain their existing 16-device bound.
+pub const MAX_PEERS: usize = if cfg!(feature = "sub2api-gateway") {
+    128
+} else {
+    16
+};
 pub const MAX_PENDING_PEERS: usize = 8;
 pub const PEER_LOOKUP_TIMEOUT: Duration = Duration::from_secs(15);
 pub const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
@@ -282,6 +288,30 @@ mod tests {
         };
         assert!(peers.is_current(peer_c, generation_c));
         assert_eq!(peers.connected_count(), 1);
+    }
+
+    #[test]
+    fn configured_peer_capacity_is_enforced_and_a_retired_slot_is_reusable() {
+        let mut peers = PeerRegistry::default();
+        for index in 0..MAX_PEERS {
+            let peer = node(index as u8);
+            let BeginPeerAttempt::Started(generation) = peers.begin_attempt(peer) else {
+                panic!("configured connected-device capacity was not available")
+            };
+            assert!(peers.transition(
+                peer,
+                generation,
+                PeerLifecycle::Connected(RemoteAuthorization::BOTH)
+            ));
+        }
+        assert_eq!(peers.connected_count(), MAX_PEERS);
+        assert_eq!(peers.begin_attempt(node(250)), BeginPeerAttempt::AtCapacity);
+        let old = peers.generation(node(0)).unwrap();
+        assert!(peers.transition(node(0), old, PeerLifecycle::Disconnected));
+        assert!(matches!(
+            peers.begin_attempt(node(250)),
+            BeginPeerAttempt::Started(_)
+        ));
     }
 
     #[test]

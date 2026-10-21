@@ -1,4 +1,4 @@
-//! Recover a managed macOS Agent after wake or a local interface change.
+//! Recover a managed macOS Agent or fixed client after wake/interface changes.
 //! A restart re-gathers NAT candidates; signal-only outages stay in the core.
 use std::{collections::BTreeSet, time::Duration};
 
@@ -49,7 +49,6 @@ impl Recovery {
     }
 }
 
-#[cfg(target_os = "macos")]
 fn interfaces() -> Option<BTreeSet<String>> {
     Some(
         if_addrs::get_if_addrs()
@@ -63,7 +62,6 @@ fn interfaces() -> Option<BTreeSet<String>> {
     )
 }
 
-#[cfg(target_os = "macos")]
 pub(super) async fn wait(control: super::control::NodeControl) -> std::io::Error {
     use std::time::{Instant, SystemTime};
     let mut recovery = Recovery::default();
@@ -84,7 +82,7 @@ pub(super) async fn wait(control: super::control::NodeControl) -> std::io::Error
         last_wall = now_wall;
         last_tick = now_tick;
         if let Some(reason) = recovery.observe(gap, interfaces(), control.is_running()) {
-            tracing::warn!(reason, "后台将优雅退出，由登录启动项自动恢复");
+            tracing::warn!(reason, "后台将优雅停止，以重新建立连接");
             return std::io::Error::other(reason);
         }
     }

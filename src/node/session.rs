@@ -1097,6 +1097,7 @@ async fn run_session(
             accept_incoming_loop(endpoint, family, accept_inputs).await;
         });
     }
+    let mut mapping_keepalives = start_mapping_keepalives(&network, &mut session_tasks);
 
     let semaphore = Arc::new(Semaphore::new(MAX_PENDING_PEERS));
     let mut peer_tasks = JoinSet::new();
@@ -2321,6 +2322,11 @@ async fn run_session(
                                     continue;
                                 }
                             }
+                            for task in mapping_keepalives.drain(..) {
+                                task.abort();
+                            }
+                            mapping_keepalives =
+                                start_mapping_keepalives(&network, &mut session_tasks);
                             for path in &network.paths {
                                 let endpoint = path.endpoint.clone();
                                 let family = path.family;
@@ -4044,6 +4050,32 @@ async fn start_tunnel_rule(
             shutdown: shutdown_tx,
         },
     );
+}
+
+fn start_mapping_keepalives(
+    network: &DesktopNetwork,
+    tasks: &mut JoinSet<()>,
+) -> Vec<tokio::task::AbortHandle> {
+    network
+        .paths
+        .iter()
+        .filter_map(|path| {
+            // Keep the destination that produced our advertised IPv4 reflexive
+            // address alive, even when no peers have a QUIC keepalive yet.
+            let server = path.mapping_probe.as_ref()?.observations.first()?.server;
+            let socket = path.punch_socket.clone();
+            Some(tasks.spawn(async move {
+                let mut interval = time::interval(Duration::from_secs(15));
+                interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+                loop {
+                    interval.tick().await;
+                    if let Err(error) = socket.keep_mapping_alive(server).await {
+                        debug!(%error, "STUN mapping keepalive failed; retrying next interval");
+                    }
+                }
+            }))
+        })
+        .collect()
 }
 
 fn start_signal_connect(

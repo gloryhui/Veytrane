@@ -9,6 +9,27 @@ fn git(args: &[&str]) -> Option<String> {
 }
 
 fn main() {
+    // A distributor supplies a private build-time profile. Never emit its
+    // contents in cargo directives, diagnostics, source control or the ZIP.
+    println!("cargo:rerun-if-env-changed=P2P_SUB2API_PROFILE_FILE");
+    let profile = if env::var_os("CARGO_FEATURE_SUB2API_CLIENT").is_some() {
+        env::var_os("P2P_SUB2API_PROFILE_FILE")
+            .map(|path| {
+                println!(
+                    "cargo:rerun-if-changed={}",
+                    std::path::Path::new(&path).display()
+                );
+                std::fs::read_to_string(path).expect("read private Sub2API build profile")
+            })
+            .unwrap_or_else(|| "{}".into())
+    } else {
+        "{}".into()
+    };
+    std::fs::write(
+        std::path::Path::new(&env::var_os("OUT_DIR").unwrap()).join("sub2api-profile.json"),
+        profile,
+    )
+    .expect("write embedded Sub2API profile");
     println!("cargo:rerun-if-changed=assets/icons/app-icon.ico");
     println!("cargo:rerun-if-changed=assets/icons/app-icon.rc");
     if env::var_os("CARGO_FEATURE_GUI").is_some()

@@ -12,6 +12,8 @@ license = "MIT"
 
 [features]
 default = ["node"]
+sub2api-client = ["node"]
+sub2api-gateway = ["node"]
 node = [
     "dep:argon2",
     "dep:hmac",
@@ -92,6 +94,21 @@ required-features = ["node"]
 [[bin]]
 name = "p2p-node"
 path = "src/bin/p2p-node.rs"
+required-features = ["node"]
+
+[[bin]]
+name = "sub2api-client"
+path = "src/bin/sub2api-client.rs"
+required-features = ["sub2api-client"]
+
+[[bin]]
+name = "p2p-sub2api-gateway"
+path = "src/bin/p2p-sub2api-gateway.rs"
+required-features = ["sub2api-gateway"]
+
+[[example]]
+name = "sub2api-client-harness"
+path = "examples/sub2api-client-harness.rs"
 required-features = ["node"]
 
 [target."cfg(unix)".dependencies]

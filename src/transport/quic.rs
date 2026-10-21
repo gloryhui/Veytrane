@@ -244,6 +244,26 @@ impl PunchSocketHandle {
         self.io.local_addr()
     }
 
+    /// Refresh the STUN mapping on the exact socket later used for QUIC.
+    /// An Indication expects no response and cannot compete with Quinn's reads.
+    pub async fn keep_mapping_alive(&self, server: SocketAddr) -> io::Result<()> {
+        if !crate::net::AddressFamily::of(self.local_addr()?).accepts(server) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "STUN keepalive family mismatch",
+            ));
+        }
+        let packet = crate::nat::stun::Message {
+            method: crate::nat::stun::Method::Binding,
+            class: crate::nat::stun::MessageClass::Indication,
+            transaction_id: rand::random(),
+            attributes: Vec::new(),
+        }
+        .encode();
+        self.io.send_to(&packet, server).await?;
+        Ok(())
+    }
+
     pub fn register_probe(&self, token: &PunchToken) -> Result<PunchProbeReceiver> {
         self.router.register(token, None, 0)
     }
@@ -788,6 +808,40 @@ impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn idle_mapping_keepalive_uses_the_quic_port_and_preserves_punch_routing() {
+        use crate::nat::stun::{Message, MessageClass, Method};
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let (endpoint, punch) = endpoint_from_socket_with_punch_dispatcher(socket).unwrap();
+        let stun = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        punch
+            .keep_mapping_alive(stun.local_addr().unwrap())
+            .await
+            .unwrap();
+        let mut bytes = [0; 1500];
+        let (size, source) =
+            tokio::time::timeout(Duration::from_secs(2), stun.recv_from(&mut bytes))
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(source, endpoint.local_addr().unwrap());
+        let packet = Message::decode(&bytes[..size]).unwrap();
+        assert_eq!(packet.method, Method::Binding);
+        assert_eq!(packet.class, MessageClass::Indication);
+        assert!(packet.attributes.is_empty());
+        let token = PunchToken::random();
+        let mut route = punch.register_probe(&token).unwrap();
+        stun.send_to(&crate::nat::punch::probe_packet(&token), source)
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), route.recv())
+                .await
+                .unwrap(),
+            Some(stun.local_addr().unwrap())
+        );
+        endpoint.close(0u32.into(), b"test complete");
+    }
     use super::*;
     use crate::identity::Identity;
     use crate::nat::punch::{PunchToken, probe_packet};
