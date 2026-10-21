@@ -24,7 +24,7 @@
 
 ## 2. 已知缺陷清单
 
-下列编号为本文本地跟踪编号，不表示已在 GitHub 创建新 Issue。相关现有实现来自 [Issue #85](https://github.com/gloryhui/p2p_file/issues/85)、[PR #86](https://github.com/gloryhui/p2p_file/pull/86) 和 [PR #87](https://github.com/gloryhui/p2p_file/pull/87)。
+下列编号为本文本地跟踪编号，不表示已在 GitHub 创建新 Issue。相关现有实现来自 [Issue #85](https://github.com/gloryhui/Veytrane/issues/85)、[PR #86](https://github.com/gloryhui/Veytrane/pull/86) 和 [PR #87](https://github.com/gloryhui/Veytrane/pull/87)。
 
 缺陷标题中的 P1/P2 表示问题优先级；“P1 修复任务”等正文中的 P0–P6 表示迁移阶段。三个缺陷均安排在迁移阶段 P1 处理。
 

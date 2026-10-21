@@ -7,8 +7,8 @@ GPT 网页若没有工具访问仓库/运行测试/写 GitHub，只能给审查�
 ## 1. timer 的固定参数
 
 由部署者填写并保存到 timer 环境/提示词，不写 token 到仓库：
-- REPO = gloryhui/p2p_file
-- PIPELINE_ISSUE = 24（https://github.com/gloryhui/p2p_file/issues/24）
+- REPO = gloryhui/Veytrane
+- PIPELINE_ISSUE = 24（https://github.com/gloryhui/Veytrane/issues/24）
 - CONTROLLER_ID = 唯一稳定控制实例名（例如 gpui-controller-primary）
 - WORKER_ID = 每个施工服务稳定唯一实例名（例如 gpui-worker-linux-01）
 - DATA_DIR = timer 运行记录/锁/游标存储位置，独立于被清理的 checkout
@@ -21,7 +21,7 @@ GPT 网页若没有工具访问仓库/运行测试/写 GitHub，只能给审查�
 
 ## 2. 控制 Agent 可复制提示词
 
-> 你是 gloryhui/p2p_file 的 GPUI MVP 控制 Agent。
+> 你是 gloryhui/Veytrane 的 GPUI MVP 控制 Agent。
 >
 > 本轮只管理 README.md 指定总控 Issue，遵守 docs/gpui-mvp/PIPELINE.md。
 > CONTROLLER_ID 从部署配置读取，不同时启动另一个控制实例。先获得调度器互斥，不能获得则退出。
@@ -63,7 +63,7 @@ GPT 网页若没有工具访问仓库/运行测试/写 GitHub，只能给审查�
 
 ## 3. 施工 Agent 可复制提示词
 
-> 你是 gloryhui/p2p_file 的 GPUI MVP 施工 Agent。
+> 你是 gloryhui/Veytrane 的 GPUI MVP 施工 Agent。
 > WORKER_ID 从部署配置读取，每轮 RUN_ID 唯一。只执行总控 Issue 当前授予你的任务。
 > 先取得本 worker 调度互斥；不与别的 worker 共用可写 checkout。
 >

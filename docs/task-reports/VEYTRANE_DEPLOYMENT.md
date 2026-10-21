@@ -57,3 +57,13 @@ Windows 构建沿用原私有 profile，EXE 中的网关身份和专用访问凭
 当前架构见[可点击架构图](../architecture-current.html#deployment)，宿主操作见[安装与恢复说明](../../packaging/node/README.md)，专用包见[分发说明](../../packaging/sub2api-windows/README.md)。此前的[首次 v2 主节点升级](P2PN_V2_DEPLOYMENT.md)与[专用网关升级](SUB2API_P2PN_V2_DEPLOYMENT.md)保留各自历史时间、构建和制品校验值。
 
 私有配置、NodeId、密码、令牌、私钥、完整日志、备份及带嵌入访问凭证的 ZIP 均未提交到仓库。
+
+## 仓库与源码目录更名（2026-10-21）
+
+GitHub 仓库更名为 [gloryhui/Veytrane](https://github.com/gloryhui/Veytrane)，仍是原仓库，仓库 ID、提交历史、Issue / PR 编号和默认分支保持不变。本地 Mac 源码目录改为 `Veytrane`，Mac 和 Ubuntu 源码工作副本的 `origin` 同步为 `https://github.com/gloryhui/Veytrane.git`。Ubuntu 源码工作副本目录和各主机安装目录维持原位置。
+
+README、Cargo 仓库元数据以及文档中的仓库坐标和 Issue / PR 链接均使用新地址；可点击架构图仍通过相对路径跳转源码，新目录下的架构页已验证可访问。Rust 包名、命令、节点数据目录及启动项不随源码仓库更名。
+
+此次操作没有重启服务或重新部署程序。改名前后核对：Mac Agent / Web、Ubuntu Agent / Web / 独立网关的 PID 和启动时间一致，Nginx 监听进程一致；节点身份、配置、管理令牌、任务 API 记录及网关身份 / 配置未变。两端信令 online、相互 connected，Mac 7 条映射均监听且远端就绪。9 个入口的只读检查与改名前一致（包括 iStore 的 403 登录页、Chromium 的未认证 401 和 Samba 的 SMB 3.0.2 协商）。配置指纹与进程快照仅保存在私有目录，未提交到 Git。
+
+新目录下 Cargo 元数据、架构图来源路径、分层约束与差异格式检查通过；本次只修改仓库地址和文档，没有重建或切换当前运行的二进制。

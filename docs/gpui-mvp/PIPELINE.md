@@ -5,7 +5,7 @@
 
 ## 1. 权威来源与权限
 
-总控 [Issue #24](https://github.com/gloryhui/p2p_file/issues/24) 负责本项目所有派工和报告；每个任务有独立 PR。Issue 正文是导航和摘要，**有效追加事件链才是状态来源**。
+总控 [Issue #24](https://github.com/gloryhui/Veytrane/issues/24) 负责本项目所有派工和报告；每个任务有独立 PR。Issue 正文是导航和摘要，**有效追加事件链才是状态来源**。
 
 权限：
 - 控制层：初始化、派工、授予任务、撤销租约、复核、返工、合并、关闭任务/总控。
@@ -86,12 +86,12 @@ next_control_seq 在未发布时只能叫“候选下一号”，不能当已释
 
 常用只读命令：
 ```bash
-gh api --paginate repos/gloryhui/p2p_file/issues/24/comments
-gh api repos/gloryhui/p2p_file/issues/24
-gh api repos/gloryhui/p2p_file/pulls/PR_NUMBER
-gh api repos/gloryhui/p2p_file/pulls/PR_NUMBER/reviews
-gh api repos/gloryhui/p2p_file/pulls/PR_NUMBER/comments
-gh pr checks PR_NUMBER --repo gloryhui/p2p_file
+gh api --paginate repos/gloryhui/Veytrane/issues/24/comments
+gh api repos/gloryhui/Veytrane/issues/24
+gh api repos/gloryhui/Veytrane/pulls/PR_NUMBER
+gh api repos/gloryhui/Veytrane/pulls/PR_NUMBER/reviews
+gh api repos/gloryhui/Veytrane/pulls/PR_NUMBER/comments
+gh pr checks PR_NUMBER --repo gloryhui/Veytrane
 ```
 
 发送多行 body 用结构化参数或 UTF-8 临时文件 + --body-file；不得把报告里的反引号/$()拼进 shell。
@@ -127,7 +127,7 @@ BOOTSTRAP_REVIEW(T000)
   "attempt": 1,
   "previous_control_seq": "GPUI-0000",
   "status": "DISPATCHED",
-  "repo": "gloryhui/p2p_file",
+  "repo": "gloryhui/Veytrane",
   "base_ref": "main",
   "base_sha": "FULL_40_HEX_SHA",
   "docs_ref": "FULL_40_HEX_SHA",

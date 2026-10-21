@@ -1,6 +1,6 @@
 # T012 候选交付与实测矩阵
 
-GPUI-0017 / attempt1；base `805724d51540887da229c8cbc05d49e57cc27924`。固定验收 ref `2041a38756b87ba7856dcd343624d98df2283c5a`。最终候选 head、完整本地结果、四作业 exact-head CI、三平台下载链接、600秒原始证据和审查/合并状态以 [Issue #24](https://github.com/gloryhui/p2p_file/issues/24) 的结构化事件为准；此文不提前填未来成功。
+GPUI-0017 / attempt1；base `805724d51540887da229c8cbc05d49e57cc27924`。固定验收 ref `2041a38756b87ba7856dcd343624d98df2283c5a`。最终候选 head、完整本地结果、四作业 exact-head CI、三平台下载链接、600秒原始证据和审查/合并状态以 [Issue #24](https://github.com/gloryhui/Veytrane/issues/24) 的结构化事件为准；此文不提前填未来成功。
 
 本地 Linux 优化构建预检：实际 executable33373568 bytes，带794个锁定上游源码归档/许可证的 tar.gz144759449 bytes。源是 base805724d 的 dirty 预检，明确 `candidate=false`，不是最终 head 产物；两项 SHA256 以预检日志为准。实际 X11/Xvfb/Openbox/Mesa 两个独立生产 GPUI 窗口映射耗时0.106416/0.124343秒，warm local 观察而非用户机器冷启动；metadata probe0.002976秒不是GUI启动。最终候选需重编、打包、verify和原生启动，不能复用旧SHA。
 

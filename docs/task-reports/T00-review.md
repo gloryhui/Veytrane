@@ -11,7 +11,7 @@
 
 ## 仓库与差异核对
 
-实际工作区为 `F:\git\p2p_file`，远端为 `https://github.com/gloryhui/p2p_file.git`。审核开始时工作区干净；执行 `git fetch origin --prune` 并用 `git ls-remote --heads origin` 核对后，远端 main 仍为上述基线，唯一位于 main 之外的新增任务候选为上述 T00 提交。两个旧 Issue #85 分支均已包含于 main。
+实际工作区为 `F:\git\p2p_file`，远端当前地址为 `https://github.com/gloryhui/Veytrane.git`（仓库后续更名，历史提交不变）。审核开始时工作区干净；执行 `git fetch origin --prune` 并用 `git ls-remote --heads origin` 核对后，远端 main 仍为上述基线，唯一位于 main 之外的新增任务候选为上述 T00 提交。两个旧 Issue #85 分支均已包含于 main。
 
 候选相对基线仅新增 `docs/task-reports/T00.md`，127 行。设计基线 `eb4b9d9a0b8eb6994faa2c645cb90e841b711b30` 到本候选也只有文档差异，`src/`、`tests/`、Cargo 文件、CI 和脚本均无改动。已阅读三份节点设计/计划/任务文档、报告模板、Cargo 配置及现有 CI，并核对报告列出的入口、授权、协议、持久化与测试入口。
 

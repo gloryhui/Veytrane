@@ -1,6 +1,6 @@
 # CLI 动态 TCP 转发与共享会话
 
-对应 [Issue #85](https://github.com/gloryhui/p2p_file/issues/85)。本文描述已实现的
+对应 [Issue #85](https://github.com/gloryhui/Veytrane/issues/85)。本文描述已实现的
 CLI 能力、配置格式、热加载语义和验收边界。
 
 ## 1. 目标与非目标

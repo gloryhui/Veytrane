@@ -15,7 +15,7 @@
 | [PIPELINE.md](PIPELINE.md) | 所有自动 Agent | Issue 事件格式、派工、领取、租约、报告、复核、合并、恢复与幂等 |
 | [AGENT_PROMPTS.md](AGENT_PROMPTS.md) | 定时器配置者及各 Agent | 可复制的控制/施工 Agent 提示词与运行要求 |
 
-总控入口：[Issue #24](https://github.com/gloryhui/p2p_file/issues/24)。文档 PR、固定文档 SHA 和当前审核状态见该 Issue 的 BOOTSTRAP 事件。
+总控入口：[Issue #24](https://github.com/gloryhui/Veytrane/issues/24)。文档 PR、固定文档 SHA 和当前审核状态见该 Issue 的 BOOTSTRAP 事件。
 **以总控 Issue 的有效控制事件为唯一施工入口，不能仅因 TASKS.md 列出了任务就自行施工。**
 
 ## 2. 本轮明确交付

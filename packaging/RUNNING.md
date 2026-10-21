@@ -4,7 +4,7 @@
 
 当前本机与 Ubuntu 安装已更新到 `ec72ed4`，Mac 应用为 `/Applications/Veytrane.app`，Windows 专用新版 ZIP 已交付到发行者桌面；实机范围、状态保留和校验值见[最新部署验收](../docs/task-reports/VEYTRANE_DEPLOYMENT.md)。通用 Windows 桌面候选与 Sub2API 专用包分别构建，不能互相替代。
 
-这是 GPUI MVP 的候选产物。版本、完整源码 commit、目标、实际二进制/归档大小、SHA256、签名状态在 `build-info.json` / `candidate.json`。`SHA256SUMS` 校验解包后的文件；旁置 `.sha256` 校验归档。不要把 PR 的 CI 成功当作最低系统、物理设备或双 NAT 验收。最终状态以 [Issue #24](https://github.com/gloryhui/p2p_file/issues/24) 为准；未完成 mandatory 外部验证之前不创建正式 Release。
+这是 GPUI MVP 的候选产物。版本、完整源码 commit、目标、实际二进制/归档大小、SHA256、签名状态在 `build-info.json` / `candidate.json`。`SHA256SUMS` 校验解包后的文件；旁置 `.sha256` 校验归档。不要把 PR 的 CI 成功当作最低系统、物理设备或双 NAT 验收。最终状态以 [Issue #24](https://github.com/gloryhui/Veytrane/issues/24) 为准；未完成 mandatory 外部验证之前不创建正式 Release。
 
 ## 安装与运行
 
