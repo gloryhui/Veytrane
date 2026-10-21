@@ -1,5 +1,4 @@
 //! Tray display state; contains no embedded session or window owner.
-use crate::node::core::network_state;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(in crate::desktop) enum CoreState {
@@ -31,28 +30,6 @@ impl CoreState {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(in crate::desktop) enum SignalState {
-    #[default]
-    Offline,
-    Connecting,
-    Online,
-    Error,
-}
-impl SignalState {
-    pub fn apply(&mut self, lifecycle: &network_state::NetworkLifecycle) {
-        use network_state::NetworkLifecycle as N;
-        match lifecycle {
-            N::Unconfigured => *self = Self::Offline,
-            N::ConnectingSignal | N::ReconnectingSignal { .. } => *self = Self::Connecting,
-            N::SignalOnline => *self = Self::Online,
-            N::Failed { .. } => *self = Self::Error,
-            N::Disconnected { peer: None, .. } => *self = Self::Offline,
-            _ => {} // A peer failure never changes the signaling state.
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(in crate::desktop) struct StatusSnapshot {
     pub core: CoreState,
@@ -78,17 +55,27 @@ impl StatusSnapshot {
             self.tunnels
         )
     }
-    pub(in crate::desktop) fn project_core(&mut self, signal: SignalState, error: bool) {
-        self.core = if error || signal == SignalState::Error || self.tunnel_errors > 0 {
-            CoreState::Error
-        } else if self.active_files > 0 || self.speed_running {
-            CoreState::Active
-        } else if self.connected_peers > 0 || signal == SignalState::Online {
-            CoreState::Online
-        } else if signal == SignalState::Connecting {
-            CoreState::Connecting
-        } else {
-            CoreState::Offline
-        };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::desktop::platform::tray;
+    #[test]
+    fn every_core_state_has_a_distinct_monochrome_menu_bar_icon() {
+        let icons: Vec<_> = [
+            CoreState::Offline,
+            CoreState::Connecting,
+            CoreState::Online,
+            CoreState::Active,
+            CoreState::Error,
+        ]
+        .into_iter()
+        .map(|state| tray::icon_rgba(state, true))
+        .collect();
+        for (i, icon) in icons.iter().enumerate() {
+            assert_eq!(icon.len(), 32 * 32 * 4);
+            assert!(icons[i + 1..].iter().all(|other| icon != other));
+        }
     }
 }

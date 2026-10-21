@@ -6,7 +6,6 @@
 
 ```text
 src/bin/p2p-desktop.rs → desktop/agent_shell → node/api + node/local
-                     └ --legacy → desktop/legacy → node/core
 src/bin/p2p-node.rs   → node/adapters（CLI、HTTP、离线迁移）
 src/bin/p2p-agent.rs  → node/host → node/core + node/api + node/local
 src/bin/sub2api-*.rs / p2p-sub2api-gateway.rs → node/products
@@ -32,15 +31,16 @@ node/adapters / node/products → 以上服务与契约
 | `src/node/api/` | 管理请求/响应、版本信息与客户端。客户端不持有 Agent 实例、身份或网络会话。 |
 | `src/node/adapters/` | 管理 CLI、HTTP 网关、内嵌 Web HTML、显式离线迁移。Web 是 Agent 的客户端。 |
 | `src/node/products/` | Sub2API 限定用途组合及其恢复策略；复用核心与监听机制。 |
-| `src/desktop/agent_shell/` | 默认 IPC 桌面及其工作台、窗口、托盘宿主；不调用旧 `DesktopShell`。 |
-| `src/desktop/legacy/` | 显式 `--legacy` 内嵌桌面，包括旧窗口、后台所有权、通知和进程回归。 |
-| `src/desktop/ui/` | 新旧桌面共用控件、文本输入、视觉主题、品牌与显示格式。无业务运行时所有权。 |
-| `src/desktop/platform/` | 新旧桌面共用托盘、窗口隐藏/显示、展示状态；不反向引用任一窗口所有者。 |
+| `src/desktop/agent_shell/` | 唯一 IPC 桌面及其工作台、窗口、托盘宿主。 |
+| `src/desktop/ui/` | 工作台与二级窗口共用控件、文本输入、视觉主题、品牌。无业务运行时所有权。 |
+| `src/desktop/platform/` | 桌面共用托盘、窗口隐藏/显示、展示状态；不反向引用任一窗口所有者。 |
 | `src/storage/` | 原子写入、私有目录权限、相对路径校验、句柄相对文件访问与下载落盘；不依赖 node/desktop。 |
 | `src/discovery/`、`nat/`、`net/`、`transport/`、`relay/` | 共用的发现、打洞、连接竞速、QUIC、Relay。 |
 | `src/protocol/`、`transfer/`、`tunnel/`、`admin/` | 原独立 CLI 仍在使用的协议与执行路径；不能因与 node 同名就删除。 |
 
-`core/config.rs` 保留历史 `DesktopConfig` 读写与共享规则校验，`core/settings.rs` 定义当前 `node.json`；旧 schema 仍由显式旧桌面和导入流程读取，不能直接合并或删除。
+`core/config.rs` 保留历史 `DesktopConfig` 读写与共享规则校验，`core/settings.rs` 定义当前 `node.json`；旧 schema 仍由导入流程和核心回归夹具读取，不能直接合并或删除。
+
+`core/process_tests.rs` 保留原先位于旧桌面目录的真实进程业务回归，直接依赖核心，随 node 特性测试执行。
 
 `core/session.rs` 与 `core/transfer.rs` 的大型测试模块分别位于同名子目录的 `tests.rs`，仍然是原模块的子测试，可访问必要私有状态。进程测试使用 `module_path!()` 构造子进程入口，避免目录重组后悄悄执行零个测试。
 
@@ -49,12 +49,12 @@ node/adapters / node/products → 以上服务与契约
 | 发现 | 处理 |
 | --- | --- |
 | desktop 下 29 个三行文件只转发 node 模块；多处“未来任务将接入”的注释掩盖实际依赖 | 删除转发文件，旧桌面直接导入唯一 core 实现；移除已经失去意义的模块级死代码豁免。 |
-| 默认桌面从旧 6,493 行窗口文件通配导入控件、品牌和原生后台能力 | 默认入口与旧运行时分开，共用能力归入 UI/platform，旧入口继续可用。 |
+| 默认桌面从旧 6,493 行窗口文件通配导入控件、品牌和原生后台能力 | 默认入口与旧运行时分开，共用能力归入 UI/platform，内嵌旧入口随后按单用户当前版本策略移除。 |
 | 会话依赖宿主配置协调器的 `CommitOptions` | 参数下沉到核心配置模型，协调器依赖核心契约。 |
 | 通用身份锁和存储反向调用 node 的权限/文件安全函数 | 通用权限与安全文件操作移入 storage，协议相对路径校验保持同一实现和原有拒绝规则。 |
 | `nat/portmap.rs` 没有生产调用，恒定返回不支持 | 删除占位模块及伪实现测试；UPnP/NAT-PMP/PCP 仍是未实现能力。该未实现模块的 Rust 导出不再保留。 |
 | 恢复查询 DTO/访问器只有旧回归使用 | 保留为 `cfg(test)` 的回归辅助；实际启动恢复仍正常编译运行。 |
-| 旧协议、桌面、独立 CLI 看似重复 | 保留可执行入口和兼容测试，不改编码、认证或默认路由。 |
+| 内嵌旧桌面与 Agent 工作台并存 | 移除 `--legacy`、旧窗口/通知/登录启动及专属依赖；进程业务回归迁入 `core/process_tests.rs`。独立 CLI 的仍在使用路径另行维护。 |
 
 ## 其他目录如何维护
 

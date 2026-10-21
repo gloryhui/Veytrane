@@ -160,32 +160,6 @@ impl NativeTray {
         self.last = Some(snapshot);
         Ok(())
     }
-    #[cfg(target_os = "macos")]
-    pub fn anchor(&self) -> Option<(u32, f32, f32)> {
-        // NSWindow/NSScreen frames are logical Cocoa coordinates, so mixed DPI
-        // never depends on the display hosting the unrelated main window.
-        let marker = objc2::MainThreadMarker::new()?;
-        let native = self.icon.ns_status_item()?.button(marker)?.window()?;
-        let screen = native.screen()?;
-        let frame = native.frame();
-        let screen_frame = screen.frame();
-        let display_id: u32 = unsafe {
-            use objc2::{class, msg_send, runtime::AnyObject};
-            let description: *mut AnyObject = msg_send![&*screen, deviceDescription];
-            let key: *mut AnyObject =
-                msg_send![class!(NSString), stringWithUTF8String: c"NSScreenNumber".as_ptr()];
-            let number: *mut AnyObject = msg_send![description, objectForKey: key];
-            if number.is_null() {
-                return None;
-            }
-            msg_send![number, unsignedIntValue]
-        };
-        Some((
-            display_id,
-            (frame.origin.x - screen_frame.origin.x) as f32,
-            (screen_frame.size.height - (frame.origin.y - screen_frame.origin.y)) as f32,
-        ))
-    }
 }
 
 #[cfg(target_os = "linux")]

@@ -35,3 +35,6 @@ pub(crate) mod transfer_files;
 pub mod trusted_devices;
 pub(crate) mod tunnel;
 pub mod wire;
+
+#[cfg(test)]
+mod process_tests;

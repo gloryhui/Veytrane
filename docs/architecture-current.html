@@ -27,7 +27,7 @@
 <div class="arch-toolbar"><div class="arch-tabs" role="tablist" aria-label="架构图视图"></div><div class="arch-search"><label for="arch-search">查找模块</label><input id="arch-search" type="search" placeholder="模块、职责或源码路径" autocomplete="off"></div></div>
 <div id="arch-results" hidden aria-live="polite"></div>
 <div class="arch-map-layout"><div class="panel arch-canvas-panel"><div class="arch-map-head"><p id="arch-description"></p><button type="button" class="btn" id="arch-fit" aria-pressed="false">放大阅读</button></div><div class="arch-legend"><span class="control">管理 / 控制</span><span class="data">业务数据</span><span class="store">状态 / 存储</span><span class="dependency">源码依赖</span></div><div id="arch-canvas" tabindex="0" aria-label="可横向滚动的交互架构图"></div><p class="small arch-hint">点击任意节点展开内部职责 · Tab / Enter 可操作 · 实线为控制、数据与存储，虚线为源码依赖</p></div><aside class="panel arch-detail" id="arch-detail" aria-label="选中模块详情" aria-live="polite"></aside></div>
-<div class="arch-boundary"><strong>分层整理后的源码视图</strong><span>23 个模块 · 4 个可切换视图 · 不依赖外部库</span><p>通用 Agent 与专用版共享核心，分别持有运行时和状态。核心不依赖界面或宿主；默认桌面不再引用旧窗口。下方部署关系是此前读取配置的历史快照，不能据此判断当前实时状态。</p><a href="REPOSITORY_LAYOUT.md">查看分层与清理依据 ↗</a> · <a href="task-reports/REPOSITORY_REORGANIZATION.md">查看回归验证记录 ↗</a></div></section>
+<div class="arch-boundary"><strong>分层整理后的源码视图</strong><span>22 个模块 · 4 个可切换视图 · 不依赖外部库</span><p>通用 Agent 与专用版共享核心，分别持有运行时和状态。核心不依赖界面或宿主；桌面统一通过 IPC 管理 Agent。下方部署关系是此前读取配置的历史快照，不能据此判断当前实时状态。</p><a href="REPOSITORY_LAYOUT.md">查看分层与清理依据 ↗</a> · <a href="task-reports/REPOSITORY_REORGANIZATION.md">查看回归验证记录 ↗</a></div></section>
 <section id="topology"><div class="section-title"><span class="index">02</span><h2>通用节点：进程关系</h2></div><p class="small">点击任意模块查看职责与源码。上半部分为本机；下半部分为远端节点与网络基础设施。</p><div class="architecture"><div class="diagram">
 <div class="boundary"><div class="boundary-title">本机 · 管理入口 / 独立进程</div><div class="nodes"><button class="node" data-node="desktop"><strong>原生桌面</strong><span>主窗口 + 二级窗口 + 托盘</span></button><button class="node" data-node="cli"><strong>p2p-node</strong><span>命令行管理客户端</span></button><button class="node" data-node="web"><strong>可选 Web 网关</strong><span>浏览器 → loopback HTTP</span></button></div></div>
 <div class="flow-label"><b>↓ ↑</b> 本地管理：版本化 JSON 请求 / 响应<br>Windows 命名管道 · Unix Domain Socket</div>
@@ -73,9 +73,9 @@
 <div class="scroll-table"><table><thead><tr><th>范围 / 触发</th><th>恢复动作与保护条件</th></tr></thead><tbody><tr><td>宿主采样</td><td>每 5 秒观察一次。停顿 ≥30 秒、接口变化连续确认或核心连续 3 次停止触发恢复。通用 Mac managed 模式退出等待 launchd；专用版在进程内重建核心。</td></tr><tr><td>共享 NAT 映射保活</td><td>每 15 秒向产生 IPv4 公网映射的 STUN 地址发送 Binding Indication，使用原 QUIC UDP socket；无需响应，由 Quinn 独占接收。网络重配置时替换保活任务。</td></tr><tr><td>专用客户端通道缺失</td><td>无设备通道持续 60 秒后重建网络；健康 QUIC 通道不在每次就绪轮询时重复请求信令配对。</td></tr><tr><td>专用客户端业务卡住</td><td>HTTP 未就绪时，每 15 秒探测服务目录，超时 3 秒；连续 3 次失败触发恢复。目录健康而后端 HTTP 异常时等待 Sub2API，不拆除健康通道。</td></tr><tr><td>专用网关空闲</td><td>无人连接且没有待连接时，实际空闲 300 秒刷新候选。存在已连接用户时，不触发空闲 / 失败刷新。</td></tr><tr><td>专用网关失败 / 停滞</td><td>核心至少运行 60 秒；90 秒内 3 次传输失败、待连接阶段 45 秒无进展，或信令 150 秒未确认时重建。密码失败不算传输失败；健康用户优先保留。</td></tr><tr><td>长 TCP 流控制配额</td><td>TcpReady 协商结束立即释放每 peer 的服务控制槽位；HTTP keep-alive、WebSocket、SMB 持续流改由 TCP 总预算持有，不再占满 8 个控制槽导致新请求 RESET_BUSY。</td></tr></tbody></table></div><div class="callout warn"><strong>恢复语义：</strong>重建后接受新的 TCP 请求；已断开的 TCP 字节流不能透明续接。朋友版窗口关闭后需再次启动 BAT；自动重连不等于开机自启，也不会绕过凭证撤销或持续网络阻断。</div>
 <details><summary>2026-10-21 的验证记录与边界</summary><p>本地 10 项专用权限、恢复、保活与容量测试及 Clippy 已通过。隔离 Ubuntu 故障实验覆盖 302 秒闲置刷新、网关 / 客户端各断网 75 秒、客户端暂停 / 恢复 70 秒；均自动恢复，身份和网关配置不变。该记录对应已交付自动恢复包的源码；本次更新文档未重做故障注入。</p><p>Windows x64 已交叉构建；BAT、浏览器、真实休眠、物理断网和跨日运行仍需最新包的实机验收。Linux 暂停进程实验不是 Windows 真实休眠；128 peer 为代码上限，不是压测承诺。</p></details><div class="scroll-table"><table><thead><tr><th>场景</th><th>当前设计</th></tr></thead><tbody><tr><td>首次运行</td><td>明确初始化或离线导入。默认桌面先附着，检测到现有配置才自动尝试拉起 Agent；不会为缺失配置静默创建另一身份。</td></tr><tr><td>Agent 启动</td><td>取得目录 / 身份所有权 → 检查迁移标记 → 加载配置、私钥和任务 → 启动会话核心 → 建立 IPC 和规则监听 → 对外提供管理状态。</td></tr><tr><td>断线与恢复</td><td>会话维护代际、候选和 peer 状态。任务恢复受认证、能力、权限、检查点和显式暂停意图约束；不会仅因重连成功就伪造完成。</td></tr><tr><td>文件调度</td><td>FIFO 接纳、发送并发 1–3；传输控制、限速、空间预算和队列有界。文件、测速和 TCP 使用独立业务流，但共享底层网络带宽。</td></tr><tr><td>管理请求超时</td><td>超时不等于操作未执行。客户端保留未确认请求 ID，查询或重试相同请求；配置提交由 revision 和最近提交信息辅助恢复。</td></tr><tr><td>配置写入失败</td><td>避免先发布授权后写盘；有恢复风险时关闭核心并报告恢复要求，保留可审计状态。</td></tr><tr><td>有序退出</td><td>显式 Stop → 停止业务 / 监听 → 等待核心关闭并释放目录、身份与任务锁。桌面托盘退出等待所有权释放。</td></tr><tr><td>服务器常驻</td><td>仓库包含 systemd 用户 / 系统服务模板、macOS LaunchAgent 模板。Windows 当前桌面拉起用户级独立 Agent；并非已经安装为 Windows 系统服务。</td></tr></tbody></table></div><div class="grid two"><article class="panel card"><h3>状态展示的来源</h3><p>Agent 提供网络与文件任务快照，桌面工作线程空闲时约每 2 秒轮询 Status / 当前 Tasks 页，界面定时消费更新。所有窗口共享同一投影；Task API 每页最多 128 项。</p></article><article class="panel card"><h3>运行预算</h3><p>普通构建 peer 上限 16；开启 sub2api-gateway 的专用网关构建上限 128。待连接 8、TCP 总流 256 / 每规则 32，通用 Web 管理并发 32 等预算仍有界。入站三类业务队列各 32，防止控制和流接纳无限增长。</p></article></div><p class="caption">这些数字是当前代码中的控制预算，不代表吞吐基准，也不等于已完成所有规模与网络组合的压测。</p></section>
 
-<section id="boundaries"><div class="section-title"><span class="index">11</span><h2>兼容边界与当前状态</h2></div><div class="scroll-table"><table><thead><tr><th>路径 / 能力</th><th>当前实现口径</th></tr></thead><tbody><tr><td>默认桌面 → Agent</td><td>主界面通过 IPC 接入新核心；文件传输工作台、二级独立窗口和托盘已包含在源码基线中。</td></tr><tr><td>新 Agent ↔ 新 Agent</td><td>默认统一节点 v1，承载文件、目录、服务与测速。具体部署的 NAT / 防火墙 / 跨平台组合仍需对应环境验证。</td></tr><tr><td>新 Agent ↔ 旧桌面</td><td>保留逐 peer 显式 <code>LegacyDesktopV1</code> 适配和受限资源策略。它是远端线协议兼容，与前端是否使用原布局无关。</td></tr><tr><td>新 Agent ↔ 旧 CLI v3</td><td>Agent 内明确不支持该 peer 模式，不自动降级。旧 CLI 自身的历史入口仍保留。</td></tr><tr><td><code>p2p-desktop --legacy</code></td><td>源码保留的显式内嵌旧运行入口。它不是当前默认主界面的后端，也不是本次主界面接 Agent 的方式。</td></tr><tr><td>旧数据迁移</td><td>显式预览、指纹校验、停机、备份与可恢复导入；不等于启动时直接复用旧配置，更不搬动业务文件。默认新旧数据目录不同。</td></tr></tbody></table></div><details><summary>已经有源码实现，不等于每种环境都验收完成</summary><p>本文按 2026-10-21 分层整理后的源码更新。仓库内的早期目标设计与发布草案带有各自基线，不能覆盖此快照。代码具备单元、进程及原生窗口测试；实际跨平台、真实旧二进制、不同 NAT 和长时间运行的覆盖应结合对应测试证据判断。本文不作新的全面验收声明。</p></details><details><summary>功能范围</summary><p>当前核心围绕设备连接、文件 / 目录传输、增量预览、TCP 服务和转发、测速、诊断、授权与本机管理。Web 是本机管理入口；没有把浏览器变成 P2P 节点。当前不应理解为全网段 VPN、通用远程桌面、任意远程文件浏览器或云账号平台。</p></details><details><summary>开发时应继续守住的边界</summary><p>新业务进入无 GUI 核心；通用节点由 Agent 统一持有状态，专用模式由隔离宿主持有自己的核心。所有通用管理入口使用同一控制契约。不要在新窗口复制网络运行时、直接编辑在线任务库，或为方便界面展示绕过授权和配置 revision。历史适配与默认路径分别管理，协议变更需要版本和兼容证据。</p></details></section>
+<section id="boundaries"><div class="section-title"><span class="index">11</span><h2>兼容边界与当前状态</h2></div><div class="scroll-table"><table><thead><tr><th>路径 / 能力</th><th>当前实现口径</th></tr></thead><tbody><tr><td>默认桌面 → Agent</td><td>主界面通过 IPC 接入新核心；文件传输工作台、二级独立窗口和托盘已包含在源码基线中。</td></tr><tr><td>新 Agent ↔ 新 Agent</td><td>默认统一节点 v1，承载文件、目录、服务与测速。具体部署的 NAT / 防火墙 / 跨平台组合仍需对应环境验证。</td></tr><tr><td>历史 peer 线协议适配</td><td>保留逐 peer 显式 <code>LegacyDesktopV1</code> 适配和受限资源策略。该适配属于核心线协议；内嵌旧桌面启动入口已移除。</td></tr><tr><td>新 Agent ↔ 旧 CLI v3</td><td>Agent 内明确不支持该 peer 模式，不自动降级。旧 CLI 自身的历史入口仍保留。</td></tr><tr><td>旧数据迁移</td><td>显式预览、指纹校验、停机、备份与可恢复导入；不等于启动时直接复用旧配置，更不搬动业务文件。默认新旧数据目录不同。</td></tr></tbody></table></div><details><summary>已经有源码实现，不等于每种环境都验收完成</summary><p>本文按 2026-10-21 分层整理后的源码更新。仓库内的早期目标设计与发布草案带有各自基线，不能覆盖此快照。代码具备单元、进程及原生窗口测试；实际跨平台、真实旧二进制、不同 NAT 和长时间运行的覆盖应结合对应测试证据判断。本文不作新的全面验收声明。</p></details><details><summary>功能范围</summary><p>当前核心围绕设备连接、文件 / 目录传输、增量预览、TCP 服务和转发、测速、诊断、授权与本机管理。Web 是本机管理入口；没有把浏览器变成 P2P 节点。当前不应理解为全网段 VPN、通用远程桌面、任意远程文件浏览器或云账号平台。</p></details><details><summary>开发时应继续守住的边界</summary><p>新业务进入无 GUI 核心；通用节点由 Agent 统一持有状态，专用模式由隔离宿主持有自己的核心。所有通用管理入口使用同一控制契约。不要在新窗口复制网络运行时、直接编辑在线任务库，或为方便界面展示绕过授权和配置 revision。历史适配与默认路径分别管理，协议变更需要版本和兼容证据。</p></details></section>
 
-<section id="sources"><div class="section-title"><span class="index">12</span><h2>源码与文档索引</h2></div><p class="small">源码链接相对于本 HTML，保留在仓库的 docs 目录即可点击定位。单独复制 HTML 后，正文与交互仍可离线使用，源码链接需原仓库目录配合。</p><div class="source-groups"><article class="panel"><h3>程序入口与桌面</h3><ul><li><a href="../Cargo.toml"><code>Cargo.toml</code></a> — 特性、依赖和二进制</li><li><a href="../src/bin/p2p-desktop.rs"><code>bin/p2p-desktop.rs</code></a> — 默认与显式兼容入口</li><li><a href="../src/bin/p2p-agent.rs"><code>bin/p2p-agent.rs</code></a> — Agent 主程序</li><li><a href="../src/bin/p2p-node.rs"><code>bin/p2p-node.rs</code></a> — 新管理 CLI</li><li><a href="../src/desktop/agent_shell.rs"><code>desktop/agent_shell.rs</code></a> — 共享模型与 IPC worker</li><li><a href="../src/desktop/agent_shell/workbench.rs"><code>desktop/agent_shell/workbench.rs</code></a> — 文件传输工作台</li><li><a href="../src/desktop/agent_shell/windows.rs"><code>desktop/agent_shell/windows.rs</code></a> — 独立子窗口</li><li><a href="../src/desktop/agent_shell/tray_host.rs"><code>desktop/agent_shell/tray_host.rs</code></a> — 托盘生命周期</li></ul></article><article class="panel"><h3>节点与持久化</h3><ul><li><a href="../src/node/host/agent.rs"><code>node/host/agent.rs</code></a> — 唯一宿主与 IPC</li><li><a href="../src/node/host/configuration.rs"><code>node/host/configuration.rs</code></a> — 配置协调</li><li><a href="../src/node/core/control.rs"><code>node/core/control.rs</code></a> — 命令与快照</li><li><a href="../src/node/core/session.rs"><code>node/core/session.rs</code></a> — 会话编排</li><li><a href="../src/node/core/settings.rs"><code>node/core/settings.rs</code></a> — 配置 schema</li><li><a href="../src/node/local/paths.rs"><code>node/local/paths.rs</code></a> — 目录与 IPC 寻址</li><li><a href="../src/node/core/task_store.rs"><code>node/core/task_store.rs</code></a> — 任务存储</li><li><a href="../src/node/adapters/migration.rs"><code>node/adapters/migration.rs</code></a> — 离线导入</li></ul></article><article class="panel"><h3>网络、业务与安全</h3><ul><li><a href="../src/node/core/wire.rs"><code>node/core/wire.rs</code></a> / <a href="../src/node/core/dispatch.rs"><code>node/core/dispatch.rs</code></a></li><li><a href="../src/node/core/transfer.rs"><code>node/core/transfer.rs</code></a> / <a href="../src/node/core/publish.rs"><code>node/core/publish.rs</code></a></li><li><a href="../src/node/core/incremental.rs"><code>node/core/incremental.rs</code></a> / <a href="../src/node/core/services.rs"><code>node/core/services.rs</code></a></li><li><a href="../src/node/core/authorization.rs"><code>node/core/authorization.rs</code></a> / <a href="../src/node/core/remote_auth.rs"><code>node/core/remote_auth.rs</code></a></li><li><a href="../src/net/mod.rs"><code>net/mod.rs</code></a> / <a href="../src/discovery/signal.rs"><code>discovery/signal.rs</code></a></li><li><a href="../src/transport/handshake.rs"><code>transport/handshake.rs</code></a> / <a href="../src/relay/client.rs"><code>relay/client.rs</code></a></li><li><a href="../src/node/adapters/web.rs"><code>node/adapters/web.rs</code></a> — 本机 Web 桥接</li></ul></article><article class="panel"><h3>专用版、恢复与本机导航</h3><ul><li><a href="../src/bin/sub2api-client.rs">Windows 专用入口</a> / <a href="../src/bin/p2p-sub2api-gateway.rs">网关入口</a></li><li><a href="../src/node/products/sub2api.rs">固定宿主、凭证与服务隔离</a></li><li><a href="../src/node/products/recovery.rs">有界恢复策略</a> / <a href="../src/node/host/recovery.rs">宿主采样</a></li><li><a href="../src/transport/quic.rs">QUIC socket 与 STUN 保活</a></li><li><a href="../scripts/node-host.py">通用节点安装与启动</a></li><li><a href="../packaging/sub2api-windows/README.md">专用版构建与授权说明</a></li><li><a href="../scripts/package-sub2api-windows.py">Windows 打包脚本</a></li><li><a href="../service-navigation.html">服务导航</a> / <a href="../scripts/update-service-navigation.py">导航同步脚本</a></li></ul></article><article class="panel"><h3>规格与运行资料</h3><ul><li><a href="specs/NODE_AGENT_API.md">Agent API 规格</a></li><li><a href="specs/NODE_WIRE.md">统一节点协议规格</a></li><li><a href="specs/NODE_AUTHORIZATION.md">资源与授权模型</a></li><li><a href="specs/NODE_STATE_RECOVERY.md">状态恢复规格</a></li><li><a href="specs/NODE_MIGRATION_IMPORT.md">旧数据导入规格</a></li><li><a href="../packaging/RUNNING.md">运行说明</a> / <a href="../packaging/node/README.md">Agent 托管说明</a></li><li><a href="NODE_ARCHITECTURE.md">早期目标架构设计</a> — 历史目标，注意其状态与基线</li></ul></article></div></section>
+<section id="sources"><div class="section-title"><span class="index">12</span><h2>源码与文档索引</h2></div><p class="small">源码链接相对于本 HTML，保留在仓库的 docs 目录即可点击定位。单独复制 HTML 后，正文与交互仍可离线使用，源码链接需原仓库目录配合。</p><div class="source-groups"><article class="panel"><h3>程序入口与桌面</h3><ul><li><a href="../Cargo.toml"><code>Cargo.toml</code></a> — 特性、依赖和二进制</li><li><a href="../src/bin/p2p-desktop.rs"><code>bin/p2p-desktop.rs</code></a> — 统一 Agent 桌面入口</li><li><a href="../src/bin/p2p-agent.rs"><code>bin/p2p-agent.rs</code></a> — Agent 主程序</li><li><a href="../src/bin/p2p-node.rs"><code>bin/p2p-node.rs</code></a> — 新管理 CLI</li><li><a href="../src/desktop/agent_shell.rs"><code>desktop/agent_shell.rs</code></a> — 共享模型与 IPC worker</li><li><a href="../src/desktop/agent_shell/workbench.rs"><code>desktop/agent_shell/workbench.rs</code></a> — 文件传输工作台</li><li><a href="../src/desktop/agent_shell/windows.rs"><code>desktop/agent_shell/windows.rs</code></a> — 独立子窗口</li><li><a href="../src/desktop/agent_shell/tray_host.rs"><code>desktop/agent_shell/tray_host.rs</code></a> — 托盘生命周期</li></ul></article><article class="panel"><h3>节点与持久化</h3><ul><li><a href="../src/node/host/agent.rs"><code>node/host/agent.rs</code></a> — 唯一宿主与 IPC</li><li><a href="../src/node/host/configuration.rs"><code>node/host/configuration.rs</code></a> — 配置协调</li><li><a href="../src/node/core/control.rs"><code>node/core/control.rs</code></a> — 命令与快照</li><li><a href="../src/node/core/session.rs"><code>node/core/session.rs</code></a> — 会话编排</li><li><a href="../src/node/core/settings.rs"><code>node/core/settings.rs</code></a> — 配置 schema</li><li><a href="../src/node/local/paths.rs"><code>node/local/paths.rs</code></a> — 目录与 IPC 寻址</li><li><a href="../src/node/core/task_store.rs"><code>node/core/task_store.rs</code></a> — 任务存储</li><li><a href="../src/node/adapters/migration.rs"><code>node/adapters/migration.rs</code></a> — 离线导入</li></ul></article><article class="panel"><h3>网络、业务与安全</h3><ul><li><a href="../src/node/core/wire.rs"><code>node/core/wire.rs</code></a> / <a href="../src/node/core/dispatch.rs"><code>node/core/dispatch.rs</code></a></li><li><a href="../src/node/core/transfer.rs"><code>node/core/transfer.rs</code></a> / <a href="../src/node/core/publish.rs"><code>node/core/publish.rs</code></a></li><li><a href="../src/node/core/incremental.rs"><code>node/core/incremental.rs</code></a> / <a href="../src/node/core/services.rs"><code>node/core/services.rs</code></a></li><li><a href="../src/node/core/authorization.rs"><code>node/core/authorization.rs</code></a> / <a href="../src/node/core/remote_auth.rs"><code>node/core/remote_auth.rs</code></a></li><li><a href="../src/net/mod.rs"><code>net/mod.rs</code></a> / <a href="../src/discovery/signal.rs"><code>discovery/signal.rs</code></a></li><li><a href="../src/transport/handshake.rs"><code>transport/handshake.rs</code></a> / <a href="../src/relay/client.rs"><code>relay/client.rs</code></a></li><li><a href="../src/node/adapters/web.rs"><code>node/adapters/web.rs</code></a> — 本机 Web 桥接</li></ul></article><article class="panel"><h3>专用版、恢复与本机导航</h3><ul><li><a href="../src/bin/sub2api-client.rs">Windows 专用入口</a> / <a href="../src/bin/p2p-sub2api-gateway.rs">网关入口</a></li><li><a href="../src/node/products/sub2api.rs">固定宿主、凭证与服务隔离</a></li><li><a href="../src/node/products/recovery.rs">有界恢复策略</a> / <a href="../src/node/host/recovery.rs">宿主采样</a></li><li><a href="../src/transport/quic.rs">QUIC socket 与 STUN 保活</a></li><li><a href="../scripts/node-host.py">通用节点安装与启动</a></li><li><a href="../packaging/sub2api-windows/README.md">专用版构建与授权说明</a></li><li><a href="../scripts/package-sub2api-windows.py">Windows 打包脚本</a></li><li><a href="../service-navigation.html">服务导航</a> / <a href="../scripts/update-service-navigation.py">导航同步脚本</a></li></ul></article><article class="panel"><h3>规格与运行资料</h3><ul><li><a href="specs/NODE_AGENT_API.md">Agent API 规格</a></li><li><a href="specs/NODE_WIRE.md">统一节点协议规格</a></li><li><a href="specs/NODE_AUTHORIZATION.md">资源与授权模型</a></li><li><a href="specs/NODE_STATE_RECOVERY.md">状态恢复规格</a></li><li><a href="specs/NODE_MIGRATION_IMPORT.md">旧数据导入规格</a></li><li><a href="../packaging/RUNNING.md">运行说明</a> / <a href="../packaging/node/README.md">Agent 托管说明</a></li><li><a href="NODE_ARCHITECTURE.md">早期目标架构设计</a> — 历史目标，注意其状态与基线</li></ul></article></div></section>
 <footer class="footer">P2P File · 当前整体架构说明 / 2026-10-21<br>源码视图对应 2026-10-21 分层整理；部署章节保留此前核对的历史快照。页面离线运行，不读取私钥、令牌或实时节点状态，不请求外部资源。</footer>
 </main></div>
 <script>
@@ -339,6 +339,11 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
           "name": "会话编排",
           "path": "src/node/core/session.rs",
           "detail": "连接代际、重连、授权与流分发。"
+        },
+        {
+          "name": "核心进程回归",
+          "path": "src/node/core/process_tests.rs",
+          "detail": "文件传输、暂停、信令重连及端点崩溃恢复；无需 GUI。"
         }
       ],
       "section": "core",
@@ -483,35 +488,6 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
         }
       ],
       "section": "storage"
-    },
-    {
-      "id": "legacy",
-      "title": "显式旧桌面",
-      "tag": "COMPATIBILITY",
-      "path": "src/desktop/legacy/mod.rs",
-      "summary": "只有 --legacy 进入内嵌旧运行时，默认桌面不再借用这个大窗口。",
-      "rules": [
-        "保留仍在用的功能和协议回归。",
-        "已移除 29 个领域转发包装文件，直接使用 core。"
-      ],
-      "parts": [
-        {
-          "name": "旧窗口",
-          "path": "src/desktop/legacy/mod.rs",
-          "detail": "显式旧入口。"
-        },
-        {
-          "name": "旧后台所有权",
-          "path": "src/desktop/legacy/background.rs",
-          "detail": "旧窗口生命周期与后台协作。"
-        },
-        {
-          "name": "旧进程回归",
-          "path": "src/desktop/legacy/e2e.rs",
-          "detail": "传输、暂停、目录和崩溃恢复。"
-        }
-      ],
-      "section": "boundaries"
     },
     {
       "id": "adapters",
@@ -690,7 +666,7 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
       "summary": "配置、任务模型和恢复状态属于核心契约，不依赖宿主协调器。",
       "rules": [
         "CommitOptions 已下沉到核心。",
-        "历史 DesktopConfig 仍由旧桌面和迁移读取。"
+        "历史 DesktopConfig 仅由导入与核心回归夹具读取。"
       ],
       "parts": [
         {
@@ -721,7 +697,7 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
       "title": "共享界面组件",
       "tag": "DESKTOP / UI",
       "path": "src/desktop/ui/mod.rs",
-      "summary": "新旧桌面共用的输入、主题、按钮、品牌和格式化。",
+      "summary": "工作台与二级窗口使用的输入、主题、按钮和品牌组件。",
       "rules": [
         "不引用 AgentShell 或旧 DesktopShell。",
         "组件不拥有业务运行时。"
@@ -740,7 +716,7 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
         {
           "name": "品牌",
           "path": "src/desktop/ui/branding.rs",
-          "detail": "新旧窗口共用图标与标题。"
+          "detail": "工作台与二级窗口共用图标与标题。"
         }
       ],
       "section": "desktop"
@@ -822,11 +798,6 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
           "y": 245
         },
         {
-          "id": "legacy",
-          "x": 40,
-          "y": 425
-        },
-        {
           "id": "host",
           "x": 330,
           "y": 425
@@ -880,11 +851,6 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
         },
         {
           "source": "host",
-          "target": "core",
-          "kind": "dependency"
-        },
-        {
-          "source": "legacy",
           "target": "core",
           "kind": "dependency"
         },
@@ -1146,36 +1112,26 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
     {
       "id": "desktop",
       "title": "桌面边界",
-      "description": "默认桌面通过管理 API 操作 Agent，显式旧桌面直接使用 core；两者只共享 UI 与平台工具。",
+      "description": "桌面只通过管理 API 操作 Agent；工作台与二级窗口共享 UI 和平台工具，不内嵌业务运行时。",
       "nodes": [
         {
           "id": "desktop",
-          "x": 185,
-          "y": 100
-        },
-        {
-          "id": "legacy",
-          "x": 765,
+          "x": 475,
           "y": 100
         },
         {
           "id": "ui",
-          "x": 330,
+          "x": 185,
           "y": 320
         },
         {
           "id": "platform",
-          "x": 620,
+          "x": 765,
           "y": 320
         },
         {
           "id": "api",
-          "x": 185,
-          "y": 560
-        },
-        {
-          "id": "core",
-          "x": 765,
+          "x": 475,
           "y": 560
         }
       ],
@@ -1191,24 +1147,9 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
           "kind": "dependency"
         },
         {
-          "source": "legacy",
-          "target": "ui",
-          "kind": "dependency"
-        },
-        {
-          "source": "legacy",
-          "target": "platform",
-          "kind": "dependency"
-        },
-        {
           "source": "desktop",
           "target": "api",
           "kind": "control"
-        },
-        {
-          "source": "legacy",
-          "target": "core",
-          "kind": "dependency"
         }
       ]
     }

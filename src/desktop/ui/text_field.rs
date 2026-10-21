@@ -51,25 +51,6 @@ fn marked_selection_to_utf8(
         ..insertion_offset + utf8_offset_from_utf16(new_text, selection_utf16.end)
 }
 
-fn concurrency_value_replacement(
-    current: &str,
-    range: Range<usize>,
-    new_text: &str,
-) -> Option<(Range<usize>, String)> {
-    if new_text.is_empty() {
-        let remaining_len = current.len().saturating_sub(range.end - range.start);
-        if remaining_len == 0 {
-            return Some((0..current.len(), current.to_owned()));
-        }
-        return Some((range, String::new()));
-    }
-
-    new_text
-        .chars()
-        .find(|character| matches!(character, '1'..='3'))
-        .map(|character| (0..current.len(), character.to_string()))
-}
-
 fn mouse_index_for_layout(content: &str, layout_text: &str, index: usize) -> Option<usize> {
     if content != layout_text {
         return None;
@@ -102,7 +83,6 @@ pub(in crate::desktop) struct TextField {
     pub(in crate::desktop) focus_handle: FocusHandle,
     pub(in crate::desktop) content: SharedString,
     placeholder: SharedString,
-    concurrency_value_input: bool,
     secret: bool,
     pub(in crate::desktop) revealed: bool,
     pub(in crate::desktop) selected_range: Range<usize>,
@@ -119,7 +99,6 @@ impl TextField {
             focus_handle: cx.focus_handle(),
             content: "".into(),
             placeholder: placeholder.into(),
-            concurrency_value_input: false,
             secret: false,
             revealed: false,
             selected_range: 0..0,
@@ -146,14 +125,6 @@ impl TextField {
             self.content.clone()
         }
     }
-    pub(in crate::desktop) fn new_concurrency_value(cx: &mut Context<Self>, value: u8) -> Self {
-        let mut field = Self::new(cx, "1–3");
-        field.content = value.to_string().into();
-        field.selected_range = field.content.len()..field.content.len();
-        field.concurrency_value_input = true;
-        field
-    }
-
     fn replacement_for_range(
         &self,
         range: Range<usize>,
@@ -165,11 +136,7 @@ impl TextField {
         {
             return None;
         }
-        if self.concurrency_value_input {
-            concurrency_value_replacement(&self.content, range, new_text)
-        } else {
-            Some((range, new_text.to_owned()))
-        }
+        Some((range, new_text.to_owned()))
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
@@ -453,19 +420,15 @@ impl EntityInputHandler for TextField {
         self.content =
             (self.content[0..range.start].to_owned() + &new_text + &self.content[range.end..])
                 .into();
-        if !self.concurrency_value_input && !new_text.is_empty() {
+        if !new_text.is_empty() {
             self.marked_range = Some(range.start..range.start + new_text.len());
         } else {
             self.marked_range = None;
         }
-        self.selected_range = if self.concurrency_value_input {
-            range.start + new_text.len()..range.start + new_text.len()
-        } else {
-            new_selected_range_utf16
-                .as_ref()
-                .map(|range_utf16| marked_selection_to_utf8(range.start, &new_text, range_utf16))
-                .unwrap_or_else(|| range.start + new_text.len()..range.start + new_text.len())
-        };
+        self.selected_range = new_selected_range_utf16
+            .as_ref()
+            .map(|range_utf16| marked_selection_to_utf8(range.start, &new_text, range_utf16))
+            .unwrap_or_else(|| range.start + new_text.len()..range.start + new_text.len());
         cx.notify();
     }
 
@@ -709,25 +672,14 @@ impl Render for TextField {
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move));
-        if self.concurrency_value_input {
-            field.line_height(px(18.)).text_size(px(12.)).child(
-                div()
-                    .h(px(24.))
-                    .w_full()
-                    .px(px(4.))
-                    .bg(white())
-                    .child(TextFieldElement { input: cx.entity() }),
-            )
-        } else {
-            field.line_height(px(26.)).text_size(px(16.)).child(
-                div()
-                    .h(px(40.))
-                    .w_full()
-                    .p(px(7.))
-                    .bg(white())
-                    .child(TextFieldElement { input: cx.entity() }),
-            )
-        }
+        field.line_height(px(26.)).text_size(px(16.)).child(
+            div()
+                .h(px(40.))
+                .w_full()
+                .p(px(7.))
+                .bg(white())
+                .child(TextFieldElement { input: cx.entity() }),
+        )
     }
 }
 
@@ -740,8 +692,8 @@ impl Focusable for TextField {
 #[cfg(test)]
 mod tests {
     use super::{
-        concurrency_value_replacement, marked_selection_to_utf8, mouse_index_for_layout,
-        password_display, utf8_offset_from_utf16, utf16_offset_from_utf8,
+        marked_selection_to_utf8, mouse_index_for_layout, password_display, utf8_offset_from_utf16,
+        utf16_offset_from_utf8,
     };
 
     #[test]
@@ -762,23 +714,6 @@ mod tests {
             None
         );
     }
-    #[test]
-    fn concurrency_input_only_accepts_single_values_from_one_to_three() {
-        assert_eq!(
-            concurrency_value_replacement("1", 1..1, "3"),
-            Some((0..1, "3".to_owned()))
-        );
-        assert_eq!(concurrency_value_replacement("1", 1..1, "4"), None);
-        assert_eq!(
-            concurrency_value_replacement("2", 0..1, ""),
-            Some((0..1, "2".to_owned()))
-        );
-        assert_eq!(
-            concurrency_value_replacement("1", 1..1, "invalid3"),
-            Some((0..1, "3".to_owned()))
-        );
-    }
-
     #[test]
     fn utf16_offsets_preserve_cjk_and_surrogate_pairs() {
         let content = "甲🙂乙";

@@ -1,4 +1,4 @@
-//! File-transfer workbench backed by Agent IPC; embedded desktop is explicit.
+//! File-transfer workbench backed by Agent IPC.
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 use clap::Parser;
 #[derive(Parser)]
@@ -7,8 +7,6 @@ struct Args {
     #[arg(long)]
     background: bool,
     #[arg(long)]
-    legacy: bool,
-    #[arg(long, conflicts_with = "legacy")]
     data_dir: Option<std::path::PathBuf>,
     #[arg(long, short = 'V')]
     version: bool,
@@ -32,10 +30,6 @@ fn main() {
             "{}",
             serde_json::json!({"name":"p2p-desktop","version":env!("CARGO_PKG_VERSION"),"build_sha":env!("P2P_BUILD_SHA"),"target":env!("P2P_BUILD_TARGET"),"source_state":env!("P2P_BUILD_STATE")})
         );
-        return;
-    }
-    if args.legacy {
-        p2p_file::desktop::run(args.background);
         return;
     }
     let root = match args.data_dir {

@@ -1,4 +1,4 @@
-//! Keyboard and command actions shared by both desktop entry points.
+//! Keyboard and command actions for the Agent desktop and text fields.
 use gpui::actions;
 
 actions!(
@@ -19,23 +19,11 @@ actions!(
         Copy,
         ChooseFiles,
         ChooseFolder,
-        ChooseReceiveDirectory,
         Quit,
         ConnectPeer,
-        SaveSettings,
         StartSpeed,
-        CancelSpeed,
         ToggleSettings,
-        PauseSelected,
-        ResumeSelected,
         NextField,
         PreviousField,
-        CopyIdentity,
-        NextTask,
-        PreviousTask,
-        ExpandGroups,
-        CycleDirection,
-        CycleDuration,
-        CycleConcurrency,
     ]
 );

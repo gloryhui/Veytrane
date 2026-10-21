@@ -4832,11 +4832,5 @@ fn test_verifier() -> RemoteVerifier {
         .clone()
 }
 
-/// Compatibility names during the in-process desktop transition.
-#[cfg(feature = "gui")]
-pub(crate) type DesktopSessionConfig = NodeSessionConfig;
-#[cfg(feature = "gui")]
-pub(crate) type DesktopSessionHandle = NodeSessionHandle;
-
 #[cfg(test)]
 mod tests;

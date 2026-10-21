@@ -226,6 +226,11 @@
           "name": "会话编排",
           "path": "src/node/core/session.rs",
           "detail": "连接代际、重连、授权与流分发。"
+        },
+        {
+          "name": "核心进程回归",
+          "path": "src/node/core/process_tests.rs",
+          "detail": "文件传输、暂停、信令重连及端点崩溃恢复；无需 GUI。"
         }
       ],
       "section": "core",
@@ -370,35 +375,6 @@
         }
       ],
       "section": "storage"
-    },
-    {
-      "id": "legacy",
-      "title": "显式旧桌面",
-      "tag": "COMPATIBILITY",
-      "path": "src/desktop/legacy/mod.rs",
-      "summary": "只有 --legacy 进入内嵌旧运行时，默认桌面不再借用这个大窗口。",
-      "rules": [
-        "保留仍在用的功能和协议回归。",
-        "已移除 29 个领域转发包装文件，直接使用 core。"
-      ],
-      "parts": [
-        {
-          "name": "旧窗口",
-          "path": "src/desktop/legacy/mod.rs",
-          "detail": "显式旧入口。"
-        },
-        {
-          "name": "旧后台所有权",
-          "path": "src/desktop/legacy/background.rs",
-          "detail": "旧窗口生命周期与后台协作。"
-        },
-        {
-          "name": "旧进程回归",
-          "path": "src/desktop/legacy/e2e.rs",
-          "detail": "传输、暂停、目录和崩溃恢复。"
-        }
-      ],
-      "section": "boundaries"
     },
     {
       "id": "adapters",
@@ -577,7 +553,7 @@
       "summary": "配置、任务模型和恢复状态属于核心契约，不依赖宿主协调器。",
       "rules": [
         "CommitOptions 已下沉到核心。",
-        "历史 DesktopConfig 仍由旧桌面和迁移读取。"
+        "历史 DesktopConfig 仅由导入与核心回归夹具读取。"
       ],
       "parts": [
         {
@@ -608,7 +584,7 @@
       "title": "共享界面组件",
       "tag": "DESKTOP / UI",
       "path": "src/desktop/ui/mod.rs",
-      "summary": "新旧桌面共用的输入、主题、按钮、品牌和格式化。",
+      "summary": "工作台与二级窗口使用的输入、主题、按钮和品牌组件。",
       "rules": [
         "不引用 AgentShell 或旧 DesktopShell。",
         "组件不拥有业务运行时。"
@@ -627,7 +603,7 @@
         {
           "name": "品牌",
           "path": "src/desktop/ui/branding.rs",
-          "detail": "新旧窗口共用图标与标题。"
+          "detail": "工作台与二级窗口共用图标与标题。"
         }
       ],
       "section": "desktop"
@@ -709,11 +685,6 @@
           "y": 245
         },
         {
-          "id": "legacy",
-          "x": 40,
-          "y": 425
-        },
-        {
           "id": "host",
           "x": 330,
           "y": 425
@@ -767,11 +738,6 @@
         },
         {
           "source": "host",
-          "target": "core",
-          "kind": "dependency"
-        },
-        {
-          "source": "legacy",
           "target": "core",
           "kind": "dependency"
         },
@@ -1033,36 +999,26 @@
     {
       "id": "desktop",
       "title": "桌面边界",
-      "description": "默认桌面通过管理 API 操作 Agent，显式旧桌面直接使用 core；两者只共享 UI 与平台工具。",
+      "description": "桌面只通过管理 API 操作 Agent；工作台与二级窗口共享 UI 和平台工具，不内嵌业务运行时。",
       "nodes": [
         {
           "id": "desktop",
-          "x": 185,
-          "y": 100
-        },
-        {
-          "id": "legacy",
-          "x": 765,
+          "x": 475,
           "y": 100
         },
         {
           "id": "ui",
-          "x": 330,
+          "x": 185,
           "y": 320
         },
         {
           "id": "platform",
-          "x": 620,
+          "x": 765,
           "y": 320
         },
         {
           "id": "api",
-          "x": 185,
-          "y": 560
-        },
-        {
-          "id": "core",
-          "x": 765,
+          "x": 475,
           "y": 560
         }
       ],
@@ -1078,24 +1034,9 @@
           "kind": "dependency"
         },
         {
-          "source": "legacy",
-          "target": "ui",
-          "kind": "dependency"
-        },
-        {
-          "source": "legacy",
-          "target": "platform",
-          "kind": "dependency"
-        },
-        {
           "source": "desktop",
           "target": "api",
           "kind": "control"
-        },
-        {
-          "source": "legacy",
-          "target": "core",
-          "kind": "dependency"
         }
       ]
     }

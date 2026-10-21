@@ -10,7 +10,7 @@
 | 新Agent↔新Agent | P2PN v1，独立文件/TCP/测速分发与能力/资源权限 | codec/调用链已接入；互通/负例待测 |
 | 新Agent↔旧桌面 | 逐peer显式LegacyDesktopV1，已知资源白名单 | 编码保持、真实旧二进制待测 |
 | 新Agent↔旧CLI v3 | Agent内不支持，明确拒绝，不降级 | 不可宣称互通 |
-| 显式旧CLI↔旧CLI、--legacy桌面 | 旧线格式/文件策略保留，统一身份互锁 | 本轮运行回归待测 |
+| 显式独立 CLI↔独立 CLI | 旧线格式/文件策略保留，统一身份互锁 | 本轮运行回归待测 |
 | 旧桌面数据导入 | 预览/指纹/停机/备份/不覆盖/resume，来源LegacyImport | 合成恢复/跨平台待测 |
 
 升级要求三二进制同SHA/target/source状态；API或schema不兼容拒绝。旧数据/权限恢复必须预览且不能覆盖新文件或复活撤销，详见[宿主规格](NODE_HOST_LIFECYCLE.md)及[导入规格](NODE_MIGRATION_IMPORT.md)。当前高级历史/诊断展示仍有显式兼容入口，不能把新界面的功能集合与旧界面全部等同。
@@ -21,7 +21,7 @@
 | --- | --- |
 | src/node核心、IPC、Agent、任务/授权/文件 | 新默认入口使用；保留并先完成验收 |
 | 原 src/desktop 薄领域重导出 | 2026-10-21 整理后旧桌面直接导入唯一 core 实现，29 个仅转发的文件已移除；业务实现及兼容协议均保留 |
-| src/desktop/legacy 旧桌面窗口/后台，以及共享 platform 托盘 | --legacy及历史验收使用；不可删除，后续逐功能证明无依赖 |
+| 原内嵌旧桌面 `src/desktop/legacy` | 按只维护当前版本的要求删除；业务进程回归迁入 core，platform 托盘仍由 Agent 桌面使用 |
 | 原CLI v3 transport/transfer/tunnel/admin | 旧CLI组合仍使用；不可删或伪称已转换成P2PN |
 | desktop旧P2PD/P2PA codec | 显式兼容模式及固定夹具依赖；不可改变编码或删除 |
 | 信令/Relay | 新旧连接基础共用；继续保留，路径恢复需实测 |

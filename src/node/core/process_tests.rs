@@ -1,9 +1,9 @@
-//! Cross-platform OS-process harness. This whole module is cfg(test): production
-//! desktop has no RPC, environment switch, fault injector or alternate network loop.
+//! Headless core process regressions for files, reconnects and crash recovery.
+//! Test-only actors never become a production RPC or alternate runtime.
 use super::{
     config::{self, DesktopConfig, SettingsDraft},
     network_state::NetworkLifecycle,
-    session::{self, DesktopSessionConfig, DesktopSessionHandle, SessionEvent},
+    session::{self, NodeSessionConfig, NodeSessionHandle, SessionEvent},
     task_model::TaskId,
     task_store::TaskStore,
     transfer::TransferService,
@@ -23,7 +23,7 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
-const PREFIX: &str = "DESKTOP_E2E_RPC ";
+const PREFIX: &str = "CORE_E2E_RPC ";
 const ENTRY: &str = concat!(module_path!(), "::tests::actor_process");
 const DEADLINE: Duration = Duration::from_secs(60);
 fn str_field<'a>(v: &'a Value, key: &str) -> &'a str {
@@ -39,14 +39,14 @@ fn start(
     identity: Identity,
     draft: &SettingsDraft,
     service: TransferService,
-) -> (
-    DesktopSessionHandle,
-    tokio::sync::mpsc::Receiver<SessionEvent>,
-) {
-    let mut conf = DesktopSessionConfig::new(super::signal_server_spec(
-        &draft.signal_host,
-        &draft.signal_port,
-    ));
+) -> (NodeSessionHandle, tokio::sync::mpsc::Receiver<SessionEvent>) {
+    let mut conf = NodeSessionConfig::new(
+        SocketAddr::new(
+            draft.signal_host.parse().unwrap(),
+            draft.signal_port.parse().unwrap(),
+        )
+        .to_string(),
+    );
     conf.network = DesktopNetworkConfig {
         local_port: 0,
         stun_servers: Vec::new(),
@@ -260,7 +260,7 @@ impl Actor {
         let log = fs::File::create(root.join("actor.log")).unwrap();
         let mut child = Command::new(std::env::current_exe().unwrap())
             .args(["--exact", ENTRY.split_once("::").unwrap().1, "--nocapture"])
-            .env("P2P_DESKTOP_E2E_ACTOR", &root)
+            .env("P2P_CORE_E2E_ACTOR", &root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::from(log.try_clone().unwrap()))
@@ -515,7 +515,7 @@ mod tests {
     use super::*;
     #[test]
     fn actor_process() {
-        if let Some(root) = std::env::var_os("P2P_DESKTOP_E2E_ACTOR") {
+        if let Some(root) = std::env::var_os("P2P_CORE_E2E_ACTOR") {
             actor(root.into());
         }
     }

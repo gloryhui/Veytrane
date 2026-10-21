@@ -17,5 +17,4 @@ pub(in crate::desktop) const WARNING: u32 = 0xD97706;
 pub(in crate::desktop) const WARNING_SOFT: u32 = 0xFFFBEB;
 pub(in crate::desktop) const DANGER: u32 = 0xDC2626;
 pub(in crate::desktop) const DANGER_SOFT: u32 = 0xFEF2F2;
-pub(in crate::desktop) const PROGRESS_TRACK: u32 = 0xE5E7EB;
 pub(in crate::desktop) const DISABLED_BG: u32 = 0xF1F5F9;
