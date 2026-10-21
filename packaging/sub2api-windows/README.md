@@ -2,6 +2,8 @@
 
 该模式与通用桌面客户端及现有 JSON Agent 分离。ZIP 内仅有 `Sub2API.exe`、`Start-Sub2API.bat`、使用说明及许可证；不包含通用 Agent、管理 CLI、Web 管理端、配置 JSON 或任何预生成身份。
 
+2026-10-21 已将 Ubuntu 独立网关部署到 P2PN v2，并从干净提交 `2bb4457` 重新生成 Windows x64 包；两者沿用原网关身份和专用凭证。实际接入、权限与重启验证见[部署验收记录](../../docs/task-reports/SUB2API_P2PN_V2_DEPLOYMENT.md)。Windows 包已完成交叉构建及制品检查，朋友 Windows 电脑未接入，尚未进行其安装与实机验收。
+
 每台 Windows 的当前用户首次启动生成独立 Ed25519 身份，保存在 `%LOCALAPPDATA%\Sub2API-Client`。所有收件人可使用同一 ZIP，凭证在构建时嵌入，但身份从不嵌入。客户端不接受参数，不读取运行时服务器/端口配置，不接受环境变量覆盖，仅监听 `127.0.0.1:18081`，仅请求 `sub2api` 服务。BAT 路径有引号，使用 CRLF，不需要管理员权限或额外解释器。
 
 ## 服务端边界
@@ -13,6 +15,8 @@
 访问凭证为共享 bearer 权限：可从收件人的程序中提取，也可转发。持有者可以生成新设备身份，因此无法靠单独禁用某个旧 NodeId 来可靠地封禁一个持有凭证的人。撤销整个分发批次需更换网关校验值并重新打包。密码不会赋予现有管理员节点权限。Sub2API 自身仍按它的账号权限控制；不要分发该应用的管理员账号。
 
 ## 构建及部署
+
+以下 `--init` 仅用于首次建立新网关。升级现有网关时先私有备份、优雅停机并确认锁释放，再替换二进制和服务路径；保留 `gateway.json`、`identity.key` 和原客户端私有 profile，禁止重新初始化或重设凭证。专用 GatewayProfile 不含通用节点的 `peer_modes`。Windows 更新只替换分发文件，保留当前用户的 `%LOCALAPPDATA%\Sub2API-Client`。P2PN v2 网关与客户端必须使用同一协议版本，旧协议包不能继续连接。
 
 1. 构建服务器：`cargo build --locked --release --features sub2api-gateway --bin p2p-sub2api-gateway`。
 2. 为网关选择全新私有目录，执行 `p2p-sub2api-gateway --data-dir <目录> --init --signal-server <HOST:PORT>`，从 stdin 输入独立随机 12 位字母数字密码。仅返回新网关 NodeId。已存在的身份/配置会被拒绝覆盖。

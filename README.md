@@ -13,6 +13,8 @@ datagram**。Relay 看不到业务明文，QUIC / Ed25519 身份认证仍然是�
 
 当前整体架构可直接打开[可点击架构图](docs/architecture-current.html)：提供系统全景、节点分层、核心内部、桌面边界四个视图，支持搜索模块、展开职责和跳转源码。图与 2026-10-21 分层后的源码对应；部署章节同步 Mac / Ubuntu 主节点的 P2PN v2 升级快照，详见[部署验收记录](docs/task-reports/P2PN_V2_DEPLOYMENT.md)。目录职责与维护方式见[仓库分层说明](docs/REPOSITORY_LAYOUT.md)。
 
+独立 Sub2API 网关已部署 P2PN v2，对应 Windows x64 新包已生成；实际接入、权限及恢复结果见[专用路径部署记录](docs/task-reports/SUB2API_P2PN_V2_DEPLOYMENT.md)。Windows 实机安装尚待执行。
+
 当前默认入口为无GUI的`p2p-agent`、共享IPC的`p2p-node`/Web和原生客户端。Agent统一持有身份、连接、文件任务与本机转发；Mac/Windows可分别从老家授权目录选择服务、设置本机端口，并继续传文件。
 
 ```sh

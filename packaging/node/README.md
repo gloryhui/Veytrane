@@ -40,7 +40,7 @@ Ubuntu无桌面且无用户登录会话时，管理员可按`p2p-file-agent.syst
 4. 更新两端二进制与宿主启动路径，恢复 Agent / Web；Mac 保留 `--managed`，桌面包同时更新。保留旧版本与恢复元数据。
 5. 核对运行构建、双向连接与信任、授权服务目录和转发监听，执行双向文件传输及校验，再按入口协议验证各服务。服务重启会中断已有 TCP 流，恢复后以新连接验证。
 
-本次按此顺序完成 Mac / Ubuntu 主节点升级，7 条映射保留，双向 1 MiB 文件校验通过。独立 Sub2API 专用网关及朋友客户端未升级。详细入口结果、认证状态码与验收边界见[部署验收记录](../../docs/task-reports/P2PN_V2_DEPLOYMENT.md)。备份和凭据不得加入仓库。
+本次按此顺序完成 Mac / Ubuntu 主节点升级，7 条映射保留，双向 1 MiB 文件校验通过。详细入口结果、认证状态码与验收边界见[部署验收记录](../../docs/task-reports/P2PN_V2_DEPLOYMENT.md)。后续已部署独立 Sub2API v2 网关并生成新版 Windows 包，朋友 Windows 实机尚未安装验收，见[专用路径记录](../../docs/task-reports/SUB2API_P2PN_V2_DEPLOYMENT.md)。备份和凭据不得加入仓库。
 
 ### 宿主行为与失败恢复
 
