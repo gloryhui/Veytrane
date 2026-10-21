@@ -13,7 +13,7 @@ Direct 成功时服务器只负责信令，不承载业务数据。用户配置 
 及时建立 authenticated transport 时，Relay UDP 服务延迟转发**端到端加密的 QUIC
 datagram**。Relay 看不到业务明文，QUIC / Ed25519 身份认证仍然是设备间端到端。
 
-产品名为 **Veytrane**，内部节点协议仍称 **P2PN v2**，协议版本与产品版本分别管理。工程包名 `p2p_file`、已有命令及节点数据路径维持当前标识，继续使用现有身份、授权、任务和服务安装。后续构建的桌面应用为 `Veytrane.app`，专用分发包为 `Veytrane-Sub2API-Windows-x64.zip`；已部署二进制与既有 ZIP 的名称以各自部署记录为准。
+产品名为 **Veytrane**，内部节点协议仍称 **P2PN v2**，协议版本与产品版本分别管理。工程包名 `p2p_file`、已有命令及节点数据路径维持当前标识，继续使用现有身份、授权、任务和服务安装。2026-10-21 已从干净提交 `ec72ed4` 更新 Mac 的 `Veytrane.app`、两端主节点及 Ubuntu 独立网关，并生成 Windows 专用新包；身份、授权、任务和 7 条映射保留。桌面交付 ZIP 为 `Veytrane-Sub2API-Windows-x64-P2PN-v2.zip`，详见[当前部署验收](docs/task-reports/VEYTRANE_DEPLOYMENT.md)。
 
 ## 当前节点架构
 
@@ -33,7 +33,7 @@ target/release/p2p-agent
 
 首次使用按[节点宿主说明](packaging/node/README.md)初始化；`init`不会覆盖现有配置。旧桌面导入和协议适配已删除，当前节点统一使用 P2PN v2，升级需同步两端程序并移除配置中的 `peer_modes` 字段。桌面包须包含同SHA的Agent和CLI。主窗口标题栏“×”会隐藏到系统托盘，传输和后台节点继续；点击托盘图标恢复原窗口，二级窗口仍单独关闭。只有托盘菜单“退出 Veytrane”会停止 Agent、确认状态已保存并退出。托盘不可用时保留任务栏入口；不会隐藏成无法恢复的进程。桌面仅保留 Agent 工作台，已移除内嵌旧桌面和 `--legacy` 参数。独立 CLI 的范围见[发布矩阵](docs/specs/NODE_RELEASE_DECISION.md)。
 
-本轮按用户要求完成代码与静态检查，测试/回归/真实设备验收后置；三个缺陷未据此关闭。进度见[任务台账](docs/task-reports/IMPLEMENTATION_STATUS.md)，四设备准备见[验收计划](docs/FOUR_DEVICE_ACCEPTANCE.md)。
+最新已部署版本与实机范围见[Veytrane 部署验收](docs/task-reports/VEYTRANE_DEPLOYMENT.md)，源码回归见[协议统一记录](docs/task-reports/NODE_PROTOCOL_UNIFICATION.md)。[任务台账](docs/task-reports/IMPLEMENTATION_STATUS.md)保留早期实施阶段记录；四设备的扩展验收范围见[验收计划](docs/FOUR_DEVICE_ACCEPTANCE.md)。
 
 ## 快速开始
 

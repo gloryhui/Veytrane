@@ -15,4 +15,4 @@
 | 信令 / Relay | Agent、专用版和独立 CLI 共用，保留。 |
 | 四设备配置示例、打包资源、历史验收记录 | 现有执行卡、构建或证据索引仍引用，保留。 |
 
-当前 Agent 配置删除 peer_modes 字段，转发必须具有 service_ids 映射；任务库与身份存储保持。节点协议使用 P2PN v2 / P2PF 文件载荷，两端需同步更新。Mac / Ubuntu 主节点已更新至 `50a167f` 并重启服务，保留身份、授权、任务和 7 条映射。独立 Sub2API 网关随后部署至 `2bb4457`，对应 Windows v2 包已生成；朋友 Windows 主机尚未安装验收，见[专用路径记录](../task-reports/SUB2API_P2PN_V2_DEPLOYMENT.md)。独立 CLI 仍有实际命令调用，不属于本次旧桌面适配清理范围。
+当前 Agent 配置删除 peer_modes 字段，转发必须具有 service_ids 映射；任务库与身份存储保持。节点协议使用 P2PN v2 / P2PF 文件载荷，两端需同步更新。Mac / Ubuntu 主节点及独立 Sub2API 网关现已更新为 Veytrane `ec72ed4`，保留身份、授权、任务和 7 条映射，对应 Windows 新包已生成；朋友 Windows 主机尚未安装验收，见[当前部署记录](../task-reports/VEYTRANE_DEPLOYMENT.md)。独立 CLI 仍有实际命令调用，不属于本次旧桌面适配清理范围。

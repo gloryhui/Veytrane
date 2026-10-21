@@ -1,6 +1,6 @@
 # 节点宿主安装与升级
 
-默认使用当前用户，不需要管理员权限。数据目录与`p2p-node`、原生窗口的`--data-dir`必须一致。2026-10-21 已完成当前 Mac 与 Ubuntu 主节点的 P2PN v2 部署，构建为 `50a167f`；范围与结果见[部署验收记录](../../docs/task-reports/P2PN_V2_DEPLOYMENT.md)。其他平台或安装方式仍须各自验收。
+默认使用当前用户，不需要管理员权限。数据目录与`p2p-node`、原生窗口的`--data-dir`必须一致。2026-10-21 已将当前 Mac、Ubuntu 主节点及独立网关更新为 Veytrane，构建为 `ec72ed4`，协议保持 P2PN v2；范围与结果见[当前部署验收](../../docs/task-reports/VEYTRANE_DEPLOYMENT.md)。首次协议升级保留在[历史记录](../../docs/task-reports/P2PN_V2_DEPLOYMENT.md)。其他平台或安装方式仍须各自验收。
 
 ## 构建和首次配置
 
