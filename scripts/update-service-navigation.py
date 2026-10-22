@@ -17,6 +17,7 @@ SERVICE_UI = {
     "istore-web": ("iStore · 路由器管理", "管理 iStore 路由器的网络、设备与系统设置。", "路由与网络", "http", "/cgi-bin/luci/"),
     "istore-nikki": ("iStore · Nikki 代理面板", "打开 Nikki 的 zashboard 面板，查看连接、代理与规则。", "路由与网络", "http", "/ui/"),
     "samba": ("Samba 文件共享", "在 Finder 中按 ⌘K，将共享地址粘贴到「连接服务器」。", "文件", "smb", ""),
+    "ssh": ("Ubuntu · SSH 终端", "在终端执行 ssh ubuntu-local，通过本机端口登录远端 Ubuntu。", "路由与网络", "ssh", ""),
 }
 
 

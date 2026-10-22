@@ -175,3 +175,86 @@ async fn no_signal_agents_discover_via_mdns_but_only_connect_after_explicit_requ
     a.stop().await;
     b.stop().await;
 }
+
+// SIGSTOP/SIGCONT exercises the real wall/monotonic gap detector without
+// suspending the developer's Mac or restarting either Agent process.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn wake_refreshes_candidates_and_restores_mapping_in_the_same_agent_process() {
+    let sandbox = Sandbox::new();
+    let (mut a, mut b) = configured_pair(&sandbox, false).await;
+    let target = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let target_addr = target.local_addr().unwrap();
+    let echo = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = target.accept().await {
+            tokio::spawn(async move {
+                let (mut r, mut w) = stream.split();
+                let _ = tokio::io::copy(&mut r, &mut w).await;
+            });
+        }
+    });
+    let port = free_tcp();
+    let mut config = b.config().await;
+    config["settings"]["services"] = json!([{"id":"echo","name":"Echo","target":target_addr,"allowed_peers":[a.id()],"enabled":true}]);
+    assert!(b.apply(&config).await.error.is_none());
+    let endpoint = ipv4_listener(&b).await;
+    let mut config = a.config().await;
+    config["settings"]["forwards"] = json!([forward("echo", &b.id(), port)]);
+    config["settings"]["service_ids"] = json!({"echo":"echo"});
+    config["settings"]["direct"]["peers"][b.id()] = json!([endpoint]);
+    assert!(a.apply(&config).await.error.is_none());
+    // No explicit connect: an active mapping must drive its own connection.
+    wait_peer(&a, &b.id()).await;
+    echo_request(port, b"before wake").await;
+    let before = a.ok(Api::Status).await;
+    let old_listen = ipv4_listener(&a).await;
+    let files = ["node.json", "identity.key", "tasks.json"]
+        .map(|name| (name, fs::read(a.root.join(name)).unwrap()));
+    let pid = a.process.as_ref().unwrap().0.id();
+    struct Resume(u32);
+    impl Drop for Resume {
+        fn drop(&mut self) {
+            let _ = Command::new("kill")
+                .args(["-CONT", &self.0.to_string()])
+                .status();
+        }
+    }
+    let resume = Resume(pid);
+    assert!(
+        Command::new("kill")
+            .args(["-STOP", &pid.to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    tokio::time::sleep(Duration::from_secs(32)).await;
+    drop(resume);
+    let until = Instant::now() + Duration::from_secs(30);
+    loop {
+        if ipv4_listener(&a).await != old_listen {
+            break;
+        }
+        assert!(Instant::now() < until, "wake did not refresh UDP endpoints");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    wait_peer(&a, &b.id()).await;
+    echo_request(port, b"after wake without restarting Agent").await;
+    let after = a.ok(Api::Status).await;
+    assert_eq!(before["epoch"], after["epoch"]);
+    assert_eq!(a.process.as_ref().unwrap().0.id(), pid);
+    assert!(a.process.as_mut().unwrap().0.try_wait().unwrap().is_none());
+    assert!(
+        after["node"]["peers"][b.id()]["generation"]
+            .as_u64()
+            .unwrap()
+            > before["node"]["peers"][b.id()]["generation"]
+                .as_u64()
+                .unwrap()
+    );
+    for (name, bytes) in files {
+        assert_eq!(fs::read(a.root.join(name)).unwrap(), bytes, "{name}");
+    }
+    a.stop().await;
+    b.stop().await;
+    echo.abort();
+}

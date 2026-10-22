@@ -44,12 +44,16 @@ use crate::node::core::network_state::{
 mod direct;
 #[cfg(test)]
 mod direct_tests;
+mod recovery;
 
 const COMMAND_CAPACITY: usize = 64;
 const EVENT_CAPACITY: usize = 128;
 const SESSION_INPUT_CAPACITY: usize = 64;
 const MAX_CANDIDATES: usize = crate::discovery::signal::MAX_CANDIDATES;
 const MAX_RECONNECT_PROBES_PER_PEER: usize = 2;
+// Authenticated transport hint only: resumption still requires fresh session
+// authorization and the existing opt-in task recovery policy.
+const NETWORK_REFRESH_CLOSE_CODE: u32 = 0x4e52;
 // Bound waiting across signaling, punching and application authentication.
 const TUNNEL_PEER_WAIT_TIMEOUT: Duration = Duration::from_secs(60);
 const PEER_PUNCH_CONFIG: PunchConfig = PunchConfig {
@@ -191,6 +195,7 @@ struct SessionEvents {
     sender: mpsc::Sender<SessionEvent>,
     shutdown: watch::Receiver<bool>,
     control: crate::node::core::control::ControlState,
+    recovery: Arc<std::sync::Mutex<recovery::Recovery>>,
 }
 
 impl SessionEvents {
@@ -203,6 +208,7 @@ impl SessionEvents {
             sender,
             shutdown,
             control,
+            recovery: Default::default(),
         }
     }
 
@@ -218,6 +224,7 @@ impl SessionEvents {
             permit = self.sender.reserve() => match permit {
                 Ok(permit) => {
                     let event = event.take().expect("event is sent only once");
+                    self.recovery.lock().unwrap().event(&event);
                     self.control.observe(&event);
                     permit.send(event);
                     true
@@ -773,6 +780,7 @@ enum SessionCommand {
         verifier: RemoteVerifier,
         done: oneshot::Sender<()>,
     },
+    RefreshNetwork(&'static str),
     ReconfigureNetwork {
         server: String,
         relay_server: Option<String>,
@@ -1135,6 +1143,7 @@ async fn run_session(
     let mut direct_dialing = HashSet::new();
     let direct_slots = Arc::new(Semaphore::new(MAX_PENDING_PEERS));
     let mut manually_disconnected = HashSet::new();
+    let mut requested_peers = HashSet::new();
     let mut remote_verifier = config.remote_auth.clone();
     let auth_context = AuthContext::default();
     let mut trusted_devices = config.trusted_devices.clone();
@@ -1153,7 +1162,7 @@ async fn run_session(
     let mut short_queries: HashMap<ShortId, (Option<SecretPassword>, time::Instant)> =
         HashMap::new();
     let local_node = identity.node_id();
-    let (input_tx, mut inputs) = mpsc::channel(SESSION_INPUT_CAPACITY);
+    let (mut input_tx, mut inputs) = mpsc::channel(SESSION_INPUT_CAPACITY);
     let mut session_tasks = JoinSet::new();
     let _ = events
         .send(SessionEvent::NetworkPaths(network.diagnostics.join("; ")))
@@ -1216,6 +1225,7 @@ async fn run_session(
     let mut pending_inbound: HashMap<(NodeId, u64), mpsc::Sender<quinn::Incoming>> = HashMap::new();
     let mut queued_lookups: VecDeque<(NodeId, u64)> = VecDeque::new();
     let mut signal: Option<SignalingClient> = None;
+    let mut active_relay_server = config.network.relay_server.clone();
     let mut signal_server = config.signal_server;
     let mut signal_tls = config.signal_tls;
     let mut signal_generation = 0u64;
@@ -1355,6 +1365,21 @@ async fn run_session(
                     .await;
             }
         }
+        let wake = if matches!(wake, Wake::Maintenance) {
+            let healthy = connections
+                .values()
+                .any(|(_, c)| c.close_reason().is_none());
+            let reason = if signal_server.trim().is_empty() && !config.direct.enabled {
+                None
+            } else {
+                events.recovery.lock().unwrap().poll(healthy)
+            };
+            reason.map_or(wake, |reason| {
+                Wake::Command(Some(SessionCommand::RefreshNetwork(reason)))
+            })
+        } else {
+            wake
+        };
         let wake = match wake {
             Wake::Command(Some(SessionCommand::RetryCandidates {
                 peer,
@@ -1648,6 +1673,7 @@ async fn run_session(
                 });
             }
             Wake::Command(Some(SessionCommand::DisconnectPeer { peer, done })) => {
+                requested_peers.remove(&peer);
                 direct_dialing.remove(&peer);
                 if manually_disconnected.len() >= 128 && !manually_disconnected.contains(&peer) {
                     let _ = done.send(Err("显式断开记录已达上限；请复用现有节点或重启宿主".into()));
@@ -2292,6 +2318,9 @@ async fn run_session(
                 let _ = done.send(result);
             }
             Wake::Command(Some(SessionCommand::ConnectAuthenticated { peer, password })) => {
+                if requested_peers.len() < MAX_PEERS {
+                    requested_peers.insert(peer);
+                }
                 manually_disconnected.remove(&peer);
                 if credentials.len() >= crate::node::core::network_state::MAX_PEERS
                     && !credentials.contains_key(&peer)
@@ -2399,6 +2428,9 @@ async fn run_session(
                     .await;
             }
             Wake::Command(Some(SessionCommand::ConnectTrusted(peer))) => {
+                if requested_peers.len() < MAX_PEERS {
+                    requested_peers.insert(peer);
+                }
                 manually_disconnected.remove(&peer);
                 let had_password = credentials.remove(&peer).is_some();
                 if peers
@@ -2545,6 +2577,163 @@ async fn run_session(
                     }
                 }
             }
+            Wake::Command(Some(SessionCommand::RefreshNetwork(reason))) => {
+                let _ = events.send(SessionEvent::Diagnostic(reason.into())).await;
+                // Retire every producer before replacing the input channel: callbacks from
+                // old sockets/handshakes must never authenticate into the refreshed network.
+                signal_generation = signal_generation.wrapping_add(1);
+                signal = None;
+                connect_task = None;
+                reconnect_sleep = None;
+                reconnect_attempt = 0;
+                let lost_peers = connections.keys().copied().collect::<Vec<_>>();
+                if let Some(service) = &config.transfer {
+                    for peer in &lost_peers {
+                        service.network_lost(*peer);
+                        service.set_peer_flow_support(*peer, false);
+                    }
+                }
+                for (_, (_, _, rights)) in authorizations.drain() {
+                    rights.send_replace(RemoteAuthorization::default());
+                }
+                for (_, (_, connection)) in connections.drain() {
+                    connection.close(
+                        NETWORK_REFRESH_CLOSE_CODE.into(),
+                        b"network candidates refreshed",
+                    );
+                }
+                for update in peer_connection_updates.values() {
+                    update.send_replace(None);
+                }
+                for (peer, generation) in peers.active_peers() {
+                    emit_peer_tunnels_starting(peer, &running_tunnels, &events).await;
+                    retire_peer_listeners(
+                        peer,
+                        &running_tunnels,
+                        &mut waiting_tunnels,
+                        &mut restart_after_tunnel_stop,
+                    );
+                    peers.transition(peer, generation, PeerLifecycle::Disconnected);
+                    emit_peer_state(&events, peer, generation, PeerLifecycle::Disconnected).await;
+                }
+                peer_tasks.abort_all();
+                session_tasks.abort_all();
+                while peer_tasks.join_next().await.is_some() {}
+                while session_tasks.join_next().await.is_some() {}
+                (input_tx, inputs) = mpsc::channel(SESSION_INPUT_CAPACITY);
+                if let Some(service) = &config.transfer {
+                    for peer in lost_peers {
+                        let _ = service.settle_network_loss(peer).await;
+                    }
+                }
+                peer_attempts.clear();
+                direct_dialing.clear();
+                deferred_candidates.clear();
+                reconnect_probes.clear();
+                pending_inbound.clear();
+                queued_lookups.clear();
+                short_queries.clear();
+                credential_retries.clear();
+                peer_candidates.clear();
+                peer_capabilities.clear();
+                mapping_keepalives.clear();
+                // Keep credentials, trust, explicit routes, manual disconnects and the
+                // Agent-owned TCP listeners. They belong to policy, not to UDP sockets.
+                discovery = None;
+                nearby = crate::node::core::connectivity::NearbyCache::new(local_node);
+                network.close();
+                let _ = time::timeout(Duration::from_secs(3), network.wait_idle()).await;
+                network = DesktopNetwork {
+                    paths: vec![],
+                    relay: None,
+                    local_candidates: vec![],
+                    diagnostics: vec![],
+                };
+                let mut preparation = config.network.clone();
+                preparation.relay_server = active_relay_server.clone();
+                if signal_server.trim().is_empty() {
+                    preparation.stun_servers.clear();
+                    preparation.relay_server = None;
+                }
+                let prepared = tokio::select! {
+                    _ = shutdown.changed() => { session_shutdown = true; continue; },
+                    prepared = prepare_desktop_network(&preparation) => prepared,
+                };
+                match prepared {
+                    Ok(prepared) => network = prepared,
+                    Err(error) => {
+                        events.recovery.lock().unwrap().retry_refresh();
+                        let _ = events
+                            .send(SessionEvent::Diagnostic(format!(
+                                "刷新网络失败，将退避重试：{error}"
+                            )))
+                            .await;
+                        emit_lifecycle(
+                            &events,
+                            NetworkLifecycle::Failed {
+                                detail: error.to_string(),
+                            },
+                        )
+                        .await;
+                        continue;
+                    }
+                }
+                for path in &network.paths {
+                    let endpoint = path.endpoint.clone();
+                    let family = path.family;
+                    let accept_inputs = input_tx.clone();
+                    session_tasks.spawn(async move {
+                        accept_incoming_loop(endpoint, family, accept_inputs).await;
+                    });
+                }
+                mapping_keepalives = start_mapping_keepalives(&network, &mut session_tasks);
+                if config.direct.enabled && config.direct.lan_discovery {
+                    match crate::node::core::connectivity::Discovery::start(local_node, &network) {
+                        Ok(d) => {
+                            discovery = Some(d);
+                            discovery_state = "active".into();
+                        }
+                        Err(_) => discovery_state = "unavailable".into(),
+                    }
+                }
+                connectivity = crate::node::core::connectivity::snapshot(
+                    &network,
+                    config.direct.enabled,
+                    discovery_state.clone(),
+                    &nearby,
+                );
+                let _ = events
+                    .send(SessionEvent::Connectivity(connectivity.clone()))
+                    .await;
+                let _ = events
+                    .send(SessionEvent::NetworkPaths(network.diagnostics.join("; ")))
+                    .await;
+                let _ = events
+                    .send(SessionEvent::NetworkFamilies {
+                        ipv4: network.path(AddressFamily::Ipv4).is_some(),
+                        ipv6: network.path(AddressFamily::Ipv6).is_some(),
+                        relay_configured: network.relay.is_some(),
+                    })
+                    .await;
+                emit_lifecycle(
+                    &events,
+                    if signal_server.trim().is_empty() {
+                        NetworkLifecycle::LocalOnly
+                    } else {
+                        NetworkLifecycle::ConnectingSignal
+                    },
+                )
+                .await;
+                start_signal_connect(
+                    &identity,
+                    (&signal_server, signal_tls.as_ref()),
+                    &network.local_candidates,
+                    signal_generation,
+                    input_tx.clone(),
+                    &mut connect_task,
+                    &mut session_tasks,
+                );
+            }
             Wake::Command(Some(
                 command @ (SessionCommand::ReconfigureNetwork { .. }
                 | SessionCommand::UpdateRemoteAuth { .. }),
@@ -2601,6 +2790,7 @@ async fn run_session(
                         }
                         signal_server = server;
                         signal_tls = updated_tls;
+                        active_relay_server = relay_server.clone();
                         credentials.clear();
                         if let Some(old) = &network.relay {
                             old.endpoints.close();
@@ -3799,6 +3989,37 @@ async fn run_session(
             }
             Wake::QueueChanged => {}
             Wake::Maintenance => {
+                // Subscriptions are the actual active Agent-owned mappings, including
+                // manually started rules. Stopped/deleted rules drop their receivers.
+                let mut wanted = peer_connection_updates
+                    .iter()
+                    .filter(|(_, update)| update.receiver_count() > 0)
+                    .map(|(peer, _)| *peer)
+                    .collect::<HashSet<_>>();
+                wanted.extend(requested_peers.iter().copied());
+                for rule in tunnel_rules.values().filter(|r| r.enabled && r.auto_start) {
+                    if let Ok(peer) = NodeId::from_hex(&rule.peer_node_id) {
+                        wanted.insert(peer);
+                    }
+                }
+                for peer in wanted {
+                    if manually_disconnected.contains(&peer)
+                        || resource_policy.borrow().for_peer(peer).disabled
+                        || peers.state(peer).is_some_and(PeerLifecycle::is_active)
+                        || (!credentials.contains_key(&peer)
+                            && !trusted_devices.iter().any(|d| d.node_id == peer.to_hex())
+                            && !credential_fallback)
+                        || (signal.is_none()
+                            && (!config.direct.enabled
+                                || (direct_routes.get(&peer.to_hex()).is_none_or(Vec::is_empty)
+                                    && nearby.addresses(peer).is_empty())))
+                    {
+                        continue;
+                    }
+                    if events.recovery.lock().unwrap().retry_due(peer) {
+                        let _ = command_tx.try_send(SessionCommand::ConnectPeer(peer));
+                    }
+                }
                 if let Some(service) = &config.transfer {
                     let (reconnect, jobs) = service.auto_due(
                         |peer, direction| {
@@ -4455,7 +4676,7 @@ fn recoverable_transport_close(reason: &quinn::ConnectionError) -> bool {
     matches!(
         reason,
         quinn::ConnectionError::TimedOut | quinn::ConnectionError::Reset
-    )
+    ) || matches!(reason, quinn::ConnectionError::ApplicationClosed(close) if close.error_code == NETWORK_REFRESH_CLOSE_CODE.into())
 }
 
 async fn accept_incoming_loop(

@@ -14,7 +14,7 @@ struct Args {
     /// Explicit first-run lifecycle action: initialize if missing, then run.
     #[arg(long)]
     initialize: bool,
-    /// Enable macOS wake/network recovery when an external service restarts us.
+    /// Enable macOS supervisor fallback if the network core exits.
     #[arg(long)]
     managed: bool,
 }

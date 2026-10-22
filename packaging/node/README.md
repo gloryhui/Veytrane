@@ -1,6 +1,6 @@
 # 节点宿主安装与升级
 
-默认使用当前用户，不需要管理员权限。数据目录与`p2p-node`、原生窗口的`--data-dir`必须一致。2026-10-21 已将当前 Mac、Ubuntu 主节点及独立网关更新为 Veytrane，构建为 `ec72ed4`，协议保持 P2PN v2；范围与结果见[当前部署验收](../../docs/task-reports/VEYTRANE_DEPLOYMENT.md)。首次协议升级保留在[历史记录](../../docs/task-reports/P2PN_V2_DEPLOYMENT.md)。其他平台或安装方式仍须各自验收。
+默认使用当前用户，不需要管理员权限。数据目录与`p2p-node`、原生窗口的`--data-dir`必须一致。2026-10-22 已部署 Mac / Ubuntu 主节点的网络恢复修复，使用 `e6e8612` 基线加未提交修复构建，配置与 8 条映射保留，两端进程停顿后均自动恢复，见[网络恢复部署验收](../../docs/task-reports/NETWORK_RECOVERY_DEPLOYMENT.md)。独立网关保留 `ec72ed4`；此前的[品牌更新验收](../../docs/task-reports/VEYTRANE_DEPLOYMENT.md)和[首次协议升级](../../docs/task-reports/P2PN_V2_DEPLOYMENT.md)作为历史记录。协议保持 P2PN v2；其他平台或安装方式仍须各自验收。
 
 ## 构建和首次配置
 
@@ -44,9 +44,11 @@ Ubuntu无桌面且无用户登录会话时，管理员可按`p2p-file-agent.syst
 
 ### 宿主行为与失败恢复
 
-macOS 登录宿主使用 `p2p-agent --managed`，保留 `RunAtLoad`、异常退出自动重启及 30 秒优雅退出等待。Agent 每 5 秒观察本机接口；变化连续确认两次，或后台停顿/休眠间隔达到 30 秒，便先按原流程停止业务、保存任务并释放锁，再以失败状态退出，由 launchd 重建网络候选。网络核心持续退出也触发该恢复；单纯信令失联仍由核心退避重连，不因此中断健康 Direct 流。身份、授权和 JSON 不回滚、不重建。
+Agent 的网络核心在所有平台和前台/托管模式下，每 5 秒观察本机接口；变化连续确认两次，或后台停顿/休眠间隔达到 30 秒，会在原进程内关闭旧网络通道、重新收集 UDP/STUN 候选并重新注册信令。连续三次传输阶段失败且没有健康连接时也会刷新候选，两次刷新至少间隔 60 秒；认证失败不触发该策略。单纯信令失联仍按原退避流程处理，保留健康 Direct 流。
 
-`--managed` 只适用于有外部宿主负责重启的后台实例；手工前台运行默认不启用该恢复退出。用户显式 Stop 或停止节点以保存需重启的配置仍正常退出，不会被该策略自动启动。Mac Agent 日志位于 `~/Library/Logs/p2p-file-node/agent.stderr.log`。同一进程重启后按已保存的启用/自动启动规则恢复；未写入 JSON 的临时停止状态属于该进程生命周期。
+活跃映射和用户请求的连接按退避自动重试；只使用当前信任或进程内已有密码，不绕过鉴权。手动断开、停用设备、删除/停止映射及显式 Stop 的边界保持有效。刷新保留 Agent PID、管理 epoch、身份、授权、JSON、监听端口和临时停止状态；旧 TCP 流会断开，需要重新连接。文件任务通过原网络中断恢复策略处理，不自动恢复用户暂停的任务。
+
+macOS 登录宿主使用 `p2p-agent --managed`，保留 `RunAtLoad`、异常退出自动重启及 30 秒优雅退出等待。`--managed` 仅为网络核心实际退出保留宿主兜底，不再因唤醒或接口变化退出 Agent。用户显式 Stop 或停止节点以保存需重启的配置仍正常退出。Mac 日志位于 `~/Library/Logs/p2p-file-node/agent.stderr.log`；恢复原因也进入管理状态的 diagnostics。
 
 `python node-host.py upgrade --bin-dir <新版本目录>`先验证两个二进制SHA/版本/target/API一致，再请求旧Agent停机并证明目录、身份、任务锁释放；不强杀、不强行接管。保留旧版本目录与`previous-install.json`，新启动核对NodeId、revision不倒退和build SHA。失败保持数据，禁止自动回退旧授权或覆盖新任务。
 

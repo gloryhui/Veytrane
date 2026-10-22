@@ -1999,6 +1999,12 @@ fn auto_resume_requires_network_loss_not_exit_or_protocol_failure() {
         &quinn::ConnectionError::TimedOut
     ));
     assert!(recoverable_transport_close(&quinn::ConnectionError::Reset));
+    assert!(recoverable_transport_close(
+        &quinn::ConnectionError::ApplicationClosed(quinn::ApplicationClose {
+            error_code: NETWORK_REFRESH_CLOSE_CODE.into(),
+            reason: b"network refresh".to_vec().into()
+        })
+    ));
     assert!(!recoverable_transport_close(
         &quinn::ConnectionError::LocallyClosed
     ));
@@ -2038,7 +2044,13 @@ async fn auto_resume_real_sessions_restore_same_task_over_fresh_authenticated_tr
     use crate::node::core::task_model::TaskState;
     use crate::node::core::task_store::TaskStore;
     use crate::node::core::transfer::TransferService;
-    for (sender_enabled, receiver_enabled) in [(true, false), (false, true), (true, true)] {
+    for (sender_enabled, receiver_enabled, refresh) in [
+        (true, false, false),
+        (false, true, false),
+        (true, true, false),
+        (true, false, true),
+        (false, true, true),
+    ] {
         let root =
             std::env::temp_dir().join(format!("p2p-auto-resume-{:032x}", rand::random::<u128>()));
         std::fs::create_dir_all(root.join("receive-a")).unwrap();
@@ -2140,7 +2152,16 @@ async fn auto_resume_real_sessions_restore_same_task_over_fresh_authenticated_tr
             .join(original_file.relative_path().unwrap());
         let (generation, old) = inspect(&ha).await[&b.node_id()].clone();
         let binding = ChannelBinding::from_connection(&old).unwrap();
-        lose_test_transport(&ha, &hb, a.node_id(), b.node_id()).await;
+        if refresh {
+            ha.commands
+                .send(SessionCommand::RefreshNetwork(
+                    "test wake with active transfer",
+                ))
+                .await
+                .unwrap();
+        } else {
+            lose_test_transport(&ha, &hb, a.node_id(), b.node_id()).await;
+        }
         time::timeout(Duration::from_secs(30), async {
             loop {
                 let ready = sa
@@ -2157,7 +2178,7 @@ async fn auto_resume_real_sessions_restore_same_task_over_fresh_authenticated_tr
         })
         .await
         .unwrap_or_else(|_| {
-            panic!("auto restore failed sender={sender_enabled} receiver={receiver_enabled}")
+            panic!("auto restore failed sender={sender_enabled} receiver={receiver_enabled} refresh={refresh}")
         });
         let (fresh_generation, fresh) = inspect(&ha).await[&b.node_id()].clone();
         assert_ne!(fresh_generation, generation);
@@ -4020,5 +4041,80 @@ async fn explicit_passwordless_reconnect_does_not_reuse_old_in_memory_password()
     ha.shutdown();
     hb.shutdown();
     drop((ha, hb));
+    server.abort();
+}
+
+#[tokio::test]
+async fn refreshing_udp_candidates_reregisters_signal_and_restores_existing_tunnel_without_restarting_session()
+ {
+    let (signal, server) = start_local_server().await;
+    let a = Identity::generate();
+    let b = Identity::generate();
+    let echo = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let target = echo.local_addr().unwrap();
+    let echo_task = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = echo.accept().await {
+            tokio::spawn(async move {
+                let (mut r, mut w) = stream.split();
+                let _ = tokio::io::copy(&mut r, &mut w).await;
+            });
+        }
+    });
+    let reserve = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listen = reserve.local_addr().unwrap();
+    drop(reserve);
+    let mut rule = crate::node::core::config::TunnelRule::new(
+        "refresh",
+        b.node_id().to_hex(),
+        listen.port(),
+        target,
+    );
+    rule.auto_start = true;
+    let mut ca = local_config(signal);
+    ca.tunnel_rules.push(rule.clone());
+    let mut cb = local_config(signal);
+    cb.allowed_forward_targets
+        .push(service_grant("echo", target, vec![a.node_id().to_hex()]));
+    let (hb, mut eb) = spawn(b.clone(), cb).unwrap();
+    wait_signal_online(&mut eb).await;
+    let (ha, mut ea) = spawn(a.clone(), ca).unwrap();
+    wait_specific_tunnel_state(&mut ea, &rule.id, TunnelRuntimeState::Running).await;
+    let (generation, old) = inspect(&ha).await[&b.node_id()].clone();
+    let old_local = old.local_ip();
+    ha.commands
+        .send(SessionCommand::RefreshNetwork("test network change"))
+        .await
+        .unwrap();
+    wait_signal_online(&mut ea).await;
+    wait_specific_tunnel_state(&mut ea, &rule.id, TunnelRuntimeState::Running).await;
+    let (new_generation, fresh) = inspect(&ha).await[&b.node_id()].clone();
+    assert!(new_generation > generation);
+    assert_ne!(old.stable_id(), fresh.stable_id());
+    assert_eq!(old_local, fresh.local_ip());
+    assert!(old.close_reason().is_some());
+    let mut local = tokio::net::TcpStream::connect(rule.listen).await.unwrap();
+    local.write_all(b"refreshed").await.unwrap();
+    let mut response = [0; 9];
+    time::timeout(Duration::from_secs(5), local.read_exact(&mut response))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&response, b"refreshed");
+    ha.disconnect_peer(b.node_id()).await.unwrap();
+    ha.commands
+        .send(SessionCommand::RefreshNetwork(
+            "test wake after manual disconnect",
+        ))
+        .await
+        .unwrap();
+    wait_signal_online(&mut ea).await;
+    time::sleep(Duration::from_secs(3)).await;
+    assert!(
+        inspect(&ha).await.is_empty(),
+        "manual disconnect must survive refresh"
+    );
+    ha.shutdown();
+    hb.shutdown();
+    echo_task.abort();
     server.abort();
 }

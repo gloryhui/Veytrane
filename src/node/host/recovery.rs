@@ -1,4 +1,5 @@
-//! Recover a managed macOS Agent or fixed client after wake/interface changes.
+//! Supervisor fallback for fixed products after wake/interface changes.
+//! The general Agent now refreshes its network in core/session/recovery.rs.
 //! A restart re-gathers NAT candidates; signal-only outages stay in the core.
 use std::{collections::BTreeSet, time::Duration};
 

@@ -637,7 +637,17 @@ async fn host_recovery(control: NodeControl, managed: bool) -> io::Error {
     }
     #[cfg(target_os = "macos")]
     {
-        crate::node::host::recovery::wait(control).await
+        // Wake/interface/failed-path recovery now lives in the network core and
+        // refreshes its sockets in place. The supervisor is only a last resort
+        // for a core that actually exited.
+        let mut stopped = 0u8;
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            stopped = if control.is_running() { 0 } else { stopped + 1 };
+            if stopped >= 3 {
+                return io::Error::other("网络核心已退出，重启后台恢复映射");
+            }
+        }
     }
     #[cfg(not(target_os = "macos"))]
     {
