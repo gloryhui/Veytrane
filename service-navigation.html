@@ -31,7 +31,7 @@
 <div class="toast" id="toast" role="status" hidden></div>
 <script id="navigation-data" type="application/json">
 {
-  "updatedAt": "2026-10-22T10:18:52+08:00",
+  "updatedAt": "2026-10-22T18:10:03+08:00",
   "services": [
     {
       "id": "ubuntu-sub2api",
@@ -154,6 +154,66 @@
       "remote": true
     },
     {
+      "id": "ubuntu-nginx-share",
+      "serviceId": "nginx-share",
+      "title": "Nginx · 文件共享",
+      "name": "Nginx 文件共享",
+      "description": "访问远端 Ubuntu 的 Nginx 文件共享服务。",
+      "category": "文件",
+      "protocol": "http",
+      "url": "http://127.0.0.1:3003/",
+      "listen": "127.0.0.1:3003",
+      "target": "127.0.0.1:3003",
+      "enabled": true,
+      "autoStart": true,
+      "remote": true
+    },
+    {
+      "id": "ubuntu-netdata",
+      "serviceId": "netdata",
+      "title": "Netdata · 服务器监控",
+      "name": "Netdata 监控",
+      "description": "查看远端 Ubuntu 上的 Netdata 监控面板。",
+      "category": "应用",
+      "protocol": "http",
+      "url": "http://127.0.0.1:19999/",
+      "listen": "127.0.0.1:19999",
+      "target": "127.0.0.1:19999",
+      "enabled": true,
+      "autoStart": true,
+      "remote": true
+    },
+    {
+      "id": "ubuntu-codex-web",
+      "serviceId": "codex-web",
+      "title": "Codex Web · AI 工作台",
+      "name": "Codex Web",
+      "description": "直接访问远端 Ubuntu 的 Codex Web 原始端口 8214。",
+      "category": "应用",
+      "protocol": "http",
+      "url": "http://127.0.0.1:8214/",
+      "listen": "127.0.0.1:8214",
+      "target": "127.0.0.1:8214",
+      "enabled": true,
+      "autoStart": true,
+      "remote": true
+    },
+    {
+      "id": "ubuntu-dsh",
+      "serviceId": "dsh",
+      "title": "DSH · DeepSeek Harness",
+      "name": "DSH",
+      "description": "直接访问远端 Ubuntu 的 DSH 原始端口 3080；首次访问需使用 DSH 启动时生成的 token 链接登录。",
+      "category": "应用",
+      "protocol": "http",
+      "url": "http://127.0.0.1:3080/",
+      "listen": "127.0.0.1:3080",
+      "target": "127.0.0.1:3080",
+      "enabled": true,
+      "autoStart": true,
+      "remote": true
+    },
+    {
       "id": "mac-admin",
       "serviceId": "mac-admin",
       "title": "本机 Mac · 节点管理",
@@ -240,7 +300,7 @@ function serviceCard(s){
  top.append(icon,el('span','pill'+(s.enabled?'':' off'),state));card.append(top,el('h3','',s.title),el('p','description',s.description));
  const endpoint=el('div','endpoint');endpoint.append(el('code','',s.url),el('span','protocol',s.protocol.toUpperCase()));card.append(endpoint,mappingRoute(s));loginHelp(card,s);
  const actions=el('div','actions');
- if(['http','https'].includes(s.protocol)&&s.enabled){const a=el('a','primary','打开页面 ↗');a.href=s.url;a.target='_blank';a.rel='noopener noreferrer';a.setAttribute('aria-label','打开'+s.title);actions.append(a)}
+ if(['http','https'].includes(s.protocol)&&s.enabled){const a=el('a','primary','打开页面 ↗');a.href=s.loginUrl||s.url;a.target='_blank';a.rel='noopener noreferrer';a.setAttribute('aria-label','打开'+s.title);actions.append(a)}
  else{const b=el('button','primary',s.protocol==='smb'?'复制 Finder 连接地址':'复制连接地址');b.onclick=()=>copy(s.url);actions.append(b)}
  if(['http','https'].includes(s.protocol)){const button=el('button','copy','复制地址');button.setAttribute('aria-label','复制'+s.name+'地址');button.onclick=()=>copy(s.url);actions.append(button)}
  card.append(actions);tokenHelp(card,s);return card;

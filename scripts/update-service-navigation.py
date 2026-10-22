@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 SERVICE_UI = {
     "ubuntu-admin": ("远程 Ubuntu · 节点管理", "配置 Ubuntu 服务器提供的服务、目标地址和允许访问的设备。", "节点管理", "http", "/"),
@@ -18,6 +19,10 @@ SERVICE_UI = {
     "istore-nikki": ("iStore · Nikki 代理面板", "打开 Nikki 的 zashboard 面板，查看连接、代理与规则。", "路由与网络", "http", "/ui/"),
     "samba": ("Samba 文件共享", "在 Finder 中按 ⌘K，将共享地址粘贴到「连接服务器」。", "文件", "smb", ""),
     "ssh": ("Ubuntu · SSH 终端", "在终端执行 ssh ubuntu-local，通过本机端口登录远端 Ubuntu。", "路由与网络", "ssh", ""),
+    "nginx-share": ("Nginx · 文件共享", "访问远端 Ubuntu 的 Nginx 文件共享服务。", "文件", "http", "/"),
+    "netdata": ("Netdata · 服务器监控", "查看远端 Ubuntu 上的 Netdata 监控面板。", "应用", "http", "/"),
+    "codex-web": ("Codex Web · AI 工作台", "直接访问远端 Ubuntu 的 Codex Web 原始端口 8214。", "应用", "http", "/"),
+    "dsh": ("DSH · DeepSeek Harness", "直接访问远端 Ubuntu 的 DSH 原始端口 3080；首次访问需使用 DSH 启动时生成的 token 链接登录。", "应用", "http", "/"),
 }
 
 
@@ -29,14 +34,45 @@ def render_data(html, data):
     return html
 
 
+def read_dsh_login_token(args):
+    # Only inspect the currently running service invocation, never an older token.
+    script = '''import json, re, subprocess
+from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+subprocess.run(["systemctl", "--user", "is-active", "--quiet", "dsh.service"], check=True)
+invocation = subprocess.check_output(["systemctl", "--user", "show", "dsh.service", "-p", "InvocationID", "--value"], text=True).strip()
+if not invocation:
+    raise SystemExit("DSH current invocation is unavailable")
+settings = json.loads((Path.home() / ".local/share/p2p-file/node/node.json").read_text())["settings"]
+target = next(service["target"] for service in settings["services"] if service["id"] == "dsh")
+port = int(target.rsplit(":", 1)[1])
+logs = subprocess.check_output(["journalctl", "--user", "-u", "dsh.service", "_SYSTEMD_INVOCATION_ID=" + invocation, "--no-pager", "-o", "cat"], text=True)
+logs = re.sub(r"\\x1b\\[[0-?]*[ -/]*[@-~]", "", logs)
+for candidate in reversed(re.findall(r"https?://[^\\s]+", logs)):
+    url = urlsplit(candidate)
+    if url.scheme == "http" and url.hostname in ("127.0.0.1", "localhost") and url.port == port:
+        token = parse_qs(url.query).get("token", [""])[0]
+        if token:
+            print(json.dumps({"token": token}))
+            break
+else:
+    raise SystemExit("DSH current login token was not found")
+'''
+    result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", args.ssh_host, "python3 -"],
+                            input=script, check=True, capture_output=True, text=True, timeout=30)
+    return json.loads(result.stdout)["token"]
+
+
 def write_private_navigation(args, html, data):
     # Opt-in belongs to this Mac, never to the shared repository or its HTML.
     private_root = Path.home() / "Library/Application Support/p2p-file/navigation"
-    if not (private_root / "show-chromium-login").is_file():
+    show_chromium = (private_root / "show-chromium-login").is_file()
+    show_dsh = (private_root / "show-dsh-login").is_file()
+    if not (show_chromium or show_dsh):
         return
     private = dict(data, services=[dict(service) for service in data["services"]])
     chromium = next((service for service in private["services"] if service.get("serviceId") == "chromium-web"), None)
-    if chromium is not None:
+    if show_chromium and chromium is not None:
         script = '''from pathlib import Path
 import json
 path = Path.home() / "app/docker-deployments/chromium/login.credentials"
@@ -46,6 +82,13 @@ print(json.dumps({"username": pairs["USERNAME"], "password": pairs["PASSWORD"]})
         result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", args.ssh_host, "python3 -"],
                                 input=script, check=True, capture_output=True, text=True, timeout=30)
         chromium["login"] = json.loads(result.stdout)
+    dsh = next((service for service in private["services"] if service.get("serviceId") == "dsh"), None)
+    if show_dsh and dsh is not None:
+        url = urlsplit(dsh["url"])
+        query = [(key, value) for key, value in parse_qsl(url.query) if key != "token"]
+        query.append(("token", read_dsh_login_token(args)))
+        dsh["loginUrl"] = urlunsplit((url.scheme, url.netloc, url.path, urlencode(query), url.fragment))
+        dsh["description"] = "直接访问远端 Ubuntu 的 DSH 原始端口 3080；点击打开页面即可使用本机私有 token 登录。"
     rendered = render_data(html, private)
     # The private copy is outside the repository and is replaced with mode 0600.
     fd, temporary = tempfile.mkstemp(prefix=".navigation-", dir=private_root)
@@ -58,7 +101,7 @@ print(json.dumps({"username": pairs["USERNAME"], "password": pairs["PASSWORD"]})
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
-    print("Updated private local navigation; Chromium login is not written to the repository")
+    print("Updated private local navigation; credentials are not written to the repository")
 
 
 def main():
