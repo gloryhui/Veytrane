@@ -1351,6 +1351,13 @@ async fn run_session(
             continue;
         }
         if matches!(wake, Wake::Maintenance) {
+            for (peer, (generation, connection)) in &connections {
+                if connection.close_reason().is_none() {
+                    events
+                        .control
+                        .transport(*peer, *generation, connection.stats().into());
+                }
+            }
             nearby.expire(std::time::Instant::now());
             let updated = crate::node::core::connectivity::snapshot(
                 &network,

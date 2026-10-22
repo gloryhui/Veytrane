@@ -145,6 +145,10 @@ pub fn install_crypto_provider() {
 /// 共享的传输参数：keepalive + 空闲超时。
 fn transport_config() -> Result<TransportConfig> {
     let mut transport = TransportConfig::default();
+    // Last-mile UDP loss must not collapse every mapped TCP/WebSocket stream
+    // to Cubic's minimum window. BBR paces against measured delivery bandwidth
+    // and RTT while retaining Quinn's loss detection and reliable delivery.
+    transport.congestion_controller_factory(Arc::new(quinn::congestion::BbrConfig::default()));
     transport.keep_alive_interval(Some(KEEP_ALIVE_INTERVAL));
     let idle: IdleTimeout = MAX_IDLE_TIMEOUT
         .try_into()
@@ -808,6 +812,106 @@ impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn large_stream_survives_loss_without_starving_reverse_traffic() {
+        // A deterministic last-mile path: 20ms RTT, one in six downstream
+        // datagrams lost after handshake. Exercise the actual punch adapter.
+        let (server, _) = endpoint_from_socket_with_punch_dispatcher(
+            crate::net::family::bind_udp("127.0.0.1:0".parse().unwrap()).unwrap(),
+        )
+        .unwrap();
+        let server_addr = server.local_addr().unwrap();
+        let proxy = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let proxy_addr = proxy.local_addr().unwrap();
+        let router = tokio::spawn(async move {
+            let mut downstream = 0u64;
+            let mut client = None;
+            let mut buffer = vec![0; 65536];
+            let mut deliveries = tokio::task::JoinSet::new();
+            loop {
+                let (size, from) = proxy.recv_from(&mut buffer).await.unwrap();
+                let to = if from == server_addr {
+                    downstream += 1;
+                    if downstream > 32 && downstream.is_multiple_of(6) {
+                        continue;
+                    }
+                    client.unwrap()
+                } else {
+                    client = Some(from);
+                    server_addr
+                };
+                let bytes = buffer[..size].to_vec();
+                let socket = proxy.clone();
+                deliveries.spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    socket.send_to(&bytes, to).await.unwrap();
+                });
+                while deliveries.try_join_next().is_some() {}
+            }
+        });
+        let (client, _) = endpoint_from_socket_with_punch_dispatcher(
+            crate::net::family::bind_udp("127.0.0.1:0".parse().unwrap()).unwrap(),
+        )
+        .unwrap();
+        let accept = tokio::spawn(async move {
+            let connection = server.accept().await.unwrap().await.unwrap();
+            (server, connection)
+        });
+        let connection = connect(&client, proxy_addr, "127.0.0.1").await.unwrap();
+        let (server, remote) = accept.await.unwrap();
+        let bytes = vec![0x5a; 2 * 1024 * 1024];
+        let expected = blake3::hash(&bytes);
+        let sender = tokio::spawn(async move {
+            let (mut send, mut recv) = remote.accept_bi().await.unwrap();
+            let reverse = tokio::spawn(async move {
+                let mut received = 0;
+                let mut buffer = [0; 32];
+                while let Some(n) = recv.read(&mut buffer).await.unwrap() {
+                    received += n;
+                }
+                received
+            });
+            send.write_all(&bytes).await.unwrap();
+            send.finish().unwrap();
+            send.stopped().await.unwrap();
+            reverse.await.unwrap()
+        });
+        let (mut send, mut recv) = connection.open_bi().await.unwrap();
+        let heartbeat = tokio::spawn(async move {
+            for _ in 0..20 {
+                send.write_all(b"ping").await.unwrap();
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            send.finish().unwrap();
+        });
+        let started = std::time::Instant::now();
+        let result =
+            tokio::time::timeout(Duration::from_secs(8), recv.read_to_end(3 * 1024 * 1024)).await;
+        heartbeat.await.unwrap();
+        // Close before assertions, so a regression cannot leave the proxy running.
+        let data = result.as_ref().ok().and_then(|r| r.as_ref().ok());
+        let intact = data.is_some_and(|b| blake3::hash(b) == expected);
+        let reverse_bytes = if intact {
+            sender.await.unwrap()
+        } else {
+            sender.abort();
+            0
+        };
+        let stats = connection.stats();
+        connection.close(0u32.into(), b"done");
+        client.wait_idle().await;
+        server.close(0u32.into(), b"done");
+        server.wait_idle().await;
+        router.abort();
+        eprintln!(
+            "2MiB lossy stream: {:?}, intact={intact}, reverse={reverse_bytes}, received={}",
+            started.elapsed(),
+            stats.udp_rx.bytes
+        );
+        assert!(intact, "large stream stalled on a lossy path: {result:?}");
+        assert_eq!(reverse_bytes, 80);
+    }
+
     #[tokio::test]
     async fn idle_mapping_keepalive_uses_the_quic_port_and_preserves_punch_routing() {
         use crate::nat::stun::{Message, MessageClass, Method};

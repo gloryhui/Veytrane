@@ -19,6 +19,39 @@ pub use crate::node::core::session::{
 };
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct TransportSnapshot {
+    pub rtt_us: u64,
+    pub congestion_window: u64,
+    pub sent_packets: u64,
+    pub lost_packets: u64,
+    pub congestion_events: u64,
+    pub mtu: u16,
+    pub black_holes: u64,
+    pub sent_bytes: u64,
+    pub received_bytes: u64,
+    pub data_blocked: u64,
+    pub stream_data_blocked: u64,
+}
+
+impl From<quinn::ConnectionStats> for TransportSnapshot {
+    fn from(stats: quinn::ConnectionStats) -> Self {
+        Self {
+            rtt_us: stats.path.rtt.as_micros().min(u64::MAX as u128) as u64,
+            congestion_window: stats.path.cwnd,
+            sent_packets: stats.path.sent_packets,
+            lost_packets: stats.path.lost_packets,
+            congestion_events: stats.path.congestion_events,
+            mtu: stats.path.current_mtu,
+            black_holes: stats.path.black_holes_detected,
+            sent_bytes: stats.udp_tx.bytes,
+            received_bytes: stats.udp_rx.bytes,
+            data_blocked: stats.frame_tx.data_blocked,
+            stream_data_blocked: stats.frame_tx.stream_data_blocked,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct PeerSnapshot {
     pub node_id: String,
     pub generation: u64,
@@ -28,6 +61,9 @@ pub struct PeerSnapshot {
     pub outbound_password: bool,
     pub outbound_trusted: bool,
     pub inbound_trust_source: Option<crate::node::core::authorization::TrustSource>,
+    /// Bounded counters only: no socket addresses, payloads or credentials.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<TransportSnapshot>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -81,6 +117,16 @@ pub(crate) struct ControlState {
 }
 
 impl ControlState {
+    pub(crate) fn transport(&self, peer: NodeId, generation: u64, stats: TransportSnapshot) {
+        if let Ok(mut state) = self.snapshot.lock()
+            && let Some(peer) = state.peers.get_mut(&peer.to_hex())
+            && peer.generation == generation
+            && peer.phase == "connected"
+        {
+            peer.transport = Some(stats);
+        }
+    }
+
     pub(crate) fn set_trust_sources(
         &self,
         sources: &std::collections::HashMap<NodeId, crate::node::core::authorization::TrustSource>,
@@ -479,5 +525,79 @@ impl NodeControl {
         selection: &crate::node::core::task_details::Selection,
     ) -> Result<PathBuf> {
         self.file_service()?.reveal_task(selection)
+    }
+}
+
+#[cfg(test)]
+mod transport_tests {
+    use super::*;
+
+    #[test]
+    fn transport_counters_cannot_cross_peer_generations() {
+        let id = Identity::generate().node_id();
+        let state = ControlState::new(id, None);
+        state.snapshot.lock().unwrap().peers.insert(
+            id.to_hex(),
+            PeerSnapshot {
+                node_id: id.to_hex(),
+                generation: 2,
+                phase: "connected".into(),
+                ..Default::default()
+            },
+        );
+        state.transport(id, 1, TransportSnapshot::default());
+        assert!(
+            state.snapshot.lock().unwrap().peers[&id.to_hex()]
+                .transport
+                .is_none()
+        );
+        state.transport(id, 2, TransportSnapshot::default());
+        assert!(
+            state.snapshot.lock().unwrap().peers[&id.to_hex()]
+                .transport
+                .is_some()
+        );
+        state
+            .snapshot
+            .lock()
+            .unwrap()
+            .peers
+            .get_mut(&id.to_hex())
+            .unwrap()
+            .phase = "disconnected".into();
+        state.transport(
+            id,
+            2,
+            TransportSnapshot {
+                mtu: 1500,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            state.snapshot.lock().unwrap().peers[&id.to_hex()]
+                .transport
+                .as_ref()
+                .unwrap()
+                .mtu,
+            0
+        );
+    }
+
+    #[test]
+    fn older_peer_snapshots_need_no_transport_counters() {
+        let peer: PeerSnapshot = serde_json::from_value(serde_json::json!({
+            "node_id":"peer", "generation":1, "phase":"connected",
+            "inbound_password":false, "inbound_trusted":true,
+            "outbound_password":false, "outbound_trusted":true,
+            "inbound_trust_source":null
+        }))
+        .unwrap();
+        assert!(peer.transport.is_none());
+        assert!(
+            serde_json::to_value(peer)
+                .unwrap()
+                .get("transport")
+                .is_none()
+        );
     }
 }
