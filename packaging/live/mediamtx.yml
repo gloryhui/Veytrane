@@ -1,0 +1,35 @@
+# Official MediaMTX v1.21.2. No source changes or transcoding required.
+# Run on the broadcaster only; all listeners stay on loopback.
+logLevel: info
+api: false
+metrics: false
+pprof: false
+playback: false
+rtsp: false
+rtmp: false
+hls: false
+srt: false
+moq: false
+webrtc: true
+webrtcAddress: 127.0.0.1:18891
+webrtcLocalUDPAddress: 127.0.0.1:18190
+webrtcLocalTCPAddress: 127.0.0.1:18190
+webrtcIPsFromInterfaces: false
+webrtcAdditionalHosts: [127.0.0.1]
+webrtcICEServers2: []
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: [127.0.0.1]
+    permissions:
+      - action: publish
+        path: live
+      - action: read
+        path: live
+pathDefaults:
+  record: false
+paths:
+  live:
+    source: publisher
+    overridePublisher: false

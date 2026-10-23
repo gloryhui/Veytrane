@@ -92,7 +92,7 @@ impl ClientProfile {
     }
 }
 
-fn authorized_peers(snapshot: NodeSnapshot) -> BTreeSet<String> {
+pub(super) fn authorized_peers(snapshot: NodeSnapshot) -> BTreeSet<String> {
     snapshot
         .peers
         .into_values()
@@ -112,7 +112,7 @@ fn only_service(peers: &BTreeSet<String>) -> AllowedForwardTarget {
 }
 
 /// Log connection stages, never profiles, passwords, proof material or tokens.
-fn log_connection_event(event: &SessionEvent) {
+pub(super) fn log_connection_event(event: &SessionEvent) {
     match event {
         SessionEvent::Lifecycle(NetworkLifecycle::ConnectingSignal) => {
             println!("正在连接信令服务器…")
@@ -267,7 +267,7 @@ pub async fn run_gateway(root: &Path) -> io::Result<()> {
     }
 }
 
-async fn stop_control(control: NodeControl) {
+pub(super) async fn stop_control(control: NodeControl) {
     control.shutdown();
     let _ = tokio::task::spawn_blocking(move || control.shutdown_and_wait()).await;
 }

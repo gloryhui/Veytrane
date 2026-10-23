@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Veytrane Live</title>
+  <style>
+    :root { color-scheme: dark; font: 16px system-ui,sans-serif; background:#10131a; color:#e8edf7 }
+    body { max-width:1120px; margin:0 auto; padding:24px }
+    header { display:flex; align-items:center; justify-content:space-between; gap:16px }
+    h1 { font-size:22px; letter-spacing:.02em }
+    #status { color:#a8b7cf; line-height:1.6 }
+    video { display:block; width:100%; max-height:78vh; background:#000; border-radius:12px; margin:16px 0 }
+    footer { display:flex; flex-wrap:wrap; align-items:center; gap:12px; color:#a8b7cf; font-size:14px }
+    button { color:inherit; background:#222d41; border:1px solid #405375; border-radius:8px; padding:9px 14px; cursor:pointer }
+    button:hover { background:#304260 }
+    #sound { color:#fff; background:#2259ae }
+  </style>
+</head>
+<body>
+  <header><h1>Veytrane Live</h1><button id="retry">重新连接</button></header>
+  <p id="status" role="status" aria-live="polite">正在连接直播…</p>
+  <video id="video" autoplay muted playsinline controls></video>
+  <footer>
+    <button id="sound">开启声音</button>
+    <span id="stats">等待画面</span>
+    <span>保持观看程序运行，主播开播后会自动播放。</span>
+  </footer>
+  <script src="/player.js"></script>
+</body>
+</html>
