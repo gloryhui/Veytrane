@@ -2,6 +2,8 @@
 
 日期：2026-10-23（Asia/Shanghai）。分支：`codex/live-distribution`，基于 `6b084199088cd578d3668f16657de291ecbdf18c`。
 
+后续已完成的 Windows 原生构建、真实 OBS 与朋友包同机验收见 [Windows OBS 验证记录](LIVE_WINDOWS_OBS_VALIDATION.md)。本文保留先前 Mac / FFmpeg 实测及当时待办的历史状态；跨网络验收仍未完成。
+
 ## 实现范围
 
 - 新增 `live-gateway` 和 `live-viewer`，由 `live` Cargo feature 启用。主播与观看端使用独立于通用 Agent / Sub2API 的身份目录。

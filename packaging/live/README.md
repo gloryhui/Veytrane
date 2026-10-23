@@ -25,7 +25,7 @@ git switch --track origin/codex/live-distribution
 powershell.exe -NoProfile -File .\packaging\live\Build-Live.ps1
 ```
 
-构建脚本复用仓库的 MSVC 环境发现，构建 `live-gateway.exe` 和 `live-viewer.exe`，输出到 `target/x86_64-pc-windows-msvc/release/`。使用没有配置过环境的普通 PowerShell 也会发现已安装的 Build Tools。脚本执行策略按本机已有配置处理。
+构建脚本复用仓库的 MSVC 环境发现，构建 `live-gateway.exe` 和 `live-viewer.exe`，输出到 `target/x86_64-pc-windows-msvc/release/`，静态链接 C/C++ 运行库，朋友无需另装 Visual C++ Redistributable。使用没有配置过环境的普通 PowerShell 也会发现已安装的 Build Tools。脚本执行策略按本机已有配置处理。
 
 从上述官方 Release 下载 `mediamtx_v1.21.2_windows_amd64.zip`，与同一 Release 的 `checksums.sha256` 核对 SHA256，解压后只需把 `mediamtx.exe` 放到 `packaging/live/`。保留仓库随附的 `mediamtx.yml`，不要用下载包的默认配置覆盖它。
 
@@ -126,4 +126,4 @@ python3 scripts/live-local-smoke.py \
 
 依赖 FFmpeg 的 `whip` muxer、Chrome 和 Node。脚本在独立私有目录生成身份，启动本机临时信令与两端节点，并在退出时清理自己启动的进程。`--loopback-test` 只用于这类隔离测试，正常分发不要启用。脚本将毫秒时间戳写进源视频，再从浏览器显示出的画面像素读取，记录编码、MediaMTX、P2P 和解码播放的合计延迟；同时断言浏览器确实选中 TCP/18189，并验证停播重开后的自动恢复。它不会把 RTT 或 jitter 当作端到端延迟。
 
-本机实测与尚未完成的 Windows/OBS/跨网络验收见[验证记录](../../docs/task-reports/LIVE_WEBRTC_TCP_VALIDATION.md)。本机结果不能代替朋友实际网络的延迟；TCP 可靠传输在丢包或带宽不足时可能积压。
+先前 Mac 实测见[验证记录](../../docs/task-reports/LIVE_WEBRTC_TCP_VALIDATION.md)；已完成的 Windows 原生构建、真实 OBS、朋友包与同机延迟验收见 [Windows OBS 验证记录](../../docs/task-reports/LIVE_WINDOWS_OBS_VALIDATION.md)。跨网络验收仍待完成。本机结果不能代替朋友实际网络的延迟；TCP 可靠传输在丢包或带宽不足时可能积压。
