@@ -62,6 +62,8 @@ Bearer Token：留空
 
 脚本在 `release/live/` 创建新目录与 ZIP，不覆盖旧包。朋友解压后双击 `Start-Live-Viewer.bat`，连接成功会自动打开 `http://127.0.0.1:18889/`；默认静音，点击“开启声音”。主播未开播或直播中断时，网页自动重试。朋友保持程序窗口运行即可，退出后本机转发关闭。
 
+浏览器优先使用 Microsoft Edge 或 Google Chrome。2026-10-23 的朋友跨网络实测中，Firefox 停在连接状态，改用 Edge 后实际出画；Firefox 的具体兼容原因尚未定位。默认浏览器无法出画时，保持观看程序运行，用 Edge 打开上述本机地址。这个结果不代表已经完成所有 Firefox 版本或其他浏览器的兼容测试。
+
 观看配置绑定主播 NodeId 和共享观看凭证，朋友首次启动自行生成设备身份。观看过程免登录、免输入验证码；底层仍自动校验节点身份与专用凭证。该文件是可转发的观看权限，不能提交到仓库；更换整批观看权限需生成新的独立直播网关并重新分发。不要删除常用节点或 Sub2API 的目录。
 
 Windows 从源码直接测试观看端也可以：
@@ -126,4 +128,4 @@ python3 scripts/live-local-smoke.py \
 
 依赖 FFmpeg 的 `whip` muxer、Chrome 和 Node。脚本在独立私有目录生成身份，启动本机临时信令与两端节点，并在退出时清理自己启动的进程。`--loopback-test` 只用于这类隔离测试，正常分发不要启用。脚本将毫秒时间戳写进源视频，再从浏览器显示出的画面像素读取，记录编码、MediaMTX、P2P 和解码播放的合计延迟；同时断言浏览器确实选中 TCP/18189，并验证停播重开后的自动恢复。它不会把 RTT 或 jitter 当作端到端延迟。
 
-先前 Mac 实测见[验证记录](../../docs/task-reports/LIVE_WEBRTC_TCP_VALIDATION.md)；已完成的 Windows 原生构建、真实 OBS、朋友包与同机延迟验收见 [Windows OBS 验证记录](../../docs/task-reports/LIVE_WINDOWS_OBS_VALIDATION.md)。跨网络验收仍待完成。本机结果不能代替朋友实际网络的延迟；TCP 可靠传输在丢包或带宽不足时可能积压。
+先前 Mac 实测见[验证记录](../../docs/task-reports/LIVE_WEBRTC_TCP_VALIDATION.md)；已完成的 Windows 原生构建、真实 OBS、朋友包与同机延迟验收，以及一次朋友跨网络 Edge 出画记录，见 [Windows OBS 验证记录](../../docs/task-reports/LIVE_WINDOWS_OBS_VALIDATION.md)。跨网络延迟、中继与长期稳定性仍待验收。本机结果不能代替朋友实际网络的延迟；TCP 可靠传输在丢包或带宽不足时可能积压。
