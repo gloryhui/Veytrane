@@ -13,9 +13,25 @@ def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def validate_profile(path, binary):
+    """Reject a distributable missing its fixed relay or built from another profile."""
+    try:
+        embedded = path.read_text()
+        profile = json.loads(embedded)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise SystemExit("Cannot read the private build profile") from None
+    relay = profile.get("relay_server") if isinstance(profile, dict) else None
+    if not isinstance(relay, str) or not relay.strip():
+        raise SystemExit("Sub2API distribution requires a fixed relay_server")
+    if embedded.encode("utf-8") not in binary:
+        raise SystemExit("Executable does not contain the supplied private build profile")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path)
+    parser.add_argument("--profile", required=True, type=Path,
+                        help="Private build input; validated but never copied into the package")
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     raw = args.binary.read_bytes()
@@ -24,6 +40,7 @@ def main():
     offset = struct.unpack_from("<I", raw, 0x3C)[0]
     if raw[offset:offset + 4] != b"PE\0\0" or struct.unpack_from("<H", raw, offset + 4)[0] != 0x8664:
         raise SystemExit("Expected a Windows x64 executable")
+    validate_profile(args.profile, raw)
     if args.output.exists():
         raise SystemExit("Output already exists; choose a new directory")
     repo = Path(__file__).resolve().parents[1]
@@ -48,6 +65,7 @@ def main():
         "architecture": "Windows x64", "authenticode": "unsigned",
         "local_url": "http://127.0.0.1:18081/",
         "identity": "generated independently on each device; none included",
+        "relay_fallback": "required fixed endpoint embedded; direct preferred",
         "files": {p.name: sha256(p) for p in sorted(package.iterdir())},
         "zip_sha256": sha256(archive),
         "sources_sha256": {str(p.relative_to(repo)): sha256(p) for p in sources},

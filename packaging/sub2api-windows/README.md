@@ -23,9 +23,9 @@
 1. 构建服务器：`cargo build --locked --release --features sub2api-gateway --bin p2p-sub2api-gateway`。
 2. 为网关选择全新私有目录，执行 `p2p-sub2api-gateway --data-dir <目录> --init --signal-server <HOST:PORT>`，从 stdin 输入独立随机 12 位字母数字密码。仅返回新网关 NodeId。已存在的身份/配置会被拒绝覆盖。
 3. 网关 `gateway.json` 仅保存密码校验值。用该目录运行服务器并由 systemd 管理；不要改变现有 Agent 的部署。
-4. 在仓库外或被忽略且权限为 0700 的私有目录准备客户端构建 JSON：`signal_server`、`server_node_id`、`password`；可选 `signal_tls`、`relay_server`。它是发行者的私有构建输入，不能提交或加入 ZIP。
+4. 在仓库外或被忽略且权限为 0700 的私有目录准备客户端构建 JSON：`signal_server`、`server_node_id`、`password`、`relay_server`；可选 `signal_tls`。专用分发必须内置固定中继；在现有信令进程中启用 UDP Relay，并将同一固定地址写入网关的 `gateway.json` 与客户端构建输入。它是发行者的私有构建输入，不能提交或加入 ZIP。
 5. 构建时设置 `P2P_SUB2API_PROFILE_FILE=<绝对路径>`，然后 `cargo build --locked --release --features sub2api-client --bin sub2api-client --target x86_64-pc-windows-msvc`。也可使用 LLVM-MinGW 配合官方 `x86_64-pc-windows-gnullvm` 标准库交叉构建，静态链接 CRT，并检查 DLL 导入。默认未提供 profile 的构建会在运行时拒绝连接。
-6. `python3 scripts/package-sub2api-windows.py --binary <sub2api-client.exe> --output <新输出目录>`。包外的 manifest 记录实际父提交、未提交状态、源文件与程序的 SHA256；它不声称未提交代码已经发布到 Git。
+6. `python3 scripts/package-sub2api-windows.py --binary <sub2api-client.exe> --profile <私有构建JSON> --output <新输出目录>`。脚本拒绝缺少固定中继或 EXE 与构建输入不匹配的制品，构建输入不会复制到 ZIP。包外的 manifest 记录实际父提交、未提交状态、源文件与程序的 SHA256；它不声称未提交代码已经发布到 Git。
 
 首次启动持锁，避免重复实例。核心保持断线重连；检测到休眠/接口变化后清理会话并重建网络。连通探测后打开默认浏览器，端口占用时直接报错，不猜测另一个端口。关闭窗口不保留后台任务或开机自启。
 

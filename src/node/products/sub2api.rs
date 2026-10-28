@@ -661,6 +661,18 @@ mod tests {
             .session()
             .unwrap();
         session.tunnel_rules.clear(); // No local listeners or existing Mac configuration.
+        // The isolated Linux acceptance service can block direct UDP for its own
+        // cgroup, while allowing the fixed relay. Assert the route, not just HTTP.
+        let required_relay = std::env::var_os("SUB2API_LIVE_REQUIRE_RELAY").map(|_| {
+            session.network.families = crate::net::NetworkFamilies::Ipv4Only;
+            session.network.stun_servers.clear();
+            profile
+                .relay_server
+                .as_ref()
+                .expect("fixed relay required")
+                .parse::<std::net::SocketAddr>()
+                .expect("live relay must be a numeric endpoint")
+        });
         let (control, mut events) = control::spawn(identity, session).unwrap();
         let drain = tokio::spawn(async move { while events.recv().await.is_some() {} });
         let mut updates = control.connection_updates(peer).await.unwrap();
@@ -676,6 +688,13 @@ mod tests {
                 }
             }
         }).await.unwrap();
+        if let Some(relay) = required_relay {
+            assert_eq!(
+                connection.remote_address(),
+                relay,
+                "acceptance must use relay"
+            );
+        }
         let entries = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let entries = services::list(&connection).await.unwrap();
