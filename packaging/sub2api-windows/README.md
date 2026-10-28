@@ -4,7 +4,7 @@
 
 该模式与通用桌面客户端及现有 JSON Agent 分离。ZIP 内仅有 `Sub2API.exe`、`Start-Sub2API.bat`、使用说明及许可证；不包含通用 Agent、管理 CLI、Web 管理端、配置 JSON 或任何预生成身份。
 
-2026-10-28 已从干净提交 `6b08419` 更新 Ubuntu 独立网关并重新生成 Windows x64 包，纳入主线的自动重连、网络变化处理与 BBR 丢包吞吐修复。两者保持 P2PN v2，沿用原网关身份和专用凭证。实际接入、权限与制品验证见[本次分发验收](../../docs/task-reports/SUB2API_DISTRIBUTION_20261028.md)；此前部署见[品牌更新记录](../../docs/task-reports/VEYTRANE_DEPLOYMENT.md)和[专用路径历史记录](../../docs/task-reports/SUB2API_P2PN_V2_DEPLOYMENT.md)。朋友 Windows 电脑未接入，尚未进行其安装与实机验收。
+2026-10-28 当前 Windows 包来自干净提交 `edcddaf`，必须内置固定中继；Ubuntu 独立网关沿用已更新的 `6b08419` 程序并配置同一固定中继。已启用公网 UDP 中继，在隔离测试中阻断直连后，实际通过中继访问 Sub2API 返回 200。两端保持 P2PN v2，原网关身份和专用凭证不变。当前制品与中继验收见[固定中继分发记录](../../docs/task-reports/SUB2API_FIXED_RELAY_20261028.md)；当日较早的无中继制品见[首次分发记录](../../docs/task-reports/SUB2API_DISTRIBUTION_20261028.md)，已被本次替代。朋友 Windows 实机及其网络环境仍待验证。
 
 每台 Windows 的当前用户首次启动生成独立 Ed25519 身份，保存在 `%LOCALAPPDATA%\Sub2API-Client`。所有收件人可使用同一 ZIP，凭证在构建时嵌入，但身份从不嵌入。客户端不接受参数，不读取运行时服务器/端口配置，不接受环境变量覆盖，仅监听 `127.0.0.1:18081`，仅请求 `sub2api` 服务。BAT 路径有引号，使用 CRLF，不需要管理员权限或额外解释器。
 
