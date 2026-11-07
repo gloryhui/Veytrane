@@ -1,4 +1,4 @@
-//! Desktop lifetime only. The Agent remains independent until explicit Quit.
+//! Desktop lifetime only. The Agent remains independent when the desktop quits.
 use super::{workbench::Page, *};
 use status::{CoreState, StatusSnapshot};
 use tray::{NativeTray, TrayAction};
@@ -220,77 +220,10 @@ fn handle_action(action: TrayAction, cx: &mut App) {
     }
 }
 
-async fn stopped(paths: &AgentPaths) -> bool {
-    crate::node::adapters::cli::run(crate::node::adapters::cli::Args {
-        data_dir: Some(paths.root.clone()),
-        command: crate::node::adapters::cli::Action::OwnershipStatus,
-    })
-    .await
-    .is_ok()
-}
-
-async fn stop_for_exit(paths: AgentPaths) -> Result<(), String> {
-    if stopped(&paths).await {
-        return Ok(());
-    }
-    let response = AgentClient::new(paths.clone()).execute(Command::Stop).await;
-    match response {
-        Ok(response) => {
-            if let Some(error) = response.error {
-                return Err(error.message);
-            }
-        }
-        Err(error) => {
-            if !stopped(&paths).await {
-                return Err(error.to_string());
-            }
-        }
-    }
-    let until = tokio::time::Instant::now() + Duration::from_secs(10);
-    while tokio::time::Instant::now() < until {
-        if stopped(&paths).await {
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    Err("后台仍在保存或退出，请稍后重试；未强制结束进程。".into())
-}
-
 fn request_quit(cx: &mut App) {
     if cx.global::<TrayRuntime>().quitting {
         return;
     }
-    let shell = cx.global::<TrayRuntime>().shell.clone();
     cx.update_global::<TrayRuntime, _>(|runtime, _| runtime.quitting = true);
-    let paths = shell.update(cx, |s, cx| {
-        s.exiting = true;
-        s.message = "正在保存后台状态并退出…".into();
-        cx.notify();
-        s.paths.clone()
-    });
-    let executor = cx.background_executor().clone();
-    cx.spawn(async move |cx| {
-        let result = executor
-            .spawn(async move {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|e| e.to_string())?
-                    .block_on(stop_for_exit(paths))
-            })
-            .await;
-        let _ = cx.update(|cx| match result {
-            Ok(()) => cx.quit(),
-            Err(error) => {
-                cx.update_global::<TrayRuntime, _>(|runtime, _| runtime.quitting = false);
-                shell.update(cx, |s, cx| {
-                    s.exiting = false;
-                    s.message = format!("退出未完成：{error}").into();
-                    cx.notify();
-                });
-                show_main(cx);
-            }
-        });
-    })
-    .detach();
+    cx.quit();
 }
