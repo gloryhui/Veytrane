@@ -22,17 +22,55 @@ fn hwnd(handle: gpui::AnyWindowHandle, cx: &mut App) -> Result<isize, String> {
 }
 
 #[test]
-#[ignore = "opens native windows and a tray icon; run explicitly on Windows"]
+#[ignore = "opens native windows and a tray icon; requires P2P_AGENT_TEST_BINARY"]
 fn native_close_hides_to_tray_restore_and_explicit_exit() {
     let root = std::env::temp_dir().join(format!("p2p-tray-test-{:032x}", rand::random::<u128>()));
     let paths = AgentPaths::new(&root).unwrap();
+    crate::node::adapters::cli::initialize(&paths).unwrap();
+    let identity = std::fs::read(paths.identity()).unwrap();
+    let binary = std::env::var_os("P2P_AGENT_TEST_BINARY").expect("set P2P_AGENT_TEST_BINARY");
+    struct Process(std::process::Child);
+    impl Drop for Process {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    use std::os::windows::process::CommandExt;
+    let mut process = Process(
+        std::process::Command::new(binary)
+            .arg("--data-dir")
+            .arg(&root)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(0x08000000)
+            .spawn()
+            .unwrap(),
+    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let client = AgentClient::new(paths.clone());
+    runtime.block_on(async {
+        let until = tokio::time::Instant::now() + Duration::from_secs(10);
+        while client.execute(Command::Status).await.is_err() {
+            assert!(
+                tokio::time::Instant::now() < until,
+                "test Agent did not start"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    });
     let result = Arc::new(Mutex::new(None));
     let result_after = result.clone();
     let explicit_exit = Arc::new(AtomicBool::new(false));
     let exit_after = explicit_exit.clone();
+    let gui_paths = paths.clone();
     Application::new().run(move |cx| {
-        let worker = ClientWorker::start(paths.clone()).unwrap();
-        let shell = cx.new(|cx| AgentShell::new(paths, worker, cx));
+        let worker = ClientWorker::start(gui_paths.clone()).unwrap();
+        let shell = cx.new(|cx| AgentShell::new(gui_paths, worker, cx));
         let main_shell = shell.clone();
         let main = cx
             .open_window(WindowOptions::default(), |_, _| main_shell)
@@ -110,11 +148,8 @@ fn native_close_hides_to_tray_restore_and_explicit_exit() {
                     if cx.windows() != vec![main.into()] {
                         return Err("closing a secondary window affected the main window".into());
                     }
-                    handle_action(TrayAction::Quit, cx);
-                    if !shell.read(cx).exiting {
-                        return Err("explicit Quit did not enter shutdown".into());
-                    }
                     *result.lock().unwrap() = Some(Ok(()));
+                    handle_action(TrayAction::Quit, cx);
                     Ok(())
                 })
                 .map_err(|e| e.to_string())??;
@@ -137,73 +172,23 @@ fn native_close_hides_to_tray_restore_and_explicit_exit() {
         .unwrap()
         .take()
         .expect("application quit before the close/restore checks completed");
-    let _ = std::fs::remove_dir_all(root);
     outcome.unwrap();
+    assert!(
+        process.0.try_wait().unwrap().is_none(),
+        "desktop Quit stopped the Agent"
+    );
+    let response = runtime
+        .block_on(client.execute(Command::Status))
+        .expect("Agent IPC unavailable after desktop Quit");
+    assert!(
+        response.error.is_none(),
+        "Agent status failed after desktop Quit"
+    );
+    assert_eq!(std::fs::read(paths.identity()).unwrap(), identity);
+    drop(process);
+    let _ = std::fs::remove_dir_all(root);
     assert!(
         exit_after.load(Ordering::SeqCst),
         "frontend exited without explicit tray Quit"
     );
-}
-
-#[tokio::test]
-#[ignore = "requires P2P_AGENT_TEST_BINARY pointing to a built Agent"]
-async fn explicit_exit_stops_real_agent_and_preserves_identity() {
-    struct Process(std::process::Child);
-    impl Drop for Process {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
-    let binary = std::env::var_os("P2P_AGENT_TEST_BINARY").expect("set P2P_AGENT_TEST_BINARY");
-    let root = std::env::temp_dir().join(format!(
-        "p2p-tray-agent-test-{:032x}",
-        rand::random::<u128>()
-    ));
-    let paths = AgentPaths::new(&root).unwrap();
-    crate::node::adapters::cli::initialize(&paths).unwrap();
-    let identity = std::fs::read(paths.identity()).unwrap();
-    let mut command = std::process::Command::new(binary);
-    command
-        .arg("--data-dir")
-        .arg(&root)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    use std::os::windows::process::CommandExt;
-    command.creation_flags(0x08000000);
-    let mut process = Process(command.spawn().unwrap());
-    let client = AgentClient::new(paths.clone());
-    let until = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        if client.execute(Command::Status).await.is_ok() {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < until,
-            "test Agent did not start"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    assert!(
-        !stopped(&paths).await,
-        "Agent ownership must be held before explicit Quit"
-    );
-    stop_for_exit(paths.clone()).await.unwrap();
-    assert!(stopped(&paths).await);
-    let until = tokio::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        if let Some(status) = process.0.try_wait().unwrap() {
-            assert!(status.success());
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < until,
-            "explicit Quit did not release the Agent process"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    assert_eq!(std::fs::read(paths.identity()).unwrap(), identity);
-    drop(process);
-    let _ = std::fs::remove_dir_all(root);
 }
