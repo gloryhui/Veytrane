@@ -61,6 +61,7 @@ pub(super) fn dial(
                 verifier,
                 AttemptOptions { capabilities },
                 password,
+                None,
             )
             .await
         })
@@ -72,6 +73,7 @@ pub(super) fn dial(
 }
 
 pub(super) async fn identify(
+    route: NetworkRoute,
     incoming: quinn::Incoming,
     identity: Identity,
     inputs: mpsc::Sender<SessionInput>,
@@ -87,6 +89,7 @@ pub(super) async fn identify(
     {
         let _ = inputs
             .send(SessionInput::DirectIdentified {
+                route,
                 peer,
                 prepared,
                 permit,
@@ -124,6 +127,7 @@ pub(super) async fn accept(
             verifier,
             AttemptOptions { capabilities },
             password,
+            None,
         )
         .await
     })
