@@ -1,162 +1,310 @@
 #!/usr/bin/env python3
-"""Install the independent Mac navigation backend, preserving every Agent/forward.
+"""Prepare integrated p2p-agent navigation configuration and private page.
 
-Only modifies this control plane's versioned runtime, its own LaunchAgent and the
-existing nginx navigation vhost's /api/navigation/ location. No Agent lifecycle
-commands or node-config writes are performed.
+This compatibility installer does not start Python HTTP services, register
+launchd/systemd/scheduled-task entries, edit Nginx, modify Agent identity, or
+restart an Agent. --replace, --no-autostart, and --foreground are accepted as
+historical flags and never start an Agent.
 """
 import argparse
-import datetime
-import hashlib
-import http.client
+import copy
+import importlib.util
 import json
 import os
 from pathlib import Path
-import plistlib
+import platform
 import re
-import socket
 import subprocess
 import sys
-import time
+import uuid
 
-from navigation_manager import write_private
+from navigation_platform import load_config, secure_private_file
+
+
+PERSISTED_FIELDS = frozenset((
+    "schema_version", "local_name", "installed", "page", "state_dir", "http",
+    "remote", "peers", "lifecycle", "agent_web",
+))
+INTEGRATED_PORT = 3001
 
 
 def run(argv, check=True):
-    return subprocess.run([str(s) for s in argv], capture_output=True, text=True, check=check, timeout=110)
+    kwargs = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    return subprocess.run(
+        [str(value) for value in argv],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=check,
+        timeout=110,
+        **kwargs,
+    )
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--replace", action="store_true", help="gracefully replace only an already installed navigation backend")
-    parser.add_argument("--nginx-conf", type=Path, default=Path('/opt/homebrew/etc/nginx/conf.d/p2p-service-navigation.conf'))
-    args = parser.parse_args()
-    if sys.platform != "darwin":
-        parser.error("This installer targets the current Mac only")
-    here = Path(__file__).resolve().parent
-    private = Path.home() / 'Library/Application Support/p2p-file/navigation'
-    label = 'io.github.gloryhui.p2p-navigation-control'
-    service = f'gui/{os.getuid()}/{label}'
-    plist = Path.home() / 'Library/LaunchAgents' / (label + '.plist')
-    nginx = Path('/opt/homebrew/bin/nginx')
-    for path in (private, args.nginx_conf, plist.parent):
-        if not path.exists() or path.is_symlink() or path.resolve() != path.absolute():
-            raise SystemExit(f'Expected an existing canonical non-symlink path: {path}')
-        if path.stat().st_uid != os.getuid():
-            raise SystemExit(f'Expected current-user ownership: {path}')
-    old = args.nginx_conf.read_text()
-    if 'listen 127.0.0.1:3001;' not in old or 'location = /service-navigation.html' not in old:
-        raise SystemExit('The selected nginx file is not the existing local navigation vhost')
-    run([nginx, '-t'])
-    job = run(['/bin/launchctl', 'print', service], check=False)
-    loaded = job.returncode == 0
-    match = re.search(r'^\s*pid = ([0-9]+)\s*$', job.stdout, re.MULTILINE)
-    old_pid = int(match[1]) if match else None
-    if loaded and not args.replace:
-        raise SystemExit('Navigation backend already running. Use --replace for a graceful gateway-only replacement.')
-    if not loaded:
-        with socket.socket() as probe:
-            probe.bind(('127.0.0.1', 17790))
-    if loaded:
-        installed_plist = plistlib.loads(plist.read_bytes())
-        command = installed_plist.get('ProgramArguments', [])
-        if installed_plist.get('Label') != label or len(command) < 2 or not Path(command[1]).is_relative_to(private / 'runtime'):
-            raise SystemExit('Existing LaunchAgent is not owned by this installer')
-    names = ('navigation-server.py', 'navigation_manager.py')
-    digest = hashlib.sha256(b''.join((here / n).read_bytes() for n in names)).hexdigest()[:16]
-    runtime = private / 'runtime' / digest
-    runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if runtime.resolve() != runtime:
-        raise SystemExit('Runtime path must not traverse symlinks')
-    for name in names:
-        source, destination = here / name, runtime / name
-        if destination.exists() and destination.read_bytes() != source.read_bytes():
-            raise SystemExit('Versioned runtime already exists with different content')
-        if not destination.exists():
-            write_private(destination, source.read_text())
-    backup = private / 'installation-backups' / datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f')
-    backup.mkdir(parents=True, mode=0o700)
-    write_private(backup / 'nginx-before.conf', old)
-    if plist.exists():
-        write_private(backup / 'launchagent-before.plist', plist.read_text())
-    page = private / 'service-navigation.html'
+def atomic_private(path, value):
+    """Apply private permissions before writing, then atomically replace."""
+    path = Path(path)
+    ensure_directory(path.parent)
+    if path.is_symlink():
+        raise RuntimeError(f"Private file target must not be a symlink: {path}")
+    temporary = path.parent / (".navigation-" + uuid.uuid4().hex)
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        secure_private_file(temporary)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
+            fd = -1
+            stream.write(value if isinstance(value, str) else json.dumps(
+                value, ensure_ascii=False, indent=2))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        secure_private_file(path)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def canonical_absolute(path):
+    value = Path(path).expanduser()
+    absolute = Path(os.path.abspath(value))
+    try:
+        return absolute.resolve(strict=False) == absolute, absolute
+    except OSError:
+        return False, absolute
+
+
+def require_path(path, *, directory=False):
+    canonical, absolute = canonical_absolute(path)
+    if not canonical:
+        raise RuntimeError(f"Expected a canonical non-symlink path: {path}")
+    if directory:
+        if not absolute.is_dir() or absolute.is_symlink():
+            raise RuntimeError(f"Expected an existing directory: {absolute}")
+    elif not absolute.is_file() or absolute.is_symlink():
+        raise RuntimeError(f"Expected an existing regular file: {absolute}")
+    if os.name != "nt" and absolute.stat().st_uid != os.getuid():
+        raise RuntimeError(f"Expected current-user ownership: {absolute}")
+    return absolute
+
+
+def ensure_directory(path):
+    """Create a missing current-user directory without traversing symlinks."""
+    _, absolute = canonical_absolute(path)
+    missing = []
+    current = absolute
+    while not current.exists():
+        missing.append(current.name)
+        current = current.parent
+    require_path(current, directory=True)
+    for name in reversed(missing):
+        current = current / name
+        current.mkdir(mode=0o700)
+        require_path(current, directory=True)
+    return require_path(absolute, directory=True)
+
+
+def effective_config(config, args):
+    value = copy.deepcopy(config)
+    for field, argument in (
+            ("installed", args.installed),
+            ("page", args.page),
+            ("state_dir", args.state_dir)):
+        if argument is not None:
+            value[field] = str(Path(argument).expanduser().resolve(strict=False))
+    if args.ssh_host is not None:
+        remote = value.get("remote")
+        if not isinstance(remote, dict):
+            raise ValueError("--ssh-host requires a non-null remote configuration")
+        remote["ssh_host"] = args.ssh_host
+    return value
+
+
+def validate_config(config):
+    host_platform = {"Darwin": "macos", "Windows": "windows", "Linux": "linux"}.get(
+        platform.system())
+    if host_platform is None:
+        raise RuntimeError("unsupported host platform: " + platform.system())
+    if config.get("platform") != host_platform:
+        raise RuntimeError(
+            f"configuration is for {config.get('platform')}, not {host_platform}")
+    if config.get("http") != {"port": INTEGRATED_PORT, "public_port": INTEGRATED_PORT}:
+        raise RuntimeError("integrated navigation requires port and public_port 3001")
+    lifecycle = config.get("lifecycle")
+    expected_kind = {"macos": "launchd", "windows": "scheduled-task",
+                     "linux": "systemd"}[host_platform]
+    if (not isinstance(lifecycle, dict) or
+            lifecycle.get("kind") not in (expected_kind, "none")):
+        raise RuntimeError("Agent lifecycle in the navigation configuration is invalid")
+
+    installed = require_path(config["installed"])
+    try:
+        metadata = json.loads(installed.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise RuntimeError("installed Agent metadata is unreadable") from error
+    if not isinstance(metadata, dict) or not {"bin_dir", "data_dir"} <= metadata.keys():
+        raise RuntimeError("installed Agent metadata is not valid")
+    data_dir = require_path(metadata["data_dir"], directory=True)
+    navigation_root = ensure_directory(data_dir.parent / "navigation")
+
+    page = canonical_absolute(config["page"])[1]
+    if page.parent != navigation_root:
+        raise RuntimeError(
+            f"navigation page must be directly inside {navigation_root}: {page}")
     if page.exists():
-        write_private(backup / 'navigation-before.html', page.read_text())
-    location = '''    location ^~ /api/navigation/ {
-        proxy_pass http://127.0.0.1:17790;
-        proxy_set_header Host $http_host;
-        proxy_http_version 1.1;
-        proxy_read_timeout 100s;
-        proxy_send_timeout 100s;
-        client_max_body_size 32k;
+        page = require_path(page)
+    if page == navigation_root / "config.json":
+        raise RuntimeError("navigation page cannot replace config.json")
+
+    state_dir = canonical_absolute(config["state_dir"])[1]
+    try:
+        state_dir.relative_to(navigation_root)
+    except ValueError as error:
+        raise RuntimeError(
+            f"navigation state must remain inside {navigation_root}: {state_dir}") from error
+    ensure_directory(state_dir)
+
+    config_path = navigation_root / "config.json"
+    if config_path.exists():
+        require_path(config_path)
+    config["page"] = str(page)
+    config["state_dir"] = str(state_dir)
+    config["navigation_root"] = str(navigation_root)
+    config["config_file"] = str(config_path)
+    return {
+        "platform": host_platform,
+        "installed": installed,
+        "data_dir": data_dir,
+        "navigation_root": navigation_root,
+        "page": page,
+        "state_dir": state_dir,
+        "config_path": config_path,
     }
-'''
-    if 'location ^~ /api/navigation/' in old:
-        if 'proxy_pass http://127.0.0.1:17790;' not in old:
-            raise SystemExit('Existing navigation API proxy uses an unexpected destination')
-        new = old
-    else:
-        if old.count('    location / {') != 1:
-            raise SystemExit('Cannot identify the navigation fallback location')
-        new = old.replace('    location / {', location + '    location / {')
-    for header, value in [
-        ('X-Frame-Options', 'DENY'),
-        ('Referrer-Policy', 'no-referrer'),
-        ('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"),
-    ]:
-        if header not in new:
-            new = new.replace('    autoindex off;', '    autoindex off;\n    add_header ' + header + ' "' + value + '" always;')
-    logs = private / 'control'
-    logs.mkdir(mode=0o700, exist_ok=True)
-    launch = {'Label': label, 'ProgramArguments': [sys.executable, str(runtime / 'navigation-server.py')],
-              'RunAtLoad': True, 'KeepAlive': True, 'ThrottleInterval': 5, 'ExitTimeOut': 100,
-              'Umask': 0o077, 'StandardOutPath': str(logs / 'stdout.log'), 'StandardErrorPath': str(logs / 'stderr.log')}
-    if loaded:
-        run(['/bin/launchctl', 'bootout', service])
-        # launchd acknowledges bootout before it has drained/removed the job.
-        deadline = time.monotonic() + 100
-        def draining():
-            if run(['/bin/launchctl', 'print', service], check=False).returncode == 0:
-                return True
-            if old_pid is not None:
-                try:
-                    os.kill(old_pid, 0)  # Read-only existence check; never kill an owner.
-                    return True
-                except ProcessLookupError:
-                    pass
+
+
+def persist_config(config_path, config):
+    payload = {key: copy.deepcopy(config[key]) for key in PERSISTED_FIELDS if key in config}
+    atomic_private(config_path, payload)
+    return Path(config_path)
+
+
+def page_matches_host(config, page):
+    page = Path(page)
+    if not page.is_file() or page.is_symlink():
+        return False
+    try:
+        html = page.read_text(encoding="utf-8")
+        match = re.search(
+            r'<script id="navigation-data" type="application/json">([\s\S]*?)</script>',
+            html,
+        )
+        if not match:
             return False
-        while draining():
-            if time.monotonic() > deadline:
-                raise SystemExit('The old navigation gateway is still draining. No Agent was restarted.')
-            time.sleep(.2)
-    write_private(plist, plistlib.dumps(launch).decode())
-    run(['/bin/launchctl', 'bootstrap', f'gui/{os.getuid()}', plist])
-    deadline = time.monotonic() + 12
-    while True:
-        try:
-            connection = http.client.HTTPConnection('127.0.0.1', 17790, timeout=1)
-            connection.request('GET', '/api/navigation/bootstrap', headers={'X-Navigation-Client': '1'})
-            response = connection.getresponse()
-            ready = response.status == 200 and bool(json.loads(response.read()).get('token'))
-            connection.close()
-            if ready:
-                break
-        except (OSError, ValueError, http.client.HTTPException):
-            pass
-        if time.monotonic() > deadline:
-            raise SystemExit('The navigation backend has not become ready. Check navigation/control/stderr.log.')
-        time.sleep(.2)
-    if new != old:
-        write_private(args.nginx_conf, new)
-        try:
-            run([nginx, '-t'])
-        except subprocess.CalledProcessError:
-            write_private(args.nginx_conf, old)
-            raise
-        run([nginx, '-s', 'reload'])
-    print(json.dumps({'installed': True, 'runtime': str(runtime), 'backup': str(backup),
-                      'url': 'http://127.0.0.1:3001/', 'agent_restarted': False}, ensure_ascii=False))
+        data = json.loads(match.group(1))
+        return (isinstance(data.get("host"), dict) and
+                data["host"].get("platform") == config["platform"])
+    except (OSError, UnicodeError, ValueError, AttributeError):
+        return False
 
 
-if __name__ == '__main__':
+def fallback_local_page(here, config, page):
+    """Create a usable local-only page when one-shot discovery is unavailable."""
+    template = here.parent / "service-navigation.html"
+    spec = importlib.util.spec_from_file_location(
+        "update_service_navigation", here / "update-service-navigation.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Unable to load the navigation page generator")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    host = module.navigation_host(config)
+    data = {
+        "updatedAt": __import__("datetime").datetime.now().astimezone().isoformat(
+            timespec="seconds"),
+        "host": host,
+        "services": [module.local_admin_service(config, host)],
+    }
+    rendered = module.render_data(template.read_text(encoding="utf-8"), data)
+    atomic_private(page, rendered)
+
+
+def generate_page(here, config, config_path):
+    """Run the one-shot Python synchronizer and preserve a usable private page."""
+    page = Path(config["page"])
+    template = here.parent / "service-navigation.html"
+    is_template_copy = (
+        page.is_file() and template.is_file() and
+        page.read_bytes() == template.read_bytes()
+    )
+    prior = (page.read_bytes()
+             if page_matches_host(config, page) and not is_template_copy else None)
+    result = run([
+        sys.executable,
+        here / "update-service-navigation.py",
+        "--navigation-config", config_path,
+        "--output", page,
+    ], check=False)
+    if result.returncode == 0 and page_matches_host(config, page):
+        return "remote-or-authorized-catalog"
+    if prior is not None:
+        if not page_matches_host(config, page) or page.read_bytes() != prior:
+            atomic_private(page, prior)
+        return "preserved-existing"
+    fallback_local_page(here, config, page)
+    return "local-only-fallback"
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, help="source platform configuration")
+    parser.add_argument(
+        "--replace", action="store_true",
+        help="compatibility flag; replacement never starts or restarts the Agent")
+    parser.add_argument(
+        "--no-autostart", "--foreground", dest="no_autostart", action="store_true",
+        help="compatibility flag; this installer never registers or starts a host")
+    parser.add_argument("--installed", type=Path, help="installed Agent metadata override")
+    parser.add_argument("--page", type=Path, help="private navigation page inside data_dir/navigation")
+    parser.add_argument("--state-dir", type=Path, help="private state inside data_dir/navigation")
+    parser.add_argument("--ssh-host", help="independent remote SSH host override")
+    return parser.parse_args(argv)
+
+
+def prepare(args):
+    config = effective_config(load_config(args.config), args)
+    locations = validate_config(config)
+    config_path = persist_config(locations["config_path"], config)
+    here = Path(__file__).resolve().parent
+    page_source = generate_page(here, config, config_path)
+    return {
+        "integrated": True,
+        "prepared": True,
+        "requires_agent_restart": True,
+        "agent_started": False,
+        "agent_restarted": False,
+        "config": str(config_path),
+        "page": str(locations["page"]),
+        "page_source": page_source,
+        "port": INTEGRATED_PORT,
+        "compatibility": {
+            "replace": args.replace,
+            "no_autostart_or_foreground": args.no_autostart,
+        },
+    }
+
+
+def main(argv=None):
+    if sys.version_info < (3, 10):
+        raise SystemExit("Python 3.10 or newer is required")
+    args = parse_args(argv)
+    try:
+        result = prepare(args)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        raise SystemExit(str(error)) from error
+    print(json.dumps(result, ensure_ascii=False))
+
+
+if __name__ == "__main__":
     main()

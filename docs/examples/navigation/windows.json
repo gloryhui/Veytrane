@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "local_name": "Office Windows",
+  "installed": "C:\\Users\\example\\AppData\\Local\\p2p-file\\bin\\installed.json",
+  "page": "C:\\Users\\example\\AppData\\Local\\p2p-file\\navigation\\service-navigation.html",
+  "state_dir": "C:\\Users\\example\\AppData\\Local\\p2p-file\\navigation\\control",
+  "http": {
+    "port": 3001,
+    "public_port": 3001
+  },
+  "remote": null,
+  "peers": {
+    "11111111111111111111111111111111": {
+      "name": "Ubuntu server",
+      "platform": "linux"
+    }
+  },
+  "lifecycle": {
+    "kind": "scheduled-task",
+    "service": null,
+    "definition": null
+  },
+  "agent_web": "http://127.0.0.1:7789/"
+}

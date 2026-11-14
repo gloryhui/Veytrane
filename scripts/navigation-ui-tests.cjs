@@ -54,6 +54,90 @@ function peerTabs(){return [...ui('peer-filters').querySelectorAll('[role="tab"]
 function peerButton(peer){return peerTabs().find(button=>button.dataset.peer===peer)}
 function visibleServices(){return [...ui('services').querySelectorAll('.card')].map(card=>navigation.services.find(s=>s.id===card.dataset.ruleId))}
 function assertVisiblePeer(peer){const expected=navigation.services.filter(s=>!isNodeService(s)&&s.peerNodeId===peer);assert.deepEqual(visibleServices().map(s=>s.id).sort(),expected.map(s=>s.id).sort())}
+function hostFixture(host){
+ const alpha='node-alpha-42',beta='node-beta-77';
+ const ordinary=navigation.services.find(service=>service.remote&&!isNodeService(service));
+ const remoteAdmin=navigation.services.find(service=>service.serviceId==='ubuntu-admin');
+ const localBase=navigation.services.find(service=>service.serviceId==='mac-admin');
+ const services=[
+  {...ordinary,id:'alpha-smb',serviceId:'alpha-smb',title:'共享目录',name:'共享目录',description:'在 Finder 中按 ⌘K，将共享地址粘贴到「连接服务器」。',category:'文件',protocol:'smb',url:'smb://127.0.0.1:2445',listen:'127.0.0.1:2445',target:'127.0.0.1:445',remoteLabel:'远端 Baseline Alpha',peerNodeId:alpha,remote:true},
+  {...ordinary,id:'alpha-unknown',serviceId:'alpha-unknown',title:'自定义协议',name:'自定义协议',description:'未知协议只复制地址。',category:'其他',protocol:'custom',url:'custom://127.0.0.1:2450',listen:'127.0.0.1:2450',target:'127.0.0.1:450',remoteLabel:'远端 Baseline Alpha',peerNodeId:alpha,remote:true},
+  {...ordinary,id:'beta-rdp',serviceId:'beta-rdp',title:'远程桌面',name:'远程桌面',description:'在 Mac 的 Windows App 中添加电脑。',category:'应用',protocol:'rdp',url:'127.0.0.1:3389',listen:'127.0.0.1:3389',target:'127.0.0.1:3389',remoteLabel:'远端 Baseline Beta',peerNodeId:beta,remote:true},
+  {...remoteAdmin,id:'remote-admin',serviceId:'remote-admin',title:'Baseline Alpha · 节点管理',name:'Baseline Alpha 管理',remoteLabel:'远端 Baseline Alpha',peerNodeId:alpha,remote:true},
+  {...localBase,id:host.localAdminId,serviceId:host.localAdminId,title:'本机 Mac · 节点管理',name:'Mac Veytrane 管理',description:'配置这台 Mac 的监听端口。',remote:false}
+ ];
+ delete services[4].category;
+ return {
+  alpha,beta,
+  navigation:{...navigation,host,updatedAt:navigation.updatedAt,services},
+  nodes:[
+   {id:alpha,label:'Office Linux',phase:'connected',rttMs:8,mappings:2},
+   {id:beta,label:'Media Build',phase:'connected',rttMs:12,mappings:1}
+  ]
+ };
+}
+async function hostScenario({name,host,hostSource,bootstrapHost=null,assertEditable=true}){
+ const fixture=hostFixture(host),scenarioErrors=[],sink=new VirtualConsole();
+ let requests=0;
+ sink.on('jsdomError',error=>{if(error.type==='unhandled-exception'||/Uncaught/.test(error.message))scenarioErrors.push(error)});
+ const stateResult={navigation:hostSource==='navigation'?{...fixture.navigation,host}:fixture.navigation,revision:41,checkedAt:new Date(Date.UTC(2026,10,14,2,0,0)).toISOString(),agent:{available:true,running:true,activeStreams:2,diagnostics:[],signal:'online'},rules:fixture.navigation.services.filter(service=>service.remote).map(service=>({id:service.id,listening:true,peer_ready:true})),nodes:fixture.nodes,remoteConfigAvailable:true,errors:[],history:[]};
+ if(hostSource==='host')stateResult.host=host;
+ if(hostSource==='baseline')stateResult.baseline={host,navigation:fixture.navigation};
+ const dom=new JSDOM(html,{url:'http://127.0.0.1:3001/',runScripts:'dangerously',pretendToBeVisual:true,virtualConsole:sink,beforeParse(window){
+  window.matchMedia=query=>({matches:false,media:query,addEventListener(){},removeEventListener(){}});
+  window.HTMLElement.prototype.scrollIntoView=function(){};
+  window.fetch=async(url,options={})=>{
+   requests++;
+   if(url==='/api/navigation/bootstrap')return {ok:true,status:200,json:async()=>({token:'host-scenario-token',host:bootstrapHost||host})};
+   if(url==='/api/navigation/catalog')return {ok:true,status:200,json:async()=>({result:{editableTarget:JSON.parse(options.body).peer===fixture.alpha,services:[{id:'catalog-service',name:'Catalog service',target:'127.0.0.1:8080'}]}})};
+   assert.equal(url,'/api/navigation/state','host scenarios must never mutate navigation');
+   return {ok:true,status:200,json:async()=>({result:stateResult})};
+  };
+ }});
+ try{
+  await flush();
+  const d=dom.window.document,get=id=>d.getElementById(id),tabs=()=>[...get('peer-filters').querySelectorAll('[role="tab"]')];
+  assert.equal(scenarioErrors.length,0,scenarioErrors.map(error=>error.message).join('\n'));
+  assert.match(get('page-intro').textContent,new RegExp(host.name));
+  assert.match(get('footer-route').textContent,new RegExp(host.name));
+  assert.match(get('mapping-local-name').textContent,new RegExp(host.name));
+  assert.equal(get('mapping-port').getAttribute('aria-label'),host.name+' 本机监听端口');
+  assert.match(get('manage-nodes').querySelector('.node-signal strong').textContent,new RegExp(host.name));
+  assert.match(get('manage-connection').title,new RegExp(host.name));
+  assert.equal(get('manage-monitor').checked,false);
+  assert.deepEqual(tabs().map(tab=>tab.querySelector('span:not(.peer-tab-icon):not(.group-count)').textContent),['Office Linux → '+host.name,'Media Build → '+host.name]);
+  assert.match(d.querySelector('[data-service-id="alpha-smb"] .service-description').textContent,/系统文件客户端/);
+  assert.doesNotMatch(d.querySelector('[data-service-id="alpha-smb"]').textContent,/Finder|⌘K/);
+  const unknownCard=d.querySelector('[data-service-id="alpha-unknown"]');
+  assert.equal(unknownCard.querySelector('.actions .primary').textContent,'复制地址');
+  const localCard=d.querySelector('#node-services .node-local');
+  assert.ok(localCard);assert.match(localCard.querySelector('h3').textContent,new RegExp(host.name));
+  assert.equal(localCard.querySelector('.actions .primary').href,host.adminUrl);
+  localCard.querySelector('.service-extra').open=true;
+  assert.doesNotMatch(localCard.textContent,/pbcopy|Finder|⌘K|⌘V|Mac RustDesk|Mac 的 Windows App/);
+  if(host.tokenCommand){assert.equal(localCard.querySelector('.token-help pre code').textContent,host.tokenCommand);assert.match(localCard.textContent,/Ctrl\+V/)}
+  else assert.match(localCard.textContent,/请从对应的本机节点管理界面获取/);
+  const visibleText=['navigation-management','node-services','connection-workspace'].map(id=>get(id).textContent).join('\n');
+  assert.doesNotMatch(visibleText,/\bMac\b|pbcopy|Finder|⌘K|⌘V|Mac RustDesk|Mac 的 Windows App/);
+  tabs()[0].click();get('manage-add').click();await flush();
+  assert.match(get('editor-title').textContent,new RegExp('Office Linux.*'+host.name));
+  assert.equal(get('mapping-route-destination-label').textContent,host.name);
+  assert.equal(get('mapping-mode-new').disabled,!assertEditable);
+  if(assertEditable)assert.equal(get('mapping-target-wrap').hidden,false);
+  get('editor-close').click();
+  tabs()[1].click();get('manage-add').click();await flush();
+  assert.doesNotMatch(d.querySelector('[data-service-id="beta-rdp"] .service-description').textContent,/Mac|Windows App/);
+  assert.equal(get('mapping-mode-new').disabled,true);
+  assert.equal(get('mapping-target-wrap').hidden,true);
+  get('editor-close').click();
+  get('management-tools').open=true;get('manage-restart').click();
+  assert.match(get('manage-confirm-title').textContent,new RegExp(host.name));
+  assert.match(get('manage-confirm-text').textContent,new RegExp(host.name));
+  get('manage-confirm-cancel').click();
+  assert.ok(requests>=4);
+  passed.push(name);console.log('PASS '+name);
+ }finally{dom.window.close()}
+}
 (async()=>{
  try{
   await flush();
@@ -381,6 +465,43 @@ function assertVisiblePeer(peer){const expected=navigation.services.filter(s=>!i
   await check('page departure clears polling and checkbox',()=>{enable();window.dispatchEvent(new window.Event('pagehide'));assertStopped()});
   await check('hidden guard prevents requests even without a lifecycle event',async()=>{const tick=enable(),before=stateReads;hidden=true;tick();await flush();assertStopped();assert.equal(stateReads,before);hidden=false});
   await check('focus guard prevents requests even without a blur event',async()=>{const tick=enable(),before=stateReads;focused=false;tick();await flush();assertStopped();assert.equal(stateReads,before);focused=true});
+  await hostScenario({
+   name:'Windows host from bootstrap/state replaces every local Mac label without native-client copy',
+   host:{platform:'windows',name:'Studio Windows',localAdminId:'local-admin',adminUrl:'http://127.0.0.1:7789/',tokenCommand:"Get-Content '.\\admin.token'"},
+   bootstrapHost:{platform:'linux',name:'Bootstrap Linux',localAdminId:'bootstrap-admin'},
+   hostSource:'host'
+  });
+  await hostScenario({
+   name:'Linux host from navigation drives local names, peer grouping and editableTarget restrictions',
+   host:{platform:'linux',name:'Linux Desk',localAdminId:'local-admin',adminUrl:'http://127.0.0.1:7789/'},
+   hostSource:'navigation'
+  });
+  await hostScenario({
+   name:'custom host from baseline keeps labels and admin identity fully data-driven',
+   host:{platform:'linux',name:'Build Room',localAdminId:'operator-admin',adminUrl:'http://127.0.0.1:7790/'},
+   hostSource:'baseline'
+  });
+  await check('file offline mode reads local identity from navigation-data.host',async()=>{
+   const offlineHtml=html.replace('"platform": "macos"','"platform": "linux"').replace('"name": "Mac"','"name": "Offline Linux"');
+   const offlineErrors=[],sink=new VirtualConsole();
+   sink.on('jsdomError',error=>{if(error.type==='unhandled-exception'||/Uncaught/.test(error.message))offlineErrors.push(error)});
+   let networkRequests=0;
+   const isolated=new JSDOM(offlineHtml,{url:'file:///Volumes/1TB/Downloads/git/Veytrane/service-navigation.html',runScripts:'dangerously',pretendToBeVisual:true,virtualConsole:sink,beforeParse(w){
+    w.matchMedia=query=>({matches:false,media:query,addEventListener(){},removeEventListener(){}});
+    w.HTMLElement.prototype.scrollIntoView=function(){};
+    w.fetch=async()=>{networkRequests++;throw new Error('offline mode must not fetch')};
+   }});
+   try{
+    await flush();const d=isolated.window.document;
+    assert.equal(offlineErrors.length,0,offlineErrors.map(error=>error.message).join('\n'));
+    assert.match(d.getElementById('page-intro').textContent,/Offline Linux/);
+    assert.match(d.getElementById('footer-route').textContent,/Offline Linux/);
+    assert.match(d.getElementById('mapping-local-name').textContent,/Offline Linux/);
+    assert.match(d.getElementById('manage-restart').textContent,/Offline Linux/);
+    assert.match(d.getElementById('manage-nodes').textContent,/仅导航模式/);
+    assert.equal(networkRequests,0);
+   }finally{isolated.window.close()}
+  });
   for(const failedRoute of ['bootstrap','state']){
    await check('initial '+failedRoute+' failure shows an honest recoverable connection state',async()=>{
     let failing=true,requests=0;
