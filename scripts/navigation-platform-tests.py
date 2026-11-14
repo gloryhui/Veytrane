@@ -85,6 +85,27 @@ class PlatformTests(unittest.TestCase):
         config = self.config("windows")
         self.assertTrue(adapter.executable(config, {"bin_dir": "/custom/bin"}, "p2p-node").endswith("p2p-node.exe"))
 
+    @unittest.skipUnless(os.name == "nt", "requires Windows file ACLs")
+    def test_private_file_acl_allows_only_the_current_windows_sid(self):
+        path = self.root / "private.json"
+        path.write_text("{}", encoding="utf-8")
+        sid = adapter.current_sid()
+        adapter.secure_private_file(path)
+        result = json.loads(adapter.powershell(
+            '$a=Get-Acl -LiteralPath $s.path;'
+            '@{owner=$a.GetOwner([System.Security.Principal.SecurityIdentifier]).Value;'
+            'protected=$a.AreAccessRulesProtected;'
+            'rules=@($a.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier])|'
+            'ForEach-Object {@{sid=$_.IdentityReference.Value;'
+            'rights=[string]$_.FileSystemRights;type=[string]$_.AccessControlType;'
+            'inherited=$_.IsInherited}})}|ConvertTo-Json -Depth 5 -Compress',
+            {"path": str(path)}))
+        self.assertEqual(result["owner"], sid)
+        self.assertTrue(result["protected"])
+        self.assertEqual(result["rules"], [{
+            "sid": sid, "rights": "FullControl", "type": "Allow", "inherited": False,
+        }])
+
     def test_launchd_verifies_definition_and_no_force_start(self):
         config = self.config("macos")
         installed = {"bin_dir": "/test/bin", "data_dir": "/test/node"}

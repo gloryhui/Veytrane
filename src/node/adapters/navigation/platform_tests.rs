@@ -89,11 +89,11 @@ fn relative_legacy_paths_resolve_from_the_config_directory() {
     let config = load_config(&path).unwrap();
     assert_eq!(
         config["installed"],
-        json!(path_text(&navigation.join("agent/installed.json")).unwrap())
+        json!(path_text(&navigation.join("agent").join("installed.json")).unwrap())
     );
     assert_eq!(
         config["page"],
-        json!(path_text(&navigation.join("public/service-navigation.html")).unwrap())
+        json!(path_text(&navigation.join("public").join("service-navigation.html")).unwrap())
     );
     assert_eq!(config["http"]["port"], 18880);
     assert_eq!(config["http"]["public_port"], 3001);

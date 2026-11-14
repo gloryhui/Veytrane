@@ -217,8 +217,10 @@ def powershell(script, values=None):
     command = shutil.which("powershell.exe") or shutil.which("pwsh")
     if not command:
         raise PlatformError("Windows 管理需要 PowerShell 和 ScheduledTasks 模块。")
-    env = os.environ.copy()
-    env.pop("PSModulePath", None)
+    # os.environ normalizes Windows keys to uppercase; the child must rebuild
+    # its own module path instead of loading inherited PowerShell 7 modules.
+    env = {key: value for key, value in os.environ.items()
+           if key.casefold() != "psmodulepath"}
     env["VEYTRANE_NAV_VALUES"] = json.dumps(values or {}, ensure_ascii=True)
     result = process([command, "-NoProfile", "-NonInteractive", "-Command",
                       "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);"
@@ -243,8 +245,9 @@ def secure_private_file(path):
     if os.name == "nt":
         powershell('$a=[System.Security.AccessControl.FileSecurity]::new();'
                    '$a.SetAccessRuleProtection($true,$false);'
-                   '$a.SetOwner([System.Security.Principal.SecurityIdentifier]::new($s.sid));'
-                   '$r=[System.Security.AccessControl.FileSystemAccessRule]::new($s.sid,"FullControl","Allow");'
+                   '$sid=[System.Security.Principal.SecurityIdentifier]::new($s.sid);'
+                   '$a.SetOwner($sid);'
+                   '$r=[System.Security.AccessControl.FileSystemAccessRule]::new($sid,"FullControl","Allow");'
                    '$a.AddAccessRule($r);Set-Acl -LiteralPath $s.path -AclObject $a',
                    {"path": str(path), "sid": current_sid()})
     else:
