@@ -848,6 +848,7 @@ impl SessionCommand {
 
 enum SessionInput {
     DirectIdentified {
+        route: NetworkRoute,
         peer: NodeId,
         prepared: PreparedTransport,
         permit: tokio::sync::OwnedSemaphorePermit,
@@ -857,7 +858,12 @@ enum SessionInput {
         generation: u64,
         transport: usize,
     },
-    Incoming(AddressFamily, Box<quinn::Incoming>),
+    Incoming(NetworkRoute, AddressFamily, Box<quinn::Incoming>),
+    RotationPrepared {
+        peer: NodeId,
+        request: u64,
+        result: std::result::Result<DesktopNetwork, Error>,
+    },
     SignalConnected {
         generation: u64,
         result: Result<SignalingClient>,
@@ -873,6 +879,7 @@ enum SessionInput {
         state: PeerLifecycle,
     },
     PeerConnected {
+        route: Option<NetworkRoute>,
         peer: NodeId,
         generation: u64,
         capabilities: u64,
@@ -893,15 +900,72 @@ enum SessionInput {
     },
 }
 
+fn recovery_preparation_invalidated(command: &SessionCommand, peer: NodeId) -> bool {
+    match command {
+        SessionCommand::DisconnectPeer { peer: changed, .. }
+        | SessionCommand::ConnectAuthenticated { peer: changed, .. }
+        | SessionCommand::ConnectAddress { peer: changed, .. }
+        | SessionCommand::ConnectTrusted(changed) => *changed == peer,
+        SessionCommand::ChangeTrustedDevice {
+            change: TrustedDeviceChange::Revoke { peer: changed },
+            ..
+        } => *changed == peer,
+        SessionCommand::ResourcePolicy { policy, .. } => policy.for_peer(peer).disabled,
+        SessionCommand::CommitAgentPolicy { .. }
+        | SessionCommand::UpdateRemoteAuth { .. }
+        | SessionCommand::RefreshNetwork(_)
+        | SessionCommand::ReconfigureNetwork { .. } => true,
+        _ => false,
+    }
+}
+
+type NetworkRoute = u64;
+
+struct RecoveryNetwork {
+    route: NetworkRoute,
+    network: DesktopNetwork,
+    accept_tasks: JoinSet<()>,
+    keepalives: Vec<tokio::task::AbortHandle>,
+}
+
+impl RecoveryNetwork {
+    async fn shutdown(mut self) {
+        for task in self.keepalives.drain(..) {
+            task.abort();
+        }
+        self.accept_tasks.abort_all();
+        while self.accept_tasks.join_next().await.is_some() {}
+        self.network.close();
+        let _ = time::timeout(Duration::from_secs(3), self.network.wait_idle()).await;
+    }
+}
+
 // A lookup alone must preserve a live connection. A matching fresh probe is
 // evidence that the peer is actually establishing a new transport. These watches
 // use Quinn's existing dispatcher, never a second UDP receive owner.
 struct ReconnectProbe {
     generation: u64,
+    network: NetworkRoute,
     candidates: Vec<Candidate>,
     token: PunchToken,
     receivers: Vec<crate::transport::quic::PunchProbeReceiver>,
     deadline: Pin<Box<Sleep>>,
+}
+
+fn network_for_route<'a>(
+    route: NetworkRoute,
+    current: NetworkRoute,
+    network: &'a DesktopNetwork,
+    recovery: &'a HashMap<NodeId, RecoveryNetwork>,
+) -> Option<&'a DesktopNetwork> {
+    if route == current {
+        Some(network)
+    } else {
+        recovery
+            .values()
+            .find(|recovery| recovery.route == route)
+            .map(|recovery| &recovery.network)
+    }
 }
 fn poll_reconnect_probes(
     probes: &mut HashMap<NodeId, VecDeque<ReconnectProbe>>,
@@ -1164,6 +1228,12 @@ async fn run_session(
     let local_node = identity.node_id();
     let (mut input_tx, mut inputs) = mpsc::channel(SESSION_INPUT_CAPACITY);
     let mut session_tasks = JoinSet::new();
+    let mut primary_accept_tasks = JoinSet::new();
+    let mut current_network_id = 1u64;
+    let mut next_network_id = 2u64;
+    let mut recovery_networks: HashMap<NodeId, RecoveryNetwork> = HashMap::new();
+    let mut rotation_preparing: Option<(NodeId, u64)> = None;
+    let mut rotation_request = 0u64;
     let _ = events
         .send(SessionEvent::NetworkPaths(network.diagnostics.join("; ")))
         .await;
@@ -1178,11 +1248,11 @@ async fn run_session(
         let endpoint = path.endpoint.clone();
         let family = path.family;
         let accept_inputs = input_tx.clone();
-        session_tasks.spawn(async move {
-            accept_incoming_loop(endpoint, family, accept_inputs).await;
+        primary_accept_tasks.spawn(async move {
+            accept_incoming_loop(current_network_id, endpoint, family, accept_inputs).await;
         });
     }
-    let mut mapping_keepalives = start_mapping_keepalives(&network, &mut session_tasks);
+    let mut mapping_keepalives = start_mapping_keepalives(&network, &mut primary_accept_tasks);
 
     let semaphore = Arc::new(Semaphore::new(MAX_PENDING_PEERS));
     let mut peer_tasks = JoinSet::new();
@@ -1222,7 +1292,11 @@ async fn run_session(
     let mut forced_tunnel_errors: HashMap<String, String> = HashMap::new();
     // Candidate sets are bound to the same peer generation as authenticated connections.
     let mut peer_candidates: HashMap<NodeId, (u64, Vec<Candidate>)> = HashMap::new();
-    let mut pending_inbound: HashMap<(NodeId, u64), mpsc::Sender<quinn::Incoming>> = HashMap::new();
+    let mut fresh_lookup_peers = HashSet::new();
+    let mut attempt_routes: HashMap<(NodeId, u64), NetworkRoute> = HashMap::new();
+    let mut connection_routes: HashMap<NodeId, NetworkRoute> = HashMap::new();
+    let mut pending_inbound: HashMap<(NodeId, u64), mpsc::Sender<(NetworkRoute, quinn::Incoming)>> =
+        HashMap::new();
     let mut queued_lookups: VecDeque<(NodeId, u64)> = VecDeque::new();
     let mut signal: Option<SignalingClient> = None;
     let mut active_relay_server = config.network.relay_server.clone();
@@ -1279,6 +1353,7 @@ async fn run_session(
             Signal(Result<SignalMessage>),
             Input(Option<SessionInput>),
             Retry,
+            Rotate(NodeId),
             ReconnectProbe(NodeId, usize, bool),
             Maintenance,
             Discovery(std::result::Result<mdns_sd::ServiceEvent, String>),
@@ -1376,13 +1451,16 @@ async fn run_session(
             let healthy = connections
                 .values()
                 .any(|(_, c)| c.close_reason().is_none());
-            let reason = if signal_server.trim().is_empty() && !config.direct.enabled {
+            let action = if signal_server.trim().is_empty() && !config.direct.enabled {
                 None
             } else {
                 events.recovery.lock().unwrap().poll(healthy)
             };
-            reason.map_or(wake, |reason| {
-                Wake::Command(Some(SessionCommand::RefreshNetwork(reason)))
+            action.map_or(wake, |action| match action {
+                recovery::RecoveryAction::Refresh(reason) => {
+                    Wake::Command(Some(SessionCommand::RefreshNetwork(reason)))
+                }
+                recovery::RecoveryAction::Rotate(peer) => Wake::Rotate(peer),
             })
         } else {
             wake
@@ -1399,6 +1477,11 @@ async fn run_session(
             })),
             wake => wake,
         };
+        if let (Some((peer, _)), Wake::Command(Some(command))) = (rotation_preparing, &wake) {
+            if recovery_preparation_invalidated(command, peer) {
+                rotation_preparing = None;
+            }
+        }
         if let Wake::Command(Some(command)) = &wake
             && let Some(peer) = command.business_peer()
             && !peer_capabilities.get(&peer).is_some_and(|caps| {
@@ -1578,6 +1661,7 @@ async fn run_session(
                 let revoke = connections
                     .keys()
                     .chain(peer_attempts.keys())
+                    .chain(recovery_networks.keys())
                     .copied()
                     .filter(|peer| {
                         let old = previous.for_peer(*peer);
@@ -1605,6 +1689,8 @@ async fn run_session(
                     credential_retries.remove(&peer);
                     deferred_candidates.remove(&peer);
                     peer_candidates.remove(&peer);
+                    fresh_lookup_peers.remove(&peer);
+                    attempt_routes.retain(|(id, _), _| *id != peer);
                     reconnect_probes.remove(&peer);
                     pending_inbound.retain(|(id, _), _| *id != peer);
                     queued_lookups.retain(|(id, _)| *id != peer);
@@ -1617,6 +1703,14 @@ async fn run_session(
                     if let Some((_, connection)) = connections.get(&peer) {
                         connection.close(3u32.into(), b"node policy revoked");
                     }
+                    fresh_lookup_peers.remove(&peer);
+                    if let Some(generation) = peers.generation(peer) {
+                        if peers.transition(peer, generation, PeerLifecycle::Disconnected) {
+                            emit_peer_state(&events, peer, generation, PeerLifecycle::Disconnected)
+                                .await;
+                        }
+                    }
+
                     if let Some(sender) = peer_connection_updates.get(&peer) {
                         sender.send_replace(None);
                     }
@@ -1688,6 +1782,7 @@ async fn run_session(
                 }
                 manually_disconnected.insert(peer);
                 credentials.remove(&peer);
+                fresh_lookup_peers.remove(&peer);
                 credential_retries.remove(&peer);
                 deferred_candidates.remove(&peer);
                 peer_candidates.remove(&peer);
@@ -1697,10 +1792,12 @@ async fn run_session(
                 if let Some((_, attempt)) = peer_attempts.remove(&peer) {
                     attempt.abort();
                 }
+                attempt_routes.retain(|(id, _), _| *id != peer);
                 if let Some((_, _, rights)) = authorizations.remove(&peer) {
                     rights.send_replace(RemoteAuthorization::default());
                 }
                 if let Some((_, connection)) = connections.remove(&peer) {
+                    connection_routes.remove(&peer);
                     connection.close(3u32.into(), b"explicit peer disconnect");
                 }
                 peer_capabilities.remove(&peer);
@@ -1735,21 +1832,32 @@ async fn run_session(
                 let disabled = connections
                     .keys()
                     .chain(peer_attempts.keys())
+                    .chain(recovery_networks.keys())
                     .copied()
                     .filter(|peer| resource_policy.borrow().for_peer(*peer).disabled)
                     .collect::<HashSet<_>>();
                 for peer in disabled {
+                    fresh_lookup_peers.remove(&peer);
                     credentials.remove(&peer);
                     credential_retries.remove(&peer);
                     if let Some((_, attempt)) = peer_attempts.remove(&peer) {
                         attempt.abort();
                     }
+                    attempt_routes.retain(|(id, _), _| *id != peer);
                     if let Some((_, _, rights)) = authorizations.get(&peer) {
                         rights.send_replace(RemoteAuthorization::default());
                     }
                     if let Some((_, connection)) = connections.get(&peer) {
                         connection.close(3u32.into(), b"peer disabled");
                     }
+                    fresh_lookup_peers.remove(&peer);
+                    if let Some(generation) = peers.generation(peer) {
+                        if peers.transition(peer, generation, PeerLifecycle::Disconnected) {
+                            emit_peer_state(&events, peer, generation, PeerLifecycle::Disconnected)
+                                .await;
+                        }
+                    }
+
                     if let Some(service) = &config.transfer {
                         service.cancel_peer_recovery(peer);
                     }
@@ -1845,12 +1953,26 @@ async fn run_session(
                         if let Some((_, attempt)) = peer_attempts.remove(&peer) {
                             attempt.abort();
                         }
+                        attempt_routes.retain(|(id, _), _| *id != peer);
                         if let Some((_, _, rights)) = authorizations.get(&peer) {
                             rights.send_replace(RemoteAuthorization::default());
                         }
                         if let Some((_, connection)) = connections.get(&peer) {
                             connection.close(3u32.into(), b"device trust revoked");
                         }
+                        fresh_lookup_peers.remove(&peer);
+                        if let Some(generation) = peers.generation(peer) {
+                            if peers.transition(peer, generation, PeerLifecycle::Disconnected) {
+                                emit_peer_state(
+                                    &events,
+                                    peer,
+                                    generation,
+                                    PeerLifecycle::Disconnected,
+                                )
+                                .await;
+                            }
+                        }
+
                         if let Some(service) = &config.transfer {
                             service.cancel_peer_recovery(peer);
                         }
@@ -2375,10 +2497,12 @@ async fn run_session(
                     if let Some((_, attempt)) = peer_attempts.remove(&peer) {
                         attempt.abort();
                     }
+                    attempt_routes.retain(|(id, _), _| *id != peer);
                     reconnect_probes.remove(&peer);
                     // Explicit credentials upgrade rights on a fresh transport; never copy
                     // the previous generation's authorization into a new exchange.
                     if let Some((generation, connection)) = connections.remove(&peer) {
+                        connection_routes.remove(&peer);
                         if let Some((_, _, rights)) = authorizations.remove(&peer) {
                             rights.send_replace(RemoteAuthorization::default());
                         }
@@ -2468,14 +2592,15 @@ async fn run_session(
                         emit_peer_state(&events, peer, generation, PeerLifecycle::PeerPending)
                             .await;
                         emit_lifecycle(&events, NetworkLifecycle::PeerPending { peer }).await;
-                        let addresses = if config.direct.enabled {
-                            direct_routes
-                                .get(&peer.to_hex())
-                                .cloned()
-                                .unwrap_or_else(|| nearby.addresses(peer))
-                        } else {
-                            Vec::new()
-                        };
+                        let addresses =
+                            if config.direct.enabled && !fresh_lookup_peers.contains(&peer) {
+                                direct_routes
+                                    .get(&peer.to_hex())
+                                    .cloned()
+                                    .unwrap_or_else(|| nearby.addresses(peer))
+                            } else {
+                                Vec::new()
+                            };
                         if !addresses.is_empty() {
                             match direct_slots.clone().try_acquire_owned() {
                                 Ok(permit) => {
@@ -2504,6 +2629,7 @@ async fn run_session(
                                     );
                                     let abort = peer_tasks.spawn(task);
                                     peer_attempts.insert(peer, (PunchToken::random(), abort));
+                                    attempt_routes.insert((peer, generation), current_network_id);
                                     direct_dialing.insert(peer);
                                 }
                                 Err(_) => {
@@ -2584,8 +2710,184 @@ async fn run_session(
                     }
                 }
             }
+            Wake::Rotate(peer) => {
+                if rotation_preparing.is_some() {
+                    let _ = events
+                        .send(SessionEvent::Diagnostic(
+                            "已有候选轮换正在进行，本设备继续使用现有退避".into(),
+                        ))
+                        .await;
+                    continue;
+                }
+                if manually_disconnected.contains(&peer)
+                    || resource_policy.borrow().for_peer(peer).disabled
+                    || peers.state(peer).is_some_and(PeerLifecycle::is_connected)
+                    || signal_server.trim().is_empty()
+                {
+                    continue;
+                }
+                let mut preparation = config.network.clone();
+                preparation.relay_server = active_relay_server.clone();
+                if preparation.local_port != 0 {
+                    if preparation.advertise_only || !preparation.advertise.is_empty() {
+                        let _ = events
+                            .send(SessionEvent::Diagnostic(format!(
+                                "设备 {} 需要刷新候选，但固定本地端口与手工广告地址无法安全并行轮换",
+                                peer.short()
+                            )))
+                            .await;
+                        continue;
+                    }
+                    // The active primary socket still owns the fixed port. A dynamic
+                    // alternate socket avoids dual-binding while still producing fresh
+                    // STUN and Host candidates.
+                    preparation.local_port = 0;
+                }
+                rotation_request = rotation_request.wrapping_add(1);
+                let request = rotation_request;
+                rotation_preparing = Some((peer, request));
+                let rotation_inputs = input_tx.clone();
+                session_tasks.spawn(async move {
+                    let result = prepare_desktop_network(&preparation).await;
+                    let _ = rotation_inputs
+                        .send(SessionInput::RotationPrepared {
+                            peer,
+                            request,
+                            result,
+                        })
+                        .await;
+                });
+                let _ = events
+                    .send(SessionEvent::Diagnostic(format!(
+                        "设备 {} 连续路径失败；正在新增候选端点并仅重新匹配该设备",
+                        peer.short()
+                    )))
+                    .await;
+                warn!(peer = %peer.short(), "peer transport recovery triggered; preparing a private recovery endpoint");
+            }
+            Wake::Input(Some(SessionInput::RotationPrepared {
+                peer,
+                request,
+                result,
+            })) => {
+                if rotation_preparing != Some((peer, request)) {
+                    if let Ok(network) = result {
+                        network.close();
+                    }
+                    continue;
+                }
+                rotation_preparing = None;
+                let prepared = match result {
+                    Ok(prepared) => prepared,
+                    Err(error) => {
+                        warn!(peer = %peer.short(), %error, "peer transport recovery network preparation failed");
+                        let _ = events
+                            .send(SessionEvent::Diagnostic(format!(
+                                "设备 {} 的增量候选准备失败，继续现有退避：{error}",
+                                peer.short()
+                            )))
+                            .await;
+                        continue;
+                    }
+                };
+                if manually_disconnected.contains(&peer)
+                    || resource_policy.borrow().for_peer(peer).disabled
+                    || peers.state(peer).is_some_and(PeerLifecycle::is_connected)
+                {
+                    prepared.close();
+                    debug!(peer = %peer.short(), "discarded prepared recovery network because identity, policy or peer state changed");
+                    continue;
+                }
+                if events.recovery.lock().unwrap().auth_failed(peer) {
+                    prepared.close();
+                    continue;
+                }
+                if !recovery_networks.contains_key(&peer) && recovery_networks.len() >= MAX_PEERS {
+                    prepared.close();
+                    warn!(peer = %peer.short(), "peer recovery deferred at network resource limit");
+                    continue;
+                }
+                // Cancel only this failed peer's producers before replacing its socket.
+                // The primary registration and every other peer retain their candidates,
+                // endpoints, authorization publishers and business streams.
+                if let Some((_, task)) = peer_attempts.remove(&peer) {
+                    task.abort();
+                }
+                pending_inbound.retain(|(id, _), _| *id != peer);
+                attempt_routes.retain(|(id, _), _| *id != peer);
+                deferred_candidates.remove(&peer);
+                reconnect_probes.remove(&peer);
+                peer_candidates.remove(&peer);
+                queued_lookups.retain(|(id, _)| *id != peer);
+                if let Some(generation) = peers.generation(peer) {
+                    if peers.transition(peer, generation, PeerLifecycle::Disconnected) {
+                        emit_peer_state(&events, peer, generation, PeerLifecycle::Disconnected)
+                            .await;
+                    }
+                }
+                if let Some(old) = recovery_networks.remove(&peer) {
+                    old.shutdown().await;
+                }
+                let route = next_network_id;
+                next_network_id = next_network_id.wrapping_add(1).max(2);
+                let mut accept_tasks = JoinSet::new();
+                for path in &prepared.paths {
+                    let endpoint = path.endpoint.clone();
+                    let family = path.family;
+                    let inputs = input_tx.clone();
+                    accept_tasks.spawn(async move {
+                        accept_incoming_loop(route, endpoint, family, inputs).await;
+                    });
+                }
+                let keepalives = start_mapping_keepalives(&prepared, &mut accept_tasks);
+                recovery_networks.insert(
+                    peer,
+                    RecoveryNetwork {
+                        route,
+                        network: prepared,
+                        accept_tasks,
+                        keepalives,
+                    },
+                );
+                let BeginPeerAttempt::Started(generation) = peers.begin_attempt(peer) else {
+                    if let Some(unused) = recovery_networks.remove(&peer) {
+                        unused.shutdown().await;
+                    }
+                    continue;
+                };
+                fresh_lookup_peers.insert(peer);
+                emit_peer_state(&events, peer, generation, PeerLifecycle::PeerPending).await;
+                if let Some(client) = signal.as_ref() {
+                    if client.request_lookup(peer).await.is_err() {
+                        queued_lookups.push_back((peer, generation));
+                        signal = None;
+                        schedule_reconnect(
+                            &events,
+                            &mut reconnect_attempt,
+                            &mut reconnect_sleep,
+                            "设备恢复的信令查询发送失败".into(),
+                        )
+                        .await;
+                    }
+                } else {
+                    queued_lookups.push_back((peer, generation));
+                }
+                warn!(peer = %peer.short(), route, "peer recovery prepared fresh socket; matching only this peer with primary candidates unchanged");
+                let _ = events
+                    .send(SessionEvent::Diagnostic(format!(
+                        "设备 {} 已准备独立恢复路径，正在重新匹配；其他设备连接保持",
+                        peer.short()
+                    )))
+                    .await;
+            }
             Wake::Command(Some(SessionCommand::RefreshNetwork(reason))) => {
                 let _ = events.send(SessionEvent::Diagnostic(reason.into())).await;
+                primary_accept_tasks.abort_all();
+                while primary_accept_tasks.join_next().await.is_some() {}
+                for (_, recovery) in recovery_networks.drain() {
+                    recovery.shutdown().await;
+                }
+                rotation_preparing = None;
                 // Retire every producer before replacing the input channel: callbacks from
                 // old sockets/handshakes must never authenticate into the refreshed network.
                 signal_generation = signal_generation.wrapping_add(1);
@@ -2642,6 +2944,9 @@ async fn run_session(
                 short_queries.clear();
                 credential_retries.clear();
                 peer_candidates.clear();
+                attempt_routes.clear();
+                connection_routes.clear();
+                fresh_lookup_peers.clear();
                 peer_capabilities.clear();
                 mapping_keepalives.clear();
                 // Keep credentials, trust, explicit routes, manual disconnects and the
@@ -2685,15 +2990,18 @@ async fn run_session(
                         continue;
                     }
                 }
+                current_network_id = next_network_id;
+                next_network_id = next_network_id.wrapping_add(1).max(1);
                 for path in &network.paths {
                     let endpoint = path.endpoint.clone();
                     let family = path.family;
                     let accept_inputs = input_tx.clone();
-                    session_tasks.spawn(async move {
-                        accept_incoming_loop(endpoint, family, accept_inputs).await;
+                    let route = current_network_id;
+                    primary_accept_tasks.spawn(async move {
+                        accept_incoming_loop(route, endpoint, family, accept_inputs).await;
                     });
                 }
-                mapping_keepalives = start_mapping_keepalives(&network, &mut session_tasks);
+                mapping_keepalives = start_mapping_keepalives(&network, &mut primary_accept_tasks);
                 if config.direct.enabled && config.direct.lan_discovery {
                     match crate::node::core::connectivity::Discovery::start(local_node, &network) {
                         Ok(d) => {
@@ -2775,13 +3083,14 @@ async fn run_session(
                                 task.abort();
                             }
                             mapping_keepalives =
-                                start_mapping_keepalives(&network, &mut session_tasks);
+                                start_mapping_keepalives(&network, &mut primary_accept_tasks);
                             for path in &network.paths {
                                 let endpoint = path.endpoint.clone();
                                 let family = path.family;
                                 let inputs = input_tx.clone();
-                                session_tasks.spawn(async move {
-                                    accept_incoming_loop(endpoint, family, inputs).await;
+                                let route = current_network_id;
+                                primary_accept_tasks.spawn(async move {
+                                    accept_incoming_loop(route, endpoint, family, inputs).await;
                                 });
                             }
                             let _ = events
@@ -2823,6 +3132,9 @@ async fn run_session(
                 let signal_changed = auth_updated.is_none();
                 if signal_changed {
                     signal_generation = signal_generation.wrapping_add(1);
+                    for (_, retired) in recovery_networks.drain() {
+                        retired.shutdown().await;
+                    }
                 }
                 // An explicit server change supersedes this generation's attempts
                 // and authenticated peers. An involuntary outage below preserves them.
@@ -2830,6 +3142,9 @@ async fn run_session(
                     connection.close(0u32.into(), b"desktop network reconfigured");
                 }
                 peer_attempts.clear();
+                attempt_routes.clear();
+                connection_routes.clear();
+                fresh_lookup_peers.clear();
                 direct_dialing.clear();
                 deferred_candidates.clear();
                 peer_tasks.abort_all();
@@ -3082,7 +3397,17 @@ async fn run_session(
                         continue;
                     }
                     let canonical = canonical_candidates(&candidates);
-                    if network.relay.is_some()
+                    let connected_network_id = connection_routes
+                        .get(&node_id)
+                        .copied()
+                        .unwrap_or(current_network_id);
+                    let connected_network = network_for_route(
+                        connected_network_id,
+                        current_network_id,
+                        &network,
+                        &recovery_networks,
+                    );
+                    if connected_network.is_some_and(|network| network.relay.is_some())
                         && peers
                             .state(node_id)
                             .is_some_and(PeerLifecycle::is_connected)
@@ -3096,19 +3421,26 @@ async fn run_session(
                     if peers
                         .state(node_id)
                         .is_some_and(PeerLifecycle::is_connected)
-                        && peer_candidates
-                            .get(&node_id)
-                            .is_some_and(|(generation, old)| {
-                                peers.is_current(node_id, *generation) && *old == canonical
-                            })
                     {
                         let _ = events
                             .send(SessionEvent::Diagnostic(
-                                "地址核对完毕，现有认证连接继续使用".into(),
+                                if peer_candidates
+                                    .get(&node_id)
+                                    .is_some_and(|(generation, old)| {
+                                        peers.is_current(node_id, *generation) && *old == canonical
+                                    })
+                                {
+                                    "地址核对完毕，现有认证连接继续使用"
+                                } else {
+                                    "收到对端地址；现有认证连接保留，新路径仅在探针确认后启用"
+                                }
+                                .into(),
                             ))
                             .await;
                         if candidates.len() <= MAX_CANDIDATES
-                            && !network.reachable_candidates(&candidates).is_empty()
+                            && connected_network.is_some_and(|network| {
+                                !network.reachable_candidates(&candidates).is_empty()
+                            })
                             && connections
                                 .get(&node_id)
                                 .is_some_and(|(_, c)| c.close_reason().is_none())
@@ -3118,7 +3450,8 @@ async fn run_session(
                             if watches.len() >= MAX_RECONNECT_PROBES_PER_PEER {
                                 watches.pop_front();
                             }
-                            let receivers = network
+                            let receivers = connected_network
+                                .expect("checked above")
                                 .paths
                                 .iter()
                                 .filter(|path| !path.reachable_candidates(&candidates).is_empty())
@@ -3131,6 +3464,7 @@ async fn run_session(
                             if !receivers.is_empty() {
                                 watches.push_back(ReconnectProbe {
                                     generation,
+                                    network: connected_network_id,
                                     candidates,
                                     token,
                                     receivers,
@@ -3145,19 +3479,13 @@ async fn run_session(
                     if peers
                         .state(node_id)
                         .is_some_and(PeerLifecycle::is_connected)
-                        && (connections
+                        && connections
                             .get(&node_id)
                             .is_some_and(|(_, connection)| connection.close_reason().is_some())
-                            || peer_candidates
-                                .get(&node_id)
-                                .is_some_and(|(generation, old)| {
-                                    peers.is_current(node_id, *generation) && *old != canonical
-                                }))
                         && !network.reachable_candidates(&candidates).is_empty()
                     {
-                        // Changed mapping or a closed transport whose callback is still queued.
-                        // Retire only this generation; new Punch/QUIC/identity/capability
-                        // checks remain mandatory. Old closure callbacks are fenced.
+                        // A changed mapping alone never retires a live winner. This branch
+                        // only clears a transport that Quinn has already closed.
                         if let Some((generation, connection)) = connections.remove(&node_id) {
                             if let Some(service) = config.transfer.clone() {
                                 service.network_lost(node_id);
@@ -3192,17 +3520,24 @@ async fn run_session(
                                 )
                                 .await;
                             }
+                            connection_routes.remove(&node_id);
                         }
                         peer_candidates.remove(&node_id);
                         reconnect_probes.remove(&node_id);
                     }
+                    let (attempt_route, attempt_network) = recovery_networks
+                        .get(&node_id)
+                        .map(|recovery| (recovery.route, &recovery.network))
+                        .unwrap_or((current_network_id, &network));
                     if let Some((generation, attempt)) = start_peer_attempt(
                         node_id,
                         candidates,
                         token,
                         local_node,
                         identity.clone(),
-                        &network,
+                        attempt_route,
+                        attempt_network,
+                        (attempt_route != current_network_id).then_some(&network),
                         &events,
                         &input_tx,
                         &semaphore,
@@ -3229,6 +3564,7 @@ async fn run_session(
                     {
                         peer_attempts.insert(node_id, (token, attempt));
                         peer_candidates.insert(node_id, (generation, canonical));
+                        attempt_routes.insert((node_id, generation), attempt_route);
                     }
                 }
                 SignalMessage::ShortResolved { short_id, node_id } => {
@@ -3271,6 +3607,7 @@ async fn run_session(
                     for (peer, generation) in peers.pending_peers() {
                         if peers.transition(peer, generation, PeerLifecycle::Failed(detail.clone()))
                         {
+                            fresh_lookup_peers.remove(&peer);
                             fail_peer_tunnels(
                                 peer,
                                 &detail,
@@ -3367,10 +3704,16 @@ async fn run_session(
                     }
                 }
             }
-            Wake::Input(Some(SessionInput::Incoming(family, incoming))) => {
+            Wake::Input(Some(SessionInput::Incoming(network_id, family, incoming))) => {
                 let incoming = *incoming;
                 let remote = incoming.remote_address();
-                let route = network
+                let Some(source_network) =
+                    network_for_route(network_id, current_network_id, &network, &recovery_networks)
+                else {
+                    incoming.refuse();
+                    continue;
+                };
+                let route = source_network
                     .path(family)
                     .and_then(|path| path.punch_socket.claim_authorized_peer(remote))
                     .or_else(|| pending_ipv6_route(remote, local_node, &peers, &peer_candidates));
@@ -3379,8 +3722,8 @@ async fn run_session(
                     && !should_initiate_quic(local_node, peer)
                     && let Some(waiting) = pending_inbound.get(&(peer, generation))
                 {
-                    if let Err(error) = waiting.try_send(incoming) {
-                        error.into_inner().refuse();
+                    if let Err(error) = waiting.try_send((network_id, incoming)) {
+                        error.into_inner().1.refuse();
                     }
                     continue;
                 }
@@ -3398,13 +3741,14 @@ async fn run_session(
                     let identity = identity.clone();
                     let inputs = input_tx.clone();
                     peer_tasks.spawn(async move {
-                        direct::identify(incoming, identity, inputs, permit).await;
+                        direct::identify(network_id, incoming, identity, inputs, permit).await;
                     });
                 } else {
                     incoming.refuse();
                 }
             }
             Wake::Input(Some(SessionInput::DirectIdentified {
+                route,
                 peer,
                 prepared,
                 permit,
@@ -3414,12 +3758,15 @@ async fn run_session(
                     || resource_policy.borrow().for_peer(peer).disabled
                     || peers.state(peer).is_some_and(PeerLifecycle::is_connected)
                     || (direct_dialing.contains(&peer) && should_initiate_quic(local_node, peer))
+                    || network_for_route(route, current_network_id, &network, &recovery_networks)
+                        .is_none()
                 {
                     continue;
                 }
                 if let Some((_, attempt)) = peer_attempts.remove(&peer) {
                     attempt.abort();
                 }
+                attempt_routes.retain(|(id, _), _| *id != peer);
                 direct_dialing.remove(&peer);
                 if let Some(generation) = peers.generation(peer) {
                     peers.transition(peer, generation, PeerLifecycle::Disconnected);
@@ -3430,6 +3777,7 @@ async fn run_session(
                 };
                 queued_lookups.retain(|(id, _)| *id != peer);
                 emit_peer_state(&events, peer, generation, PeerLifecycle::Authenticating).await;
+                attempt_routes.insert((peer, generation), route);
                 let task = direct::accept(
                     prepared,
                     peer,
@@ -3475,6 +3823,7 @@ async fn run_session(
                 }
             }
             Wake::Input(Some(SessionInput::PeerConnected {
+                route,
                 peer,
                 generation,
                 capabilities,
@@ -3492,14 +3841,24 @@ async fn run_session(
                 if !transport_can_publish(&peers, peer, generation, &connection) {
                     continue;
                 }
+                let attempted_route = attempt_routes.remove(&(peer, generation));
+                let network_id = route.or(attempted_route).unwrap_or(current_network_id);
+                let Some(connection_network) =
+                    network_for_route(network_id, current_network_id, &network, &recovery_networks)
+                else {
+                    connection.close(0u32.into(), b"connection network generation retired");
+                    continue;
+                };
+                let relay = connection_network
+                    .relay
+                    .as_ref()
+                    .is_some_and(|relay| relay.endpoints.is_relay(&connection));
+                let transport_label = connection_network.transport_label(&connection);
                 let _ = events
                     .send(SessionEvent::PeerTransport {
                         peer,
                         generation,
-                        relay: network
-                            .relay
-                            .as_ref()
-                            .is_some_and(|r| r.endpoints.is_relay(&connection)),
+                        relay,
                         family: AddressFamily::of(connection.remote_address()),
                     })
                     .await;
@@ -3510,7 +3869,7 @@ async fn run_session(
                         detail: format!(
                             "对端 {} 已认证 transport：{}",
                             peer.short(),
-                            network.transport_label(&connection)
+                            transport_label
                         ),
                     })
                     .await;
@@ -3617,7 +3976,9 @@ async fn run_session(
                         .await;
                 }
                 reconnect_probes.remove(&peer);
+                fresh_lookup_peers.remove(&peer);
                 connections.insert(peer, (generation, connection.clone()));
+                connection_routes.insert(peer, network_id);
                 peer_capabilities.insert(peer, capabilities);
                 if let Some(service) = config.transfer.as_ref() {
                     service.set_peer_incremental_support(
@@ -3781,39 +4142,56 @@ async fn run_session(
                 generation,
                 detail,
             })) => {
-                if peers.is_current(peer, generation) {
-                    direct_dialing.remove(&peer);
-                }
+                attempt_routes.remove(&(peer, generation));
                 pending_inbound.remove(&(peer, generation));
                 if peers.is_current(peer, generation) {
+                    direct_dialing.remove(&peer);
                     peer_attempts.remove(&peer);
                     let candidate = deferred_candidates.remove(&peer);
                     let credential_retry = credential_retries.remove(&peer);
-                    if candidate.is_some() || credential_retry {
-                        peers.transition(peer, generation, PeerLifecycle::Failed(detail));
-                        let retry = candidate.map_or(
-                            SessionCommand::ConnectPeer(peer),
-                            |(candidates, token)| SessionCommand::RetryCandidates {
+                    if peers.transition(peer, generation, PeerLifecycle::Failed(detail.clone())) {
+                        peer_candidates.remove(&peer);
+                        // Classify even when another offer is queued. An offer is not
+                        // new authorization and cannot turn a denied password into retry.
+                        emit_peer_state(
+                            &events,
+                            peer,
+                            generation,
+                            PeerLifecycle::Failed(detail.clone()),
+                        )
+                        .await;
+                        let auth_failed = events.recovery.lock().unwrap().auth_failed(peer);
+                        if credential_retry {
+                            let _ = command_tx.try_send(SessionCommand::ConnectPeer(peer));
+                            continue;
+                        }
+                        if !auth_failed && let Some((candidates, token)) = candidate {
+                            let _ = command_tx.try_send(SessionCommand::RetryCandidates {
                                 peer,
                                 candidates,
                                 token,
-                            },
+                            });
+                            continue;
+                        }
+                        if auth_failed {
+                            fresh_lookup_peers.remove(&peer);
+                            debug!(peer = %peer.short(), "peer authentication failure keeps transport recovery paused");
+                        }
+                        fail_peer_tunnels(
+                            peer,
+                            &detail,
+                            &running_tunnels,
+                            &mut forced_tunnel_errors,
                         );
-                        let _ = command_tx.try_send(retry);
-                        continue;
                     }
                 }
-                if peers.transition(peer, generation, PeerLifecycle::Failed(detail.clone())) {
-                    peer_candidates.remove(&peer);
-                    fail_peer_tunnels(peer, &detail, &running_tunnels, &mut forced_tunnel_errors);
-                    emit_peer_state(
-                        &events,
-                        peer,
-                        generation,
-                        PeerLifecycle::Failed(detail.clone()),
-                    )
-                    .await;
-                }
+                release_unused_recovery_networks(
+                    &mut recovery_networks,
+                    &connection_routes,
+                    &attempt_routes,
+                    &fresh_lookup_peers,
+                )
+                .await;
             }
             Wake::Input(Some(SessionInput::PeerClosed {
                 peer,
@@ -3829,6 +4207,9 @@ async fn run_session(
                         .get(&peer)
                         .is_some_and(|(current, _)| *current == generation)
                 {
+                    let closed_network = connection_routes
+                        .remove(&peer)
+                        .unwrap_or(current_network_id);
                     if network_interruption && let Some(service) = &config.transfer {
                         service.network_lost(peer);
                     }
@@ -3878,7 +4259,14 @@ async fn run_session(
                         let _ = command_tx.try_send(SessionCommand::ConnectPeer(peer));
                     }
                     peer_candidates.remove(&peer);
-                    let relay_retry = if network.relay.is_some() {
+                    let relay_retry = if network_for_route(
+                        closed_network,
+                        current_network_id,
+                        &network,
+                        &recovery_networks,
+                    )
+                    .is_some_and(|network| network.relay.is_some())
+                    {
                         reconnect_probes.remove(&peer); // retire old token/source routes first
                         deferred_candidates.remove(&peer)
                     } else {
@@ -3904,6 +4292,13 @@ async fn run_session(
                         });
                     }
                 }
+                release_unused_recovery_networks(
+                    &mut recovery_networks,
+                    &connection_routes,
+                    &attempt_routes,
+                    &fresh_lookup_peers,
+                )
+                .await;
             }
             Wake::ReconnectProbe(peer, index, ready) => {
                 let Some(probe) = reconnect_probes
@@ -3914,6 +4309,7 @@ async fn run_session(
                 };
                 let ReconnectProbe {
                     generation,
+                    network: network_id,
                     candidates,
                     token,
                     receivers,
@@ -3930,7 +4326,13 @@ async fn run_session(
                     continue;
                 }
                 reconnect_probes.remove(&peer);
+                let attempt_network =
+                    network_for_route(network_id, current_network_id, &network, &recovery_networks);
+                let Some(attempt_network) = attempt_network else {
+                    continue;
+                };
                 if let Some((_, old)) = connections.remove(&peer) {
+                    connection_routes.remove(&peer);
                     if let Some(service) = config.transfer.clone() {
                         service.network_lost(peer);
                         peer_tasks.spawn(async move {
@@ -3965,7 +4367,9 @@ async fn run_session(
                     token,
                     local_node,
                     identity.clone(),
-                    &network,
+                    network_id,
+                    attempt_network,
+                    (network_id != current_network_id).then_some(&network),
                     &events,
                     &input_tx,
                     &semaphore,
@@ -3992,6 +4396,7 @@ async fn run_session(
                 {
                     peer_attempts.insert(peer, (token, attempt));
                     peer_candidates.insert(peer, (generation, canonical));
+                    attempt_routes.insert((peer, generation), network_id);
                 }
             }
             Wake::QueueChanged => {}
@@ -4107,6 +4512,7 @@ async fn run_session(
                 for (peer, generation) in peers.expired_lookups(time::Instant::now()) {
                     let state = PeerLifecycle::Failed("目标离线或候选等待超时，请重试连接".into());
                     if peers.transition(peer, generation, state.clone()) {
+                        fresh_lookup_peers.remove(&peer);
                         for (id, rule) in &waiting_tunnels {
                             if rule.peer_node_id == peer.to_hex() {
                                 let _ = events
@@ -4129,6 +4535,13 @@ async fn run_session(
                         emit_peer_state(&events, peer, generation, state).await;
                     }
                 }
+                release_unused_recovery_networks(
+                    &mut recovery_networks,
+                    &connection_routes,
+                    &attempt_routes,
+                    &fresh_lookup_peers,
+                )
+                .await;
             }
             Wake::Input(None) => session_shutdown = true,
             Wake::Shutdown => session_shutdown = true,
@@ -4275,6 +4688,11 @@ async fn run_session(
     for (_, (_, connection)) in connections.drain() {
         connection.close(0u32.into(), b"desktop session shutdown");
     }
+    primary_accept_tasks.abort_all();
+    while primary_accept_tasks.join_next().await.is_some() {}
+    for (_, retired) in recovery_networks.drain() {
+        retired.shutdown().await;
+    }
     network.close();
     forward_streams.shutdown().await;
     session_tasks.abort_all();
@@ -4282,6 +4700,28 @@ async fn run_session(
     while peer_tasks.join_next().await.is_some() {}
     while session_tasks.join_next().await.is_some() {}
     let _ = time::timeout(Duration::from_secs(1), network.wait_idle()).await;
+}
+
+async fn release_unused_recovery_networks(
+    recovery: &mut HashMap<NodeId, RecoveryNetwork>,
+    connections: &HashMap<NodeId, NetworkRoute>,
+    attempts: &HashMap<(NodeId, u64), NetworkRoute>,
+    pending: &HashSet<NodeId>,
+) {
+    let unused = recovery
+        .iter()
+        .filter(|(peer, entry)| {
+            !pending.contains(peer)
+                && !connections.values().any(|route| *route == entry.route)
+                && !attempts.values().any(|route| *route == entry.route)
+        })
+        .map(|(peer, _)| *peer)
+        .collect::<Vec<_>>();
+    for peer in unused {
+        if let Some(entry) = recovery.remove(&peer) {
+            entry.shutdown().await;
+        }
+    }
 }
 
 fn retire_peer_listeners(
@@ -4687,13 +5127,14 @@ fn recoverable_transport_close(reason: &quinn::ConnectionError) -> bool {
 }
 
 async fn accept_incoming_loop(
+    route: NetworkRoute,
     endpoint: quinn::Endpoint,
     family: AddressFamily,
     inputs: mpsc::Sender<SessionInput>,
 ) {
     while let Some(incoming) = endpoint.accept().await {
         if inputs
-            .send(SessionInput::Incoming(family, Box::new(incoming)))
+            .send(SessionInput::Incoming(route, family, Box::new(incoming)))
             .await
             .is_err()
         {
@@ -4725,12 +5166,14 @@ async fn start_peer_attempt(
     token: PunchToken,
     local_node: NodeId,
     identity: Identity,
+    route: NetworkRoute,
     network: &DesktopNetwork,
+    primary: Option<&DesktopNetwork>,
     events: &SessionEvents,
     inputs: &mpsc::Sender<SessionInput>,
     semaphore: &Arc<Semaphore>,
     peers: &mut PeerRegistry,
-    pending_inbound: &mut HashMap<(NodeId, u64), mpsc::Sender<quinn::Incoming>>,
+    pending_inbound: &mut HashMap<(NodeId, u64), mpsc::Sender<(NetworkRoute, quinn::Incoming)>>,
     tasks: &mut JoinSet<()>,
     auth: AuthContext,
     verifier: Option<RemoteVerifier>,
@@ -4841,13 +5284,18 @@ async fn start_peer_attempt(
             (!candidates.is_empty()).then(|| (path.clone(), candidates))
         })
         .collect();
+    let bridge_paths = primary
+        .map(|primary| primary.paths.clone())
+        .unwrap_or_default();
     let attempt = tasks.spawn(async move {
         let result = run_peer_attempt(
             peer,
             generation,
             local_node,
             identity,
+            route,
             paths,
+            bridge_paths,
             relay,
             token,
             inbound_rx,
@@ -4878,10 +5326,12 @@ async fn run_peer_attempt(
     generation: u64,
     local_node: NodeId,
     identity: Identity,
+    route: NetworkRoute,
     paths: Vec<(NetworkPath, Vec<SocketAddr>)>,
+    bridge_paths: Vec<NetworkPath>,
     relay: Option<crate::relay::client::Fallback>,
     token: PunchToken,
-    inbound: mpsc::Receiver<quinn::Incoming>,
+    inbound: mpsc::Receiver<(NetworkRoute, quinn::Incoming)>,
     _pending_permit: tokio::sync::OwnedSemaphorePermit,
     inputs: mpsc::Sender<SessionInput>,
     auth: AuthContext,
@@ -4896,8 +5346,10 @@ async fn run_peer_attempt(
             state: PeerLifecycle::Authenticating,
         })
         .await;
-    let guard = race_peer_paths(
+    let (selected_route, guard) = race_peer_paths(
+        route,
         paths,
+        bridge_paths,
         token,
         peer,
         generation,
@@ -4909,7 +5361,17 @@ async fn run_peer_attempt(
     .await
     .map_err(|error| error.to_string())?;
     finish_peer_transport(
-        peer, generation, local_node, guard, relay, inputs, auth, verifier, options, password,
+        peer,
+        generation,
+        local_node,
+        guard,
+        relay,
+        inputs,
+        auth,
+        verifier,
+        options,
+        password,
+        Some(selected_route),
     )
     .await
 }
@@ -4926,6 +5388,7 @@ async fn finish_peer_transport(
     verifier: Option<RemoteVerifier>,
     options: AttemptOptions,
     password: Option<SecretPassword>,
+    route: Option<NetworkRoute>,
 ) -> std::result::Result<(), String> {
     let connection = guard.connection();
 
@@ -4981,6 +5444,7 @@ async fn finish_peer_transport(
     }
     inputs
         .send(SessionInput::PeerConnected {
+            route,
             peer,
             generation,
             capabilities,
@@ -4999,7 +5463,9 @@ fn transport_can_publish(
     connection: &quinn::Connection,
 ) -> bool {
     if !peers.is_current(peer, generation)
-        || peers.state(peer).is_some_and(PeerLifecycle::is_connected)
+        || !peers
+            .state(peer)
+            .is_some_and(|state| state.is_active() && !state.is_connected())
     {
         connection.close(0u32.into(), b"duplicate or stale peer generation");
         false
@@ -5010,15 +5476,39 @@ fn transport_can_publish(
 
 #[allow(clippy::too_many_arguments)]
 async fn race_peer_paths(
+    route: NetworkRoute,
     paths: Vec<(NetworkPath, Vec<SocketAddr>)>,
+    bridge_paths: Vec<NetworkPath>,
     token: PunchToken,
     peer: NodeId,
     generation: u64,
     local: NodeId,
     identity: Identity,
-    mut inbound: mpsc::Receiver<quinn::Incoming>,
+    mut inbound: mpsc::Receiver<(NetworkRoute, quinn::Incoming)>,
     relay: Option<crate::relay::client::Fallback>,
-) -> Result<ConnectionGuard> {
+) -> Result<(NetworkRoute, ConnectionGuard)> {
+    // Keep the original advertised socket able to answer this pairing's token.
+    // This also bridges simultaneous private-socket recovery: at least one side
+    // can dial the other side's still-published primary without changing the
+    // candidate set observed by unrelated (including older) peers.
+    let mut bridges = JoinSet::new();
+    for path in bridge_paths {
+        let mut receiver = path
+            .punch_socket
+            .register_peer_probe(&token, peer, generation)?;
+        bridges.spawn(async move {
+            while let Some(source) = receiver.recv().await {
+                if path
+                    .punch_socket
+                    .send_probe_to(&token, source)
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+    }
     let initiator = should_initiate_quic(local, peer);
     // Registration is synchronous and per path, before awaiting probes or any incoming connection.
     let mut routes = Vec::new();
@@ -5080,7 +5570,9 @@ async fn race_peer_paths(
         if let Some(relay) = relay {
             tasks.spawn(async move { relay.prepare(identity, peer, token).await });
         }
-        return crate::net::race::finish_prepared_guard(tasks).await;
+        return crate::net::race::finish_prepared_guard(tasks)
+            .await
+            .map(|winner| (route, winner));
     }
     let mut probes = JoinSet::new();
     for (path, candidates, mut receiver) in routes {
@@ -5096,7 +5588,12 @@ async fn race_peer_paths(
     let has_relay = relay.is_some();
     if let Some(relay) = relay {
         let relay_identity = identity.clone();
-        authentication.spawn(async move { relay.wait(relay_identity, peer, token).await });
+        authentication.spawn(async move {
+            relay
+                .wait(relay_identity, peer, token)
+                .await
+                .map(|winner| (route, winner))
+        });
     }
     let deadline = time::sleep(if has_relay {
         crate::relay::RELAY_FALLBACK_DELAY
@@ -5110,11 +5607,11 @@ async fn race_peer_paths(
     let result = loop {
         tokio::select! {
             incoming = inbound.recv() => {
-                let Some(incoming) = incoming else { break Err(Error::Transport("incoming generation retired".into())); };
+                let Some((incoming_route, incoming)) = incoming else { break Err(Error::Transport("incoming generation retired".into())); };
                 if authentication.len() >= MAX_CANDIDATES { incoming.refuse(); continue; }
                 let identity = identity.clone();
                 authentication.spawn(async move {
-                    authenticate_incoming(incoming, &identity, peer).await.map(ConnectionGuard::new).map_err(Error::Transport)
+                    authenticate_incoming(incoming, &identity, peer).await.map(|connection| (incoming_route, ConnectionGuard::new(connection))).map_err(Error::Transport)
                 });
             }
             result = authentication.join_next(), if !authentication.is_empty() => {

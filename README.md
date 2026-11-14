@@ -219,7 +219,7 @@ target/release/p2p_file signal-server   --listen 0.0.0.0:8900   --short-id-db ./
 
 自定义目录使用 `--data-dir`。持续升级时保留身份、授权、任务和映射，先备份再按宿主流程操作；具体命令与恢复边界见[节点安装、升级与恢复](packaging/node/README.md)。
 
-平台资料：[macOS Apple Silicon](packaging/macos-arm64/README.md) · [macOS Intel](packaging/macos-x86_64/README.md) · [Windows x64](packaging/windows-x64/README.md) · [Linux x86_64](packaging/linux-x86_64/README.md) · [Sub2API 专用包](packaging/sub2api-windows/README.md)。
+平台资料：[macOS Apple Silicon](packaging/macos-arm64/README.md) · [macOS Intel](packaging/macos-x86_64/README.md) · [Windows x64](packaging/windows-x64/README.md) · [Linux x86_64](packaging/linux-x86_64/README.md) · [Sub2API 专用包](packaging/sub2api-windows/README.md) · [直播专用版](packaging/live/README.md)。
 
 ## 安全与访问边界
 

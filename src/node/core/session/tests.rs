@@ -48,6 +48,8 @@ use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
 use super::*;
+#[path = "peer_recovery_tests.rs"]
+mod peer_recovery;
 use crate::discovery::signal::{
     SignalServerConfig, run_signal_server_on_borrowed, run_signal_server_on_with,
 };
@@ -213,10 +215,12 @@ async fn ipv6_quic_completes_when_peer_never_answers_punch_probes() {
     .unwrap();
     let (_tx, incoming) = mpsc::channel(1);
     let started = time::Instant::now();
-    let connection = time::timeout(
+    let (_, connection) = time::timeout(
         Duration::from_secs(3),
         race_peer_paths(
+            1,
             vec![(network.paths[0].clone(), vec![address])],
+            Vec::new(),
             PunchToken::random(),
             peer,
             1,
@@ -1034,6 +1038,7 @@ async fn reconnect_watch_only_accepts_matching_probe_and_expires_without_reconne
         peer,
         VecDeque::from([ReconnectProbe {
             generation: 7,
+            network: 1,
             candidates: Vec::new(),
             token,
             receivers: vec![punch.register_peer_probe(&token, peer, 7).unwrap()],
@@ -1080,6 +1085,7 @@ async fn reconnect_watch_only_accepts_matching_probe_and_expires_without_reconne
         peer,
         VecDeque::from([ReconnectProbe {
             generation: 8,
+            network: 1,
             candidates: Vec::new(),
             token,
             receivers: vec![receiver],

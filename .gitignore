@@ -51,3 +51,9 @@ target/
 # ---- 本机信令地址数据库 ----
 /signal-device-ids.sqlite3
 /signal-device-ids.sqlite3-*
+
+# Live broadcaster identities, viewer bearer profiles and downloaded runtimes.
+/live-private/
+/live-viewer.json
+/packaging/live/mediamtx.exe
+/packaging/live/mediamtx
