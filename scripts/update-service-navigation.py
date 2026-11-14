@@ -1,14 +1,26 @@
 #!/usr/bin/env python3
-"""Refresh the standalone local navigation from the deployed JSON configurations."""
+"""Refresh the standalone service navigation from installed node configurations."""
 import argparse
+import copy
 import datetime
 import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
+import sys
 import tempfile
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPOSITORY_ROOT = SCRIPT_DIR.parent
+DEFAULT_TEMPLATE = REPOSITORY_ROOT / "service-navigation.html"
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import navigation_platform
+
 
 SERVICE_UI = {
     "ubuntu-admin": ("远程 Ubuntu · 节点管理", "配置 Ubuntu 服务器提供的服务、目标地址和允许访问的设备。", "节点管理", "http", "/"),
@@ -39,58 +51,372 @@ SERVICE_UI = {
     "streamdesk-wsl-srs-hls": ("Windows · WSL SRS HLS 源站", "主服务代理使用的 HLS 源站；空目录可返回 404，观看应经过 StreamDesk 保护。", "应用", "http", "/"),
 }
 
+SUPPORTED_PROTOCOLS = {"http", "https", "tcp", "ssh", "smb", "rdp"}
+NODE_ID_PATTERN = re.compile(r"[a-f0-9]{32}")
 
-def read_windows_catalog(args, peer):
-    # The service directory exposes IDs/names only, never Worker credentials or targets.
-    cli = args.node_cli
-    if cli is None:
-        installed = json.loads((args.config.parent.parent / "bin/installed.json").read_text())
-        cli = Path(installed["bin_dir"]) / "p2p-node"
-    result = subprocess.run([str(cli), "--data-dir", str(args.config.parent), "services", peer],
-                            check=True, capture_output=True, text=True, timeout=40)
-    response = json.loads(result.stdout)
-    if response.get("error") or not isinstance(response.get("result"), list):
-        raise ValueError("Windows authorized service directory is unavailable")
-    return {service["id"] for service in response["result"]}
+
+class NavigationError(ValueError):
+    pass
+
+
+def _node_id(value, label):
+    value = str(value or "")
+    if not NODE_ID_PATTERN.fullmatch(value):
+        raise NavigationError(f"{label} must be a complete lowercase NodeId")
+    return value
+
+
+def _read_json(path, label):
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise NavigationError(f"Cannot read {label}: {path}") from error
+    if not isinstance(value, dict):
+        raise NavigationError(f"{label} must contain a JSON object")
+    return value
+
+
+def _process_result(argv, *, timeout=35):
+    kwargs = dict(capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    if os.name == "nt":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    result = subprocess.run([str(item) for item in argv], **kwargs)
+    if result.returncode:
+        detail = (result.stderr or result.stdout or "no diagnostic output").strip()
+        raise NavigationError(f"Command failed ({argv[0]}): {detail}")
+    return result.stdout
+
+
+def _response_payload(output, label):
+    try:
+        response = json.loads(output)
+    except ValueError as error:
+        raise NavigationError(f"{label} did not return valid JSON") from error
+    if not isinstance(response, dict):
+        raise NavigationError(f"{label} returned an invalid response")
+    if response.get("error"):
+        raise NavigationError(f"{label} failed: {response['error']}")
+    return response.get("result", response)
+
+
+def local_installation(config, node_json=None, node_cli=None):
+    installed = _read_json(config["installed"], "installed.json")
+    try:
+        data_dir = Path(installed["data_dir"]).expanduser().resolve()
+        cli = Path(node_cli) if node_cli else Path(navigation_platform.executable(config, installed, "p2p-node"))
+    except (KeyError, TypeError, OSError) as error:
+        raise NavigationError("installed.json does not identify the Agent binaries and data directory") from error
+    node_path = Path(node_json).expanduser().resolve() if node_json else data_dir / "node.json"
+    record = _read_json(node_path, "local node.json")
+    settings = record.get("settings", record)
+    if not isinstance(settings, dict):
+        raise NavigationError("local node.json settings must be an object")
+    for key in ("forwards", "services"):
+        if not isinstance(settings.get(key), list):
+            raise NavigationError(f"local node.json settings.{key} must be a list")
+    if not isinstance(settings.get("service_ids", {}), dict):
+        raise NavigationError("local node.json settings.service_ids must be an object")
+    return {
+        "installed": installed,
+        "data_dir": data_dir,
+        "node_json": node_path,
+        "cli": cli,
+        "settings": settings,
+    }
+
+
+def run_local_node(local, command, timeout=35):
+    argv = [local["cli"], "--data-dir", local["data_dir"], *command]
+    return _response_payload(_process_result(argv, timeout=timeout), "p2p-node " + " ".join(command))
+
+
+def read_authorized_catalog(local, peer):
+    result = run_local_node(local, ["services", peer], timeout=40)
+    entries = result if isinstance(result, list) else result.get("services") if isinstance(result, dict) else None
+    if not isinstance(entries, list):
+        raise NavigationError(f"Authorized service directory for {peer} is unavailable")
+    catalog = {}
+    for service in entries:
+        if not isinstance(service, dict) or not isinstance(service.get("id"), str) or not service["id"]:
+            raise NavigationError(f"Authorized service directory for {peer} is invalid")
+        catalog[service["id"]] = service.get("name") if isinstance(service.get("name"), str) else service["id"]
+    return catalog
+
+
+def _remote_config(config, ssh_host):
+    candidate = copy.deepcopy(config)
+    if candidate.get("remote") is None and ssh_host:
+        candidate["remote"] = {
+            "name": "Ubuntu",
+            "node_id": None,
+            "management_service_id": "ubuntu-admin",
+            "ssh_host": ssh_host,
+            "python": "python3",
+            "installed": "~/.local/lib/p2p-file-node/installed.json",
+        }
+    elif candidate.get("remote") is not None and ssh_host:
+        candidate["remote"]["ssh_host"] = ssh_host
+    return candidate
+
+
+def resolve_remote_node(config, settings):
+    remote = config.get("remote")
+    if remote is None:
+        return None
+    configured = remote.get("node_id")
+    management_id = remote.get("management_service_id")
+    mappings = {
+        forward.get("peer_node_id")
+        for forward in settings["forwards"]
+        if management_id and settings.get("service_ids", {}).get(forward.get("id")) == management_id
+    }
+    if configured is not None:
+        expected = _node_id(configured, "remote.node_id")
+        if mappings and mappings != {expected}:
+            raise NavigationError("remote.node_id does not match the management-service mapping")
+        return expected
+    if len(mappings) != 1:
+        raise NavigationError("Cannot identify the managed remote node from remote.node_id or management_service_id")
+    return _node_id(next(iter(mappings)), "managed peer node_id")
+
+
+def remote_status_and_services(config, expected_node_id):
+    installed = json.dumps(config["remote"]["installed"], ensure_ascii=True)
+    expected = json.dumps(expected_node_id, ensure_ascii=True)
+    script = f'''import json, os, subprocess, sys
+from pathlib import Path
+installed_path = Path(os.path.expandvars({installed})).expanduser()
+installed = json.loads(installed_path.read_text(encoding="utf-8"))
+cli = Path(installed["bin_dir"]) / ("p2p-node.exe" if os.name == "nt" else "p2p-node")
+process = subprocess.run([str(cli), "--data-dir", installed["data_dir"], "status"],
+                         capture_output=True, text=True, encoding="utf-8", timeout=30)
+if process.returncode:
+    print(process.stderr or process.stdout, file=sys.stderr)
+    raise SystemExit(process.returncode)
+response = json.loads(process.stdout)
+result = response.get("result", response)
+node = result.get("node") if isinstance(result, dict) else None
+actual = node.get("node_id") if isinstance(node, dict) else None
+actual = actual or (result.get("node_id") if isinstance(result, dict) else None)
+if actual != {expected}:
+    raise SystemExit("remote Agent NodeId does not match configured or management-mapped NodeId")
+record = json.loads((Path(installed["data_dir"]) / "node.json").read_text(encoding="utf-8"))
+settings = record.get("settings", record)
+services = [dict(id=item.get("id"), target=item.get("target"), enabled=item.get("enabled"))
+            for item in settings.get("services", [])]
+print(json.dumps(dict(node_id=actual, services=services), ensure_ascii=False))
+'''
+    argv = navigation_platform.ssh_command(config, script)
+    payload = _response_payload(_process_result(argv, timeout=45), "remote node status")
+    actual = _node_id(payload.get("node_id"), "remote status node_id")
+    if actual != expected_node_id:
+        raise NavigationError("Remote Agent identity changed while reading its configuration")
+    services = payload.get("services")
+    if not isinstance(services, list):
+        raise NavigationError("Remote node services are unavailable")
+    mapped = {}
+    for service in services:
+        if not isinstance(service, dict) or not isinstance(service.get("id"), str) or not service["id"]:
+            raise NavigationError("Remote node contains an invalid service")
+        mapped[service["id"]] = service
+    return actual, mapped
+
+
+def run_remote_json(config, script, label, timeout=30):
+    return _response_payload(
+        _process_result(navigation_platform.ssh_command(config, script), timeout=timeout),
+        label,
+    )
 
 
 def render_data(html, data):
     encoded = json.dumps(data, ensure_ascii=False, indent=2).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-    html, count = re.subn(r'(<script id="navigation-data" type="application/json">)\s*[\s\S]*?(</script>)', lambda m: m[1] + "\n" + encoded + "\n" + m[2], html)
+    html, count = re.subn(
+        r'(<script id="navigation-data" type="application/json">)\s*[\s\S]*?(</script>)',
+        lambda match: match.group(1) + "\n" + encoded + "\n" + match.group(2),
+        html,
+    )
     if count != 1:
-        raise ValueError("Expected exactly one navigation-data block")
+        raise NavigationError("Template must contain exactly one navigation-data block")
     return html
 
 
+def service_url(listen, protocol, path_value):
+    host, port = listen.rsplit(":", 1)
+    if protocol not in ("http", "https"):
+        return listen
+    url_host = "localhost" if protocol == "https" and host in ("127.0.0.1", "localhost", "::1", "[::1]") else host
+    return f"{protocol}://{url_host}:{port}{path_value}"
+
+
 def apply_presentation(services, path):
-    """Reuse the local web editor's display metadata; never copy credentials."""
+    """Reuse the local editor's display metadata; never copy credentials."""
     if not path.is_file():
         return
-    presentation = json.loads(path.read_text())
+    presentation = _read_json(path, "presentation.json")
     for service in services:
         meta = presentation.get(service["id"], {})
+        if not isinstance(meta, dict):
+            raise NavigationError("presentation.json entries must be objects")
         if meta.get("peer") != service.get("peerNodeId") or meta.get("serviceId") != service.get("serviceId"):
             continue
         protocol, path_value = meta.get("protocol", "tcp"), meta.get("path", "/")
-        if protocol not in ("http", "https", "tcp", "ssh", "smb", "rdp"):
-            raise ValueError("Unsupported local navigation protocol")
-        if not path_value.startswith("/") or path_value.startswith("//") or any(c in path_value for c in ("?", "#", "\\", "\r", "\n")):
-            raise ValueError("Invalid local navigation path")
-        service.update(title=meta["title"], protocol=protocol, category=meta["category"], healthPath=meta.get("healthPath", ""))
-        service["url"] = f"{protocol}://{service['listen']}{path_value if protocol in ('http', 'https') else ''}" if protocol != "tcp" else service["listen"]
+        if protocol not in SUPPORTED_PROTOCOLS:
+            raise NavigationError("Unsupported local navigation protocol")
+        if (not isinstance(path_value, str) or not path_value.startswith("/") or path_value.startswith("//")
+                or any(character in path_value for character in ("?", "#", "\\", "\r", "\n"))):
+            raise NavigationError("Invalid local navigation path")
+        title, category = meta.get("title"), meta.get("category")
+        if not isinstance(title, str) or not title.strip() or not isinstance(category, str) or not category.strip():
+            raise NavigationError("presentation.json needs non-empty title and category")
+        service.update(title=title.strip(), protocol=protocol, category=category.strip(),
+                       healthPath=meta.get("healthPath", ""))
+        service["url"] = service_url(service["listen"], protocol, path_value)
 
 
-def read_dsh_login_token(args):
-    # Only inspect the currently running service invocation, never an older token.
-    script = '''import json, re, subprocess
+def _peer_info(config, peer, managed_remote):
+    configured = config.get("peers", {}).get(peer, {})
+    if not isinstance(configured, dict):
+        raise NavigationError(f"peers.{peer} must be an object")
+    remote = config.get("remote") or {}
+    fallback = remote.get("name") if peer == managed_remote else None
+    name = configured.get("name") or fallback or f"设备 {peer[:8]}"
+    platform = str(configured.get("platform") or "unknown").lower()
+    raw_targets = configured.get("targets", {})
+    if not isinstance(raw_targets, dict):
+        raise NavigationError(f"peers.{peer}.targets must be an object")
+    targets = {}
+    for service_id, target in raw_targets.items():
+        if not isinstance(service_id, str) or not service_id:
+            raise NavigationError(f"peers.{peer}.targets has an invalid service ID")
+        if not isinstance(target, str) or not target.strip():
+            raise NavigationError(f"peers.{peer}.targets.{service_id} must be a non-empty string")
+        targets[service_id] = target.strip()
+    return {"name": name.strip(), "platform": platform, "targets": targets}
+
+
+def build_services(config, local, remote_node, remote_services):
+    settings = local["settings"]
+    services = []
+    catalog_cache = {}
+    for forward in settings["forwards"]:
+        if not isinstance(forward, dict):
+            raise NavigationError("local node.json contains an invalid forward")
+        rule_id = forward.get("id")
+        service_id = settings.get("service_ids", {}).get(rule_id)
+        peer = forward.get("peer_node_id")
+        listen = forward.get("listen")
+        if not isinstance(rule_id, str) or not rule_id:
+            raise NavigationError("local forward is missing its rule ID")
+        if not isinstance(service_id, str) or not service_id:
+            raise NavigationError(f"Forward {rule_id} is missing a service ID")
+        peer = _node_id(peer, f"Forward {rule_id} peer_node_id")
+        if not isinstance(listen, str) or ":" not in listen:
+            raise NavigationError(f"Forward {rule_id} has an invalid listen address")
+        peer_info = _peer_info(config, peer, remote_node)
+        remote_label = "远端 " + peer_info["name"]
+        remote_service = remote_services.get(service_id) if peer == remote_node else None
+        if peer == remote_node:
+            if remote_service is None:
+                raise NavigationError(f"Managed remote service is missing: {service_id}")
+            target = remote_service.get("target")
+            if not isinstance(target, str) or not target:
+                raise NavigationError(f"Managed remote service {service_id} has no target")
+            target_source = None
+            authorized_verified = None
+            target_verified = True
+            remote_verified = True
+            enabled = bool(forward.get("enabled") and remote_service.get("enabled"))
+        else:
+            if peer not in catalog_cache:
+                catalog_cache[peer] = read_authorized_catalog(local, peer)
+            catalog = catalog_cache[peer]
+            if service_id not in catalog:
+                raise NavigationError(f"Service {service_id} is not in the authorized directory for {peer}")
+            target = peer_info["targets"].get(service_id)
+            target_source = "user-confirmed" if target else "authorized-directory"
+            authorized_verified = True
+            target_verified = False
+            remote_verified = False
+            enabled = bool(forward.get("enabled"))
+        presentation = SERVICE_UI.get(service_id)
+        if presentation:
+            title, description, category, protocol, path_value = presentation
+        else:
+            title = catalog.get(service_id, forward.get("name", service_id)) if peer != remote_node else forward.get("name", service_id)
+            description = (
+                "已通过可信管理通道读取服务目标；协议未登记，因此仅提供 TCP 地址复制。"
+                if peer == remote_node else
+                "授权目录已确认服务 ID；目录不公开远端目标，且协议未登记，因此仅提供 TCP 地址复制。"
+            )
+            category, protocol, path_value = "其他", "tcp", ""
+        services.append(dict(
+            id=rule_id,
+            serviceId=service_id,
+            title=title,
+            name=forward.get("name", service_id),
+            description=description,
+            category=category,
+            protocol=protocol,
+            url=service_url(listen, protocol, path_value),
+            listen=listen,
+            target=target or "远端目标未公开",
+            remoteLabel=remote_label,
+            peerName=peer_info["name"],
+            peerPlatform=peer_info["platform"],
+            peerNodeId=peer,
+            targetSource=target_source,
+            authorizedDirectoryVerified=authorized_verified,
+            targetVerified=target_verified,
+            remoteConfigVerified=remote_verified,
+            enabled=enabled,
+            autoStart=bool(forward.get("auto_start")),
+            remote=True,
+        ))
+    return services
+
+
+def local_admin_service(config_or_host, host=None):
+    if host is None:
+        host = config_or_host
+    url = host["adminUrl"]
+    parsed = urlsplit(url)
+    listen = parsed.netloc + (parsed.path if parsed.path not in ("", "/") else "")
+    platform_name = {"macos": "Mac", "windows": "Windows", "linux": "Linux"}.get(
+        host["platform"], host["platform"])
+    service = dict(
+        id=host["localAdminId"],
+        serviceId=host["localAdminId"],
+        title=f"本机 {host['name']} · 节点管理",
+        name=f"{host['name']} Veytrane 管理",
+        description=f"配置这台 {platform_name} 的回环监听，接收其他设备提供的服务。",
+        category="节点管理",
+        protocol="http",
+        url=url,
+        listen=listen,
+        target=f"本机 {host['name']} Web 管理",
+        enabled=True,
+        autoStart=None,
+        remote=False,
+        localPlatform=host["platform"],
+        localName=host["name"],
+    )
+    return service
+
+
+def read_dsh_login_token(config, target):
+    installed = json.dumps(config["remote"]["installed"], ensure_ascii=True)
+    target_json = json.dumps(target, ensure_ascii=True)
+    script = f'''import json, os, re, subprocess
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 subprocess.run(["systemctl", "--user", "is-active", "--quiet", "dsh.service"], check=True)
 invocation = subprocess.check_output(["systemctl", "--user", "show", "dsh.service", "-p", "InvocationID", "--value"], text=True).strip()
 if not invocation:
     raise SystemExit("DSH current invocation is unavailable")
-settings = json.loads((Path.home() / ".local/share/p2p-file/node/node.json").read_text())["settings"]
-target = next(service["target"] for service in settings["services"] if service["id"] == "dsh")
+installed = json.loads(Path(os.path.expandvars({installed})).expanduser().read_text(encoding="utf-8"))
+settings = json.loads((Path(installed["data_dir"]) / "node.json").read_text(encoding="utf-8"))["settings"]
+target = {target_json}
 port = int(target.rsplit(":", 1)[1])
 logs = subprocess.check_output(["journalctl", "--user", "-u", "dsh.service", "_SYSTEMD_INVOCATION_ID=" + invocation, "--no-pager", "-o", "cat"], text=True)
 logs = re.sub(r"\\x1b\\[[0-?]*[ -/]*[@-~]", "", logs)
@@ -99,38 +425,74 @@ for candidate in reversed(re.findall(r"https?://[^\\s]+", logs)):
     if url.scheme == "http" and url.hostname in ("127.0.0.1", "localhost") and url.port == port:
         token = parse_qs(url.query).get("token", [""])[0]
         if token:
-            print(json.dumps({"token": token}))
+            print(json.dumps({{"token": token}}))
             break
 else:
     raise SystemExit("DSH current login token was not found")
 '''
-    result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", args.ssh_host, "python3 -"],
-                            input=script, check=True, capture_output=True, text=True, timeout=30)
-    return json.loads(result.stdout)["token"]
+    value = run_remote_json(config, script, "DSH login lookup")
+    if not isinstance(value.get("token"), str) or not value["token"]:
+        raise NavigationError("DSH login token is unavailable")
+    return value["token"]
 
 
-def write_private_navigation(args, html, data):
-    # Opt-in belongs to this Mac, never to the shared repository or its HTML.
-    private_root = Path.home() / "Library/Application Support/p2p-file/navigation"
-    show_chromium = (private_root / "show-chromium-login").is_file()
-    show_dsh = (private_root / "show-dsh-login").is_file()
-    show_rustfs = (private_root / "show-rustfs-login").is_file()
-    if not (show_chromium or show_dsh or show_rustfs):
-        return
-    private = dict(data, services=[dict(service) for service in data["services"]])
-    chromium = next((service for service in private["services"] if service.get("serviceId") == "chromium-web"), None)
-    if show_chromium and chromium is not None:
+def _read_remote_secret(config, script, label):
+    value = run_remote_json(config, script, label)
+    if not all(isinstance(value.get(key), str) and value[key] for key in ("username", "password")):
+        raise NavigationError(f"{label} did not return username and password")
+    return {"username": value["username"], "password": value["password"]}
+
+
+def atomic_write(path, text, private=False):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing_mode = (path.stat().st_mode & 0o777) if path.is_file() else None
+    fd, temporary = tempfile.mkstemp(prefix=".navigation-", dir=path.parent)
+    os.close(fd)
+    try:
+        if private:
+            navigation_platform.secure_private_file(temporary)
+        with Path(temporary).open("w", encoding="utf-8", newline="\n") as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if not private and os.name != "nt":
+            temporary_path = Path(temporary)
+            temporary_path.chmod(existing_mode or 0o644)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def write_private_navigation(config, html, data, *, force=False):
+    private_root = Path(config["page"]).expanduser().parent
+    markers = {
+        "chromium": private_root / "show-chromium-login",
+        "dsh": private_root / "show-dsh-login",
+        "rustfs": private_root / "show-rustfs-login",
+    }
+    credentials_enabled = config["platform"] == "macos" and config.get("remote") is not None
+    active_markers = markers if credentials_enabled else {}
+    if not force and not any(path.is_file() for path in active_markers.values()):
+        return False
+    try:
+        private_root.resolve().relative_to(REPOSITORY_ROOT)
+    except ValueError:
+        pass
+    else:
+        raise NavigationError("Private navigation must remain outside the repository")
+    private = copy.deepcopy(data)
+    by_id = {service.get("serviceId"): service for service in private["services"]}
+    if active_markers.get("chromium", Path()).is_file() and "chromium-web" in by_id:
         script = '''from pathlib import Path
 import json
 path = Path.home() / "app/docker-deployments/chromium/login.credentials"
 pairs = dict(line.split("=", 1) for line in path.read_text().splitlines() if "=" in line)
 print(json.dumps({"username": pairs["USERNAME"], "password": pairs["PASSWORD"]}))
 '''
-        result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", args.ssh_host, "python3 -"],
-                                input=script, check=True, capture_output=True, text=True, timeout=30)
-        chromium["login"] = json.loads(result.stdout)
-    rustfs = next((service for service in private["services"] if service.get("serviceId") == "rustfs-console"), None)
-    if show_rustfs and rustfs is not None:
+        by_id["chromium-web"]["login"] = _read_remote_secret(config, script, "Chromium login lookup")
+    if active_markers.get("rustfs", Path()).is_file() and "rustfs-console" in by_id:
         script = '''import json, subprocess
 container = json.loads(subprocess.check_output(["docker", "inspect", "rustfs"]))[0]
 if not container["State"]["Running"]:
@@ -142,101 +504,96 @@ if not username or not password:
     raise SystemExit("RustFS login configuration is unavailable")
 print(json.dumps({"username": username, "password": password}))
 '''
-        result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", args.ssh_host, "python3 -"],
-                                input=script, check=True, capture_output=True, text=True, timeout=30)
-        rustfs["login"] = json.loads(result.stdout)
-    dsh = next((service for service in private["services"] if service.get("serviceId") == "dsh"), None)
-    if show_dsh and dsh is not None:
-        url = urlsplit(dsh["url"])
+        by_id["rustfs-console"]["login"] = _read_remote_secret(config, script, "RustFS login lookup")
+    if active_markers.get("dsh", Path()).is_file() and "dsh" in by_id:
+        service = by_id["dsh"]
+        url = urlsplit(service["url"])
         query = [(key, value) for key, value in parse_qsl(url.query) if key != "token"]
-        query.append(("token", read_dsh_login_token(args)))
-        dsh["loginUrl"] = urlunsplit((url.scheme, url.netloc, url.path, urlencode(query), url.fragment))
-        dsh["description"] = "直接访问远端 Ubuntu 的 DSH 原始端口 3080；点击打开页面即可使用本机私有 token 登录。"
-    rendered = render_data(html, private)
-    # The private copy is outside the repository and is replaced with mode 0600.
-    fd, temporary = tempfile.mkstemp(prefix=".navigation-", dir=private_root)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(rendered)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, private_root / "service-navigation.html")
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
-    print("Updated private local navigation; credentials are not written to the repository")
+        query.append(("token", read_dsh_login_token(config, service["target"])))
+        service["loginUrl"] = urlunsplit((url.scheme, url.netloc, url.path, urlencode(query), url.fragment))
+        service["description"] = f"直接访问远端 {service['peerName']} 的 DSH；点击打开页面即可使用本机私有 token 登录。"
+    atomic_write(config["page"], render_data(html, private), private=True)
+    return True
 
 
-def main():
+def navigation_host(config, local=None):
+    host = dict(navigation_platform.host_info(config))
+    if host.get("platform") == "macos":
+        try:
+            if local is None:
+                installed = _read_json(config["installed"], "installed.json")
+                data_dir = Path(installed["data_dir"]).expanduser().resolve()
+            else:
+                data_dir = Path(local["data_dir"]).expanduser().resolve()
+            token_path = data_dir / "admin.token"
+            host["tokenCommand"] = "pbcopy < " + shlex.quote(str(token_path))
+        except (NavigationError, KeyError, OSError, TypeError):
+            pass
+    return host
+
+
+def generate(config, *, output=None, node_json=None, node_cli=None, template=DEFAULT_TEMPLATE):
+    local = local_installation(config, node_json=node_json, node_cli=node_cli)
+    remote_node = resolve_remote_node(config, local["settings"])
+    remote_services = {}
+    if remote_node and any(
+            forward.get("peer_node_id") == remote_node for forward in local["settings"]["forwards"]):
+        verified_node, remote_services = remote_status_and_services(config, remote_node)
+        remote_node = verified_node
+    host = navigation_host(config, local)
+    services = build_services(config, local, remote_node, remote_services)
+    services.append(local_admin_service(host))
+    apply_presentation(services[:-1], Path(config["state_dir"]).expanduser() / "presentation.json")
+    data = {
+        "updatedAt": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "host": host,
+        "services": services,
+    }
+    template_path = Path(template)
+    if not template_path.is_file():
+        raise NavigationError(f"Navigation template is missing: {template_path}")
+    rendered = render_data(template_path.read_text(encoding="utf-8"), data)
+    output_path = Path(output or config["page"]).expanduser()
+    private_path = Path(config["page"]).expanduser()
+    same_path = output_path.resolve(strict=False) == private_path.resolve(strict=False)
+    if same_path:
+        write_private_navigation(config, rendered, data, force=True)
+        print(f"Updated private navigation {output_path}: {len(services)} entries; private permissions applied")
+    else:
+        atomic_write(output_path, rendered)
+        print(f"Updated {output_path}: {len(services)} entries; no credentials included")
+        if write_private_navigation(config, rendered, data):
+            print("Updated private local navigation; private permissions applied")
+    return data
+
+
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--ssh-host", required=True, help="Ubuntu SSH alias, e.g. ubuntu")
-    parser.add_argument("--config", type=Path, default=Path.home() / "Library/Application Support/p2p-file/node/node.json")
-    parser.add_argument("--output", type=Path, default=Path(__file__).resolve().parents[1] / "service-navigation.html")
-    parser.add_argument("--mac-web", default="http://127.0.0.1:7789/")
-    parser.add_argument("--node-cli", type=Path, help="Installed p2p-node CLI; defaults to this Mac's installation metadata")
-    args = parser.parse_args()
-    local = json.loads(args.config.read_text())["settings"]
-    # The remote command emits only public routing fields, never authentication data.
-    command = "python3 -c " + "'import json; from pathlib import Path; s=json.loads((Path.home()/\".local/share/p2p-file/node/node.json\").read_text())[\"settings\"]; print(json.dumps([{k:x.get(k) for k in (\"id\",\"target\",\"enabled\")} for x in s[\"services\"]]))'"
-    result = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", args.ssh_host, command], check=True, capture_output=True, text=True, timeout=30)
-    remote = {s["id"]: s for s in json.loads(result.stdout)}
-    ubuntu_peers = {f["peer_node_id"] for f in local["forwards"]
-                    if local.get("service_ids", {}).get(f["id"]) == "ubuntu-admin"}
-    if len(ubuntu_peers) != 1:
-        raise ValueError("Cannot identify the Ubuntu peer from its management mapping")
-    windows_peer = "5eef2d53912e77479fa2e61ef3aa27c3"
-    windows_media_ids = {"streamdesk-wsl-media", "streamdesk-wsl-srs-api", "streamdesk-wsl-srs-hls"}
-    required_windows_ids = {local.get("service_ids", {}).get(f["id"]) for f in local["forwards"]
-                            if f["peer_node_id"] == windows_peer
-                            and local.get("service_ids", {}).get(f["id"]) in (windows_media_ids | {"windows-rdp"})}
-    if required_windows_ids and not required_windows_ids <= read_windows_catalog(args, windows_peer):
-        raise ValueError("Windows services are missing from the authorized directory; navigation was not changed")
-    services = []
-    for forward in local["forwards"]:
-        service_id = local.get("service_ids", {}).get(forward["id"])
-        ubuntu = forward["peer_node_id"] in ubuntu_peers
-        # Never look up another node's service ID in Ubuntu's service catalog.
-        pending_windows = (forward["peer_node_id"] == windows_peer
-                           and service_id in ({"rustdesk-win", "wsl-llama", "windows-rdp"} | windows_media_ids))
-        if not ubuntu and not pending_windows:
-            raise ValueError(f"No verified service source for peer mapping: {forward['id']}")
-        service = remote.get(service_id) if ubuntu else None
-        if ubuntu and service_id and service is None:
-            raise ValueError(f"Remote service missing: {service_id}; navigation was not changed")
-        title, description, category, protocol, path = SERVICE_UI.get(service_id, (forward["name"], "复制本机监听地址，使用对应客户端连接。", "其他", "tcp", ""))
-        listen = forward["listen"]
-        host, port = listen.rsplit(":", 1)
-        # Existing HTTPS services use certificates that include localhost.
-        url_host = "localhost" if protocol == "https" and host in ("127.0.0.1", "localhost") else host
-        url = f"{protocol}://{url_host}:{port}{path}" if protocol not in {"tcp", "rdp"} else listen
-        windows_target = {
-            "rustdesk-win": "127.0.0.1:21118（计划目标，待 Windows 核对）",
-            # Confirmed by the Windows owner; the authenticated catalog exposes
-            # only ID/name, so do not claim its target or full ACL was read here.
-            "windows-rdp": "127.0.0.1:3389",
-            "wsl-llama": "wsl-llama（Windows 目标地址未公开）",
-            "streamdesk-wsl-media": "127.0.0.1:18097（Windows 端提供，未读取配置）",
-            "streamdesk-wsl-srs-api": "127.0.0.1:21985（Windows 端提供，未读取配置）",
-            "streamdesk-wsl-srs-hls": "127.0.0.1:28098（Windows 端提供，未读取配置）",
-        }.get(service_id)
-        services.append(dict(id=forward["id"], serviceId=service_id, title=title, name=forward["name"], description=description,
-                             category=category, protocol=protocol, url=url, listen=listen,
-                             target=service["target"] if service else windows_target,
-                             remoteLabel="远端 Ubuntu" if ubuntu else "远端 Windows",
-                             peerNodeId=forward["peer_node_id"],
-                             targetSource="user-confirmed" if service_id == "windows-rdp" and pending_windows else None,
-                             authorizedDirectoryVerified=service_id in required_windows_ids if pending_windows else None,
-                             targetVerified=not pending_windows,
-                             enabled=bool(forward["enabled"] and (service is None or service["enabled"])),
-                             autoStart=bool(forward["auto_start"]), remote=True))
-    services.append(dict(id="mac-admin", serviceId="mac-admin", title="本机 Mac · 节点管理", name="Mac Veytrane 管理", description="配置这台 Mac 的监听端口，接收 Ubuntu 等远端设备提供的服务。", category="节点管理", protocol="http", url=args.mac_web, listen=args.mac_web.split("://", 1)[1].rstrip("/"), target="本机 Veytrane Web 管理", enabled=True, autoStart=None, remote=False))
-    apply_presentation(services, Path.home() / "Library/Application Support/p2p-file/navigation/control/presentation.json")
-    data = dict(updatedAt=datetime.datetime.now().astimezone().isoformat(timespec="seconds"), services=services)
-    html = render_data(args.output.read_text(), data)
-    write_private_navigation(args, html, data)
-    args.output.write_text(html)
-    print(f"Updated {args.output}: {len(services)} entries; no credentials included")
+    parser.add_argument("--ssh-host", help="Deprecated override for the configured independent SSH alias")
+    parser.add_argument("--config", type=Path, help="Legacy local node.json path override")
+    parser.add_argument("--navigation-config", type=Path, help="Cross-platform navigation JSON configuration")
+    parser.add_argument("--output", type=Path, help="HTML output; defaults to config.page, or the repository template for legacy Mac use")
+    parser.add_argument("--mac-web", help="Deprecated override for the local Agent web URL")
+    parser.add_argument("--node-cli", type=Path, help="Installed p2p-node CLI override")
+    parser.add_argument("--template", type=Path, default=DEFAULT_TEMPLATE,
+                        help="Credential-free HTML template")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    try:
+        config = navigation_platform.load_config(args.navigation_config)
+        config = _remote_config(config, args.ssh_host)
+        if args.mac_web:
+            config["agent_web"] = args.mac_web
+        output = args.output or (config["page"] if args.navigation_config else DEFAULT_TEMPLATE)
+        generate(config, output=output, node_json=args.config, node_cli=args.node_cli, template=args.template)
+    except (NavigationError, navigation_platform.PlatformError, OSError, subprocess.SubprocessError) as error:
+        print(f"navigation sync failed: {error}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

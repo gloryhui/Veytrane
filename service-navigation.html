@@ -107,10 +107,10 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
 <body>
 <header class="top"><div class="top-inner"><div class="brand"><span class="logo" aria-hidden="true"><svg viewBox="0 0 28 28"><rect x="3" y="5" width="8" height="8" rx="2"/><rect x="17" y="15" width="8" height="8" rx="2"/><path d="M11 9h6a4 4 0 0 1 4 4v2M7 13v6h10"/></svg></span>Veytrane <small>本机服务工作台</small></div><div class="top-actions"><button id="theme-toggle" class="theme-toggle" type="button" aria-pressed="false"><span class="theme-toggle-icon" aria-hidden="true"><svg class="theme-icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg class="theme-icon-moon" viewBox="0 0 24 24"><path d="M20 15.2A8.4 8.4 0 0 1 8.8 4 8.4 8.4 0 1 0 20 15.2Z"/></svg></span><span id="theme-toggle-label">暗色</span></button><div class="private"><span class="dot"></span>仅本机访问</div></div></div></header>
 <main>
-<div class="page-heading"><div><h1>服务导航</h1><p class="intro">按远端设备管理服务入口，并把可用端口映射到这台 Mac。</p></div><div class="page-actions"><button id="find-services" class="button subtle" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>查找服务</button></div></div>
+<div class="page-heading"><div><h1>服务导航</h1><p class="intro" id="page-intro">按远端设备管理服务入口，并把可用端口映射到本机。</p></div><div class="page-actions"><button id="find-services" class="button subtle" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>查找服务</button></div></div>
 <div class="overview"><span class="overview-scope">全部设备</span><div class="metric"><b id="total">—</b><span>个服务入口</span></div><div class="metric"><b id="mapped">—</b><span>条远程映射</span></div><div class="metric"><b id="automatic">—</b><span>条随节点启动</span></div></div>
 <section class="management" id="navigation-management" aria-labelledby="management-title">
- <div class="management-head"><h2 id="management-title">节点连接</h2><div class="management-actions"><time class="manage-checked" id="manage-checked"></time><label class="monitor-toggle" title="每10秒更新；切换页面或窗口后关闭"><input type="checkbox" id="manage-monitor" disabled><span class="monitor-switch" aria-hidden="true"></span><span>实时状态</span></label><button id="manage-refresh" class="button subtle" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 8a7 7 0 0 1 12-2l2 2M4 16l2 2a7 7 0 0 0 12-2"/></svg>刷新状态</button><details class="popover" id="management-tools"><summary>管理选项<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></summary><div class="menu-panel"><button id="manage-connect">连接管理台</button><button id="manage-remote" disabled>核对两端配置</button><button id="manage-restart" class="danger" disabled>重启 Mac 节点…</button><p class="menu-note">实时状态默认关闭。重启本机节点会短暂中断全部转发。</p></div></details></div></div>
+ <div class="management-head"><h2 id="management-title">节点连接</h2><div class="management-actions"><time class="manage-checked" id="manage-checked"></time><label class="monitor-toggle" title="每10秒更新；切换页面或窗口后关闭"><input type="checkbox" id="manage-monitor" disabled><span class="monitor-switch" aria-hidden="true"></span><span>实时状态</span></label><button id="manage-refresh" class="button subtle" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 8a7 7 0 0 1 12-2l2 2M4 16l2 2a7 7 0 0 0 12-2"/></svg>刷新状态</button><details class="popover" id="management-tools"><summary>管理选项<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></summary><div class="menu-panel"><button id="manage-connect">连接管理台</button><button id="manage-remote" disabled>核对两端配置</button><button id="manage-restart" class="danger" disabled>重启本机节点…</button><p class="menu-note">实时状态默认关闭。重启本机节点会短暂中断全部转发。</p></div></details></div></div>
  <div class="node-status-list" id="manage-nodes"><div class="node-signal"><div class="node-info"><strong>正在读取节点状态</strong><div class="node-state">连接本机管理后端…</div></div></div></div>
  <div class="management-foot"><div class="connection-meta"><span class="dot"></span><span id="manage-connection">正在连接管理台…</span></div><button class="activity-toggle" id="manage-activity-toggle" aria-expanded="false" aria-controls="manage-activity">活动与诊断<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button></div>
  <div id="manage-activity" class="activity-panel" hidden><div class="activity-tabs" role="tablist" aria-label="活动与诊断"><button id="activity-history-tab" role="tab" aria-selected="true" aria-controls="activity-history-panel">操作记录</button><button id="activity-diagnostics-tab" role="tab" aria-selected="false" aria-controls="activity-diagnostics-panel" tabindex="-1">节点诊断</button></div><div id="activity-history-panel" class="activity-body" role="tabpanel" aria-labelledby="activity-history-tab"><ol class="operation-history" id="manage-history"></ol></div><div id="activity-diagnostics-panel" class="activity-body" role="tabpanel" aria-labelledby="activity-diagnostics-tab" hidden><pre class="diagnostics" id="manage-diagnostics"></pre></div></div>
@@ -119,14 +119,14 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
 </section>
 <div id="node-services" aria-label="节点管理"></div>
 <section id="connection-workspace" aria-labelledby="connection-workspace-title" aria-describedby="workspace-direction-context">
- <div class="workspace-heading"><div><h2 id="connection-workspace-title">按设备管理端口连接</h2><p class="workspace-direction-context" id="workspace-direction-context">选择远端设备，查看并管理映射到这台 Mac 的服务。</p></div></div>
- <div class="peer-navigation"><nav class="tabs peer-tabs" id="peer-filters" role="tablist" aria-label="远端设备"><button class="tab" type="button" role="tab" aria-selected="true">正在读取设备…</button></nav><button id="manage-add" class="button primary-button workspace-create" disabled aria-label="新建当前设备到本机 Mac 的端口连接" title="新建当前设备到本机 Mac 的端口连接"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span id="manage-add-label">新建端口连接</span></button></div>
+ <div class="workspace-heading"><div><h2 id="connection-workspace-title">按设备管理端口连接</h2><p class="workspace-direction-context" id="workspace-direction-context">选择远端设备，查看并管理映射到本机的服务。</p></div></div>
+ <div class="peer-navigation"><nav class="tabs peer-tabs" id="peer-filters" role="tablist" aria-label="远端设备"><button class="tab" type="button" role="tab" aria-selected="true">正在读取设备…</button></nav><button id="manage-add" class="button primary-button workspace-create" disabled aria-label="新建当前设备到本机的端口连接" title="新建当前设备到本机的端口连接"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span id="manage-add-label">新建端口连接</span></button></div>
  <div class="toolbar"><nav class="tabs" id="filters" aria-label="服务分类"></nav><label class="search-wrap"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg><input class="search" id="search" type="search" placeholder="搜索当前设备的服务或端口" aria-label="搜索当前设备的服务或端口" aria-controls="services"></label></div>
  <p class="result-status" id="service-results-status" role="status" aria-live="polite" aria-atomic="true"></p>
  <p class="manage-message connection-message" id="connection-message" role="status" aria-live="polite" aria-atomic="true"></p>
  <div id="connection-confirmation-slot"></div>
  <div class="mapping-editor" id="mapping-editor" hidden>
-  <div class="editor-heading"><div><h3 id="editor-title">新增端口映射</h3><p class="editor-caption">把远端服务连接到这台 Mac，保存前可以预览完整变更。</p></div><button id="editor-close" aria-label="关闭配置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+  <div class="editor-heading"><div><h3 id="editor-title">新增端口映射</h3><p class="editor-caption" id="editor-caption">把远端服务连接到本机，保存前可以预览完整变更。</p></div><button id="editor-close" aria-label="关闭配置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
   <p class="editor-peer-status" id="editor-peer-status" role="status" aria-live="polite" hidden></p>
   <form id="mapping-form">
    <div class="endpoint-form">
@@ -135,21 +135,21 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       <label>设备<select id="mapping-peer" required disabled aria-readonly="true"></select><small class="editor-direction-lock"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>方向已锁定到当前设备；完成或取消编辑后可切换。</small></label>
       <div class="service-origin"><span class="field-caption">服务来源</span><div class="service-mode" role="group" aria-label="服务来源"><button type="button" id="mapping-mode-existing" aria-pressed="true">选择已有服务</button><button type="button" id="mapping-mode-new" aria-pressed="false">创建新服务</button></div></div>
       <label id="mapping-service-wrap">已发布的服务<select id="mapping-service" required></select><small id="mapping-catalog-note">正在读取服务…</small></label>
-      <label id="mapping-new-wrap" hidden>新服务 ID<input id="mapping-new-id" maxlength="64" placeholder="例如 my-service" pattern="[A-Za-z0-9_.\-]+"><small>已自动生成，可修改；新服务仅授权这台 Mac。</small></label>
+      <label id="mapping-new-wrap" hidden>新服务 ID<input id="mapping-new-id" maxlength="64" placeholder="例如 my-service" pattern="[A-Za-z0-9_.\-]+"><small>已自动生成，可修改；新服务仅授权当前本机。</small></label>
       <div id="mapping-target-wrap" class="target-field"><div class="field-label-row"><label for="mapping-target" id="mapping-target-label">服务目标地址</label><button type="button" id="mapping-edit-target" class="target-edit">修改目标</button></div><input id="mapping-target" placeholder="127.0.0.1:8080" readonly><small id="mapping-target-note">这里的回环地址属于远端设备。</small></div>
      </div>
     </fieldset>
     <div class="endpoint-bridge" aria-hidden="true"><span>P2P</span><svg viewBox="0 0 32 20"><path d="M2 10h27m-7-7 7 7-7 7"/></svg></div>
-    <fieldset class="endpoint-editor local-editor"><legend><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg><span>本机 Mac 入口<small>你将在这里访问远端服务</small></span></legend>
+    <fieldset class="endpoint-editor local-editor"><legend><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg><span><span id="mapping-local-name">本机入口</span><small>你将在这里访问远端服务</small></span></legend>
      <div class="editor-fields endpoint-fields">
-      <label for="mapping-port">本机端口</label><div class="listen-field"><code id="mapping-listen-prefix">127.0.0.1</code><span>:</span><input id="mapping-port" type="number" inputmode="numeric" min="1" max="65535" required value="18080" aria-label="Mac 本机监听端口"></div><small class="field-help">只在这台 Mac 上监听，保存前检查端口占用。</small><input id="mapping-listen" type="hidden" value="127.0.0.1:18080">
+      <label for="mapping-port">本机端口</label><div class="listen-field"><code id="mapping-listen-prefix">127.0.0.1</code><span>:</span><input id="mapping-port" type="number" inputmode="numeric" min="1" max="65535" required value="18080" aria-label="本机监听端口"></div><small class="field-help" id="mapping-local-help">只在这台设备上监听，保存前检查端口占用。</small><input id="mapping-listen" type="hidden" value="127.0.0.1:18080">
       <label>访问方式<select id="mapping-protocol"><option value="tcp">TCP · 用客户端连接</option><option value="http">HTTP · 在浏览器打开</option><option value="https">HTTPS · 在浏览器打开</option><option value="ssh">SSH</option><option value="smb">SMB · 文件共享</option><option value="rdp">RDP · 远程桌面</option></select></label>
       <label id="mapping-path-wrap" hidden>网页入口路径<input id="mapping-path" value="/" placeholder="/ 或 /login"><small>只填写路径，不包含账号、密码或 token。</small></label>
       <div class="local-access"><span>保存后使用这个地址访问</span><output id="mapping-access-address">127.0.0.1:18080</output></div>
      </div>
     </fieldset>
    </div>
-   <div class="editor-route" aria-label="映射链路预览"><div><span id="mapping-route-source-label">远端 Ubuntu</span><code id="mapping-route-source">选择服务</code></div><span class="editor-route-arrow" aria-hidden="true"><svg viewBox="0 0 24 16"><path d="M2 8h19m-5-5 5 5-5 5"/></svg></span><div><span>本机 Mac</span><code id="mapping-route-destination">127.0.0.1:18080</code></div></div>
+   <div class="editor-route" aria-label="映射链路预览"><div><span id="mapping-route-source-label">远端设备</span><code id="mapping-route-source">选择服务</code></div><span class="editor-route-arrow" aria-hidden="true"><svg viewBox="0 0 24 16"><path d="M2 8h19m-5-5 5 5-5 5"/></svg></span><div><span id="mapping-route-destination-label">本机</span><code id="mapping-route-destination">127.0.0.1:18080</code></div></div>
    <div class="editor-name"><label for="mapping-name">入口名称</label><input id="mapping-name" maxlength="128" required placeholder="例如：测试环境控制台"><small>显示在导航页上，可以保留服务名称。</small></div>
    <details class="editor-advanced"><summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>更多设置</summary><div class="editor-fields">
     <label>功能分组<select id="mapping-category"><option value="其他">其他</option><option value="应用">应用服务</option><option value="路由与网络">路由与网络</option><option value="文件">文件共享</option><option value="节点管理">节点管理</option></select></label>
@@ -165,7 +165,7 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
 </section>
 <noscript><p>请允许本地页面运行 JavaScript 以显示服务入口。</p></noscript>
 <aside class="hint"><strong>状态与配置分开展示。</strong><p>映射标签表示保存的配置；服务可用性请按需检测。原有客户端仍可使用这里的本机地址。</p></aside>
-<footer class="foot"><span id="updated"></span><span>远端服务 → 本机 Mac · 无外部资源</span></footer>
+<footer class="foot"><span id="updated"></span><span id="footer-route">远端服务 → 本机 · 无外部资源</span></footer>
 </main>
 <div class="toast" id="toast" role="status" hidden></div>
 <script id="theme-controls">
@@ -181,7 +181,16 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
 </script>
 <script id="navigation-data" type="application/json">
 {
-  "updatedAt": "2026-11-12T18:07:50+08:00",
+  "updatedAt": "2026-11-14T12:08:08+08:00",
+  "host": {
+    "platform": "macos",
+    "name": "Mac",
+    "localAdminId": "mac-admin",
+    "adminUrl": "http://127.0.0.1:7789/",
+    "managedRemoteName": "Ubuntu",
+    "agentRestartSupported": true,
+    "tokenCommand": "pbcopy \u003c '/Users/glory/Library/Application Support/p2p-file/node/admin.token'"
+  },
   "services": [
     {
       "id": "ubuntu-sub2api",
@@ -195,10 +204,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:18081",
       "target": "127.0.0.1:8080",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -211,14 +223,17 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "description": "在 Finder 中按 ⌘K，将共享地址粘贴到「连接服务器」。",
       "category": "文件",
       "protocol": "smb",
-      "url": "smb://127.0.0.1:1445",
+      "url": "127.0.0.1:1445",
       "listen": "127.0.0.1:1445",
       "target": "127.0.0.1:445",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -235,10 +250,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:18443",
       "target": "192.168.3.192:18443",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -255,10 +273,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:7788",
       "target": "127.0.0.1:8787",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -275,10 +296,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:18082",
       "target": "192.168.3.1:80",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -295,10 +319,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:9090",
       "target": "192.168.3.1:9090",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -311,14 +338,17 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "description": "在 Mac 浏览器中操作远端 Ubuntu 的 Chromium，使用原有账号登录。",
       "category": "应用",
       "protocol": "https",
-      "url": "https://127.0.0.1:13001/",
+      "url": "https://localhost:13001/",
       "listen": "127.0.0.1:13001",
       "target": "172.19.0.3:3001",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true,
@@ -332,14 +362,17 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "description": "在终端执行 ssh ubuntu-local，通过本机端口登录远端 Ubuntu。",
       "category": "路由与网络",
       "protocol": "ssh",
-      "url": "ssh://127.0.0.1:2222",
+      "url": "127.0.0.1:2222",
       "listen": "127.0.0.1:2222",
       "target": "127.0.0.1:61132",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -356,10 +389,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:3003",
       "target": "127.0.0.1:3003",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -376,10 +412,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:19999",
       "target": "127.0.0.1:19999",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -396,10 +435,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:8214",
       "target": "127.0.0.1:8214",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -416,10 +458,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:3080",
       "target": "127.0.0.1:3080",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -436,10 +481,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:22118",
       "target": "127.0.0.1:21118（计划目标，待 Windows 核对）",
       "remoteLabel": "远端 Windows",
+      "peerName": "Windows",
+      "peerPlatform": "windows",
       "peerNodeId": "5eef2d53912e77479fa2e61ef3aa27c3",
-      "targetSource": null,
-      "authorizedDirectoryVerified": false,
+      "targetSource": "user-confirmed",
+      "authorizedDirectoryVerified": true,
       "targetVerified": false,
+      "remoteConfigVerified": false,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -456,10 +504,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:18097",
       "target": "127.0.0.1:18097",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -476,10 +527,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:21985",
       "target": "127.0.0.1:21985",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -496,10 +550,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:28098",
       "target": "127.0.0.1:28098",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -514,12 +571,15 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "protocol": "http",
       "url": "http://127.0.0.1:18090/v1/models",
       "listen": "127.0.0.1:18090",
-      "target": "wsl-llama（Windows 目标地址未公开）",
+      "target": "远端目标未公开",
       "remoteLabel": "远端 Windows",
+      "peerName": "Windows",
+      "peerPlatform": "windows",
       "peerNodeId": "5eef2d53912e77479fa2e61ef3aa27c3",
-      "targetSource": null,
-      "authorizedDirectoryVerified": false,
+      "targetSource": "authorized-directory",
+      "authorizedDirectoryVerified": true,
       "targetVerified": false,
+      "remoteConfigVerified": false,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -534,12 +594,15 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "protocol": "http",
       "url": "http://127.0.0.1:18098/worker/v1/capabilities",
       "listen": "127.0.0.1:18098",
-      "target": "127.0.0.1:18097（Windows 端提供，未读取配置）",
+      "target": "远端目标未公开",
       "remoteLabel": "远端 Windows",
+      "peerName": "Windows",
+      "peerPlatform": "windows",
       "peerNodeId": "5eef2d53912e77479fa2e61ef3aa27c3",
-      "targetSource": null,
+      "targetSource": "authorized-directory",
       "authorizedDirectoryVerified": true,
       "targetVerified": false,
+      "remoteConfigVerified": false,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -554,12 +617,15 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "protocol": "http",
       "url": "http://127.0.0.1:21986/api/v1/versions",
       "listen": "127.0.0.1:21986",
-      "target": "127.0.0.1:21985（Windows 端提供，未读取配置）",
+      "target": "远端目标未公开",
       "remoteLabel": "远端 Windows",
+      "peerName": "Windows",
+      "peerPlatform": "windows",
       "peerNodeId": "5eef2d53912e77479fa2e61ef3aa27c3",
-      "targetSource": null,
+      "targetSource": "authorized-directory",
       "authorizedDirectoryVerified": true,
       "targetVerified": false,
+      "remoteConfigVerified": false,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -574,12 +640,15 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "protocol": "http",
       "url": "http://127.0.0.1:28099/",
       "listen": "127.0.0.1:28099",
-      "target": "127.0.0.1:28098（Windows 端提供，未读取配置）",
+      "target": "远端目标未公开",
       "remoteLabel": "远端 Windows",
+      "peerName": "Windows",
+      "peerPlatform": "windows",
       "peerNodeId": "5eef2d53912e77479fa2e61ef3aa27c3",
-      "targetSource": null,
+      "targetSource": "authorized-directory",
       "authorizedDirectoryVerified": true,
       "targetVerified": false,
+      "remoteConfigVerified": false,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -596,10 +665,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:19001",
       "target": "127.0.0.1:9001",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -616,10 +688,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:13389",
       "target": "127.0.0.1:3389",
       "remoteLabel": "远端 Windows",
+      "peerName": "Windows",
+      "peerPlatform": "windows",
       "peerNodeId": "5eef2d53912e77479fa2e61ef3aa27c3",
       "targetSource": "user-confirmed",
       "authorizedDirectoryVerified": true,
       "targetVerified": false,
+      "remoteConfigVerified": false,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -636,10 +711,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:1935",
       "target": "127.0.0.1:1935",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true
@@ -656,10 +734,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:6379",
       "target": "127.0.0.1:6379",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true,
@@ -677,10 +758,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:3306",
       "target": "127.0.0.1:13306",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true,
@@ -698,10 +782,13 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "listen": "127.0.0.1:5432",
       "target": "127.0.0.1:5432",
       "remoteLabel": "远端 Ubuntu",
+      "peerName": "Ubuntu",
+      "peerPlatform": "linux",
       "peerNodeId": "cbd82de8be77d5f813fc3ff92663b2ac",
       "targetSource": null,
       "authorizedDirectoryVerified": null,
       "targetVerified": true,
+      "remoteConfigVerified": true,
       "enabled": true,
       "autoStart": true,
       "remote": true,
@@ -712,15 +799,17 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
       "serviceId": "mac-admin",
       "title": "本机 Mac · 节点管理",
       "name": "Mac Veytrane 管理",
-      "description": "配置这台 Mac 的监听端口，接收 Ubuntu 等远端设备提供的服务。",
+      "description": "配置这台 Mac 的回环监听，接收其他设备提供的服务。",
       "category": "节点管理",
       "protocol": "http",
       "url": "http://127.0.0.1:7789/",
       "listen": "127.0.0.1:7789",
-      "target": "本机 Veytrane Web 管理",
+      "target": "本机 Mac Web 管理",
       "enabled": true,
       "autoStart": null,
-      "remote": false
+      "remote": false,
+      "localPlatform": "macos",
+      "localName": "Mac"
     }
   ]
 }
@@ -728,54 +817,110 @@ body,.top,.node-status-list,.grid,.node-grid .card,.activity-panel,.menu-panel,.
 <script>
 const data=JSON.parse(document.getElementById('navigation-data').textContent);
 const icons={管理:'<rect x="3" y="4" width="18" height="15" rx="2"/><path d="M3 9h18M8 9v10m3 3h2"/>',应用:'<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',文件:'<path d="M3 7a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9H3z"/>'};
+const defaultHostNames={macos:'Mac',windows:'Windows',linux:'Linux'};
+function normalizePlatform(value){
+ const platform=String(value||'').toLowerCase();
+ if(['mac','macos','osx','darwin'].includes(platform))return 'macos';
+ if(['win','win32','windows'].includes(platform))return 'windows';
+ if(['linux'].includes(platform))return 'linux';
+ return platform||'macos';
+}
+function normalizeHost(value={},previous={}){
+ const platform=normalizePlatform(value.platform||previous.platform);
+ const name=String(value.name||(value.platform?defaultHostNames[platform]:previous.name)||defaultHostNames[platform]||'Mac').trim();
+ const localAdminId=String(value.localAdminId||(value.platform?undefined:previous.localAdminId)||(platform==='macos'?'mac-admin':'local-admin')).trim();
+ const host={...previous,...value,platform,name,localAdminId};
+ if(value.platform&&!Object.prototype.hasOwnProperty.call(value,'tokenCommand'))delete host.tokenCommand;
+ return host;
+}
+function hostFromPayload(value){
+ const candidates=[value?.host,value?.navigation?.host,value?.baseline?.host,value?.baseline?.navigation?.host,value?.result?.host,value?.data?.host];
+ return candidates.find(candidate=>candidate&&typeof candidate==='object'&&!Array.isArray(candidate))||null;
+}
+let currentHost=normalizeHost(data.host||{},{platform:'macos',name:'Mac',localAdminId:'mac-admin'});
+function applyHost(value){const host=hostFromPayload(value);if(host)currentHost=normalizeHost(host,currentHost);return currentHost}
+function localName(){return currentHost.name}
+function localPlatform(){return currentHost.platform}
+function localAdminId(){return currentHost.localAdminId}
+function tokenCommand(){return String(currentHost.tokenCommand||'').trim()}
+function pasteShortcut(){return localPlatform()==='macos'?'⌘V':'Ctrl+V'}
+function localizeText(value){
+ const text=String(value??''),name=localName();if(name==='Mac'||!text)return text;
+ return text.replace(/本机\s*Mac/g,name+' · 本机').replace(/这台 Mac/g,name).replace(/\bMac\b/g,name);
+}
+function displayDescription(s){
+ let text=String(s?.description||'');
+ if(localPlatform()!=='macos'){
+  text=text.replace(/在 Finder 中按 ⌘K，将共享地址粘贴到「连接服务器」。/g,'使用系统文件客户端打开此共享地址。')
+   .replace(/Finder/g,'系统文件客户端')
+   .replace(/⌘K|Cmd\+K|Command\+K/g,'文件客户端入口')
+   .replace(/在 Mac 的 Windows App 中/g,'在当前设备的远程桌面客户端中')
+   .replace(/在 Mac RustDesk 中/g,'在当前设备的 RustDesk 中')
+   .replace(/在 Mac 浏览器中/g,'在当前设备的浏览器中')
+   .replace(/在 Mac 的/g,'在当前设备的')
+   .replace(/Mac 的/g,'当前设备的')
+   .replace(/Mac/g,'当前设备');
+ }
+ return localizeText(text);
+}
 let filter='全部',timer,selectedPeer=null,peerSwitchGuard=null,editorPeerIdentity=null;
 function el(tag,cls,text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n}
 function notify(message){const t=document.getElementById('toast');t.textContent=message;t.hidden=false;clearTimeout(timer);timer=setTimeout(()=>t.hidden=true,2600)}
 async function copy(text,label='地址'){try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text)}else{const t=el('textarea');t.value=text;t.style.cssText='position:fixed;top:-9999px';document.body.append(t);t.select();const ok=document.execCommand('copy');t.remove();if(!ok)throw Error('clipboard')}notify(label+'已复制')}catch{notify('复制失败，请手动选择并复制上方内容')}}
 function tokenHelp(card,s){
  if(!isNode(s))return;
- const isMac=s.serviceId==='mac-admin'||s.id==='mac-admin';
- const command=isMac?'pbcopy < "$HOME/Library/Application Support/p2p-file/node/admin.token"':"ssh ubuntu 'cat ~/.local/share/p2p-file/node/admin.token' | pbcopy";
+ const local=isLocalAdmin(s),nodeName=local?localName():servicePeerLabel(s,'对应节点'),command=local?tokenCommand():'';
  const box=el('div','token-help');
- box.append(el('strong','',(isMac?'Mac':'Ubuntu')+' 管理 token'));
- box.append(el('p','','在 Mac 终端执行下面的命令，将对应节点的 token 复制到剪贴板：'));
- const pre=el('pre');pre.append(el('code','',command));box.append(pre);
- const button=el('button','copy','复制获取 token 的命令');button.type='button';button.onclick=()=>copy(command,'命令');box.append(button);
- box.append(el('p','','执行后终端没有输出是正常的。打开上方管理页面，在“管理 token”输入框按 ⌘V 粘贴，再点击“读取配置（放弃草稿）”。'));
- box.append(el('p','','Mac 与 Ubuntu 使用各自的 token；此网页只提供命令，不保存 token。'));
+ box.append(el('strong','',nodeName+' 管理 token'));
+ if(command){
+  box.append(el('p','','在当前设备终端执行下面的命令，将管理 token 复制到剪贴板：'));
+  const pre=el('pre');pre.append(el('code','',command));box.append(pre);
+  const button=el('button','copy','复制获取 token 的命令');button.type='button';button.onclick=()=>copy(command,'命令');box.append(button);
+  box.append(el('p','','打开上方管理页面，在“管理 token”输入框按 '+pasteShortcut()+' 粘贴，再点击“读取配置（放弃草稿）”。'));
+ }else{
+  box.append(el('p','','请从对应的本机节点管理界面获取管理 token，再粘贴到上方管理页面。'));
+ }
+ box.append(el('p','','此网页只提供获取入口，不保存 token。'));
  card.append(box);
 }
 const groups=[
- {category:'节点管理',title:'节点管理',description:'这台 Mac 与远程 Ubuntu 并排管理。服务提供方和接收方，请分别在对应节点配置。'},
+ {category:'节点管理',title:'节点管理',description:'本机与远端设备的节点管理入口。服务提供方和接收方，请分别在对应节点配置。'},
  {category:'路由与网络',title:'路由与网络',description:'路由器系统、网络设备和代理控制面板。'},
  {category:'应用',title:'应用服务',description:'日常使用的应用与控制台。'},
- {category:'文件',title:'文件共享',description:'使用 Finder 或对应客户端访问文件。'},
+ {category:'文件',title:'文件共享',description:'使用系统文件客户端访问共享文件。'},
  {category:'其他',title:'其他入口',description:'尚未标明访问方式的入口仅提供地址复制。'}
 ];
 icons['节点管理']=icons.管理;
 icons['路由与网络']='<rect x="3" y="10" width="18" height="10" rx="2"/><path d="M7 10V5m10 5V5M7 15h.01M11 15h.01M8 3a7 7 0 0 1 8 0"/>';
-function isNode(s){return ['mac-admin','ubuntu-admin'].includes(s.serviceId)||['mac-admin','ubuntu-ubuntu-admin'].includes(s.id)}
+function serviceIdentity(s){return String(s?.serviceId||s?.id||'')}
+function isLocalAdmin(s){return !!s&&s.remote===false&&(s.category==='节点管理'||serviceIdentity(s)===localAdminId()||s.id===localAdminId())}
+function isNode(s){return !!s&&(s.category==='节点管理'||isLocalAdmin(s))}
 function groupOf(s){return isNode(s)?'节点管理':s.category||'其他'}
 function definitions(){const known=new Set(groups.map(g=>g.category));return [...groups,...[...new Set(data.services.map(groupOf))].filter(c=>!known.has(c)).sort((a,b)=>a.localeCompare(b,'zh-CN')).map(c=>({category:c,title:c,description:''}))]}
 function sortedServices(services,category){
  return [...services].sort((a,b)=>{
-  if(category==='节点管理')return Number(a.id==='mac-admin')-Number(b.id==='mac-admin');
+  if(category==='节点管理')return Number(isLocalAdmin(b))-Number(isLocalAdmin(a));
   return a.title.localeCompare(b.title,'zh-CN',{numeric:true})||a.id.localeCompare(b.id);
  });
 }
 function isRemoteService(s){return !isNode(s)&&s.remote&&s.peerNodeId}
+function peerNode(key){return (Array.isArray(window.navigationSnapshot?.nodes)?window.navigationSnapshot.nodes:[]).find(node=>(node.id||node.peer)===key)}
+function peerLabelForService(s,fallback='设备'){
+ const configured=peerNode(s?.peerNodeId)?.label||s?.remoteLabel||s?.label||currentHost.managedRemoteName||fallback;
+ return String(configured).trim().replace(/^远端\s*/,'')||fallback;
+}
+function servicePeerLabel(s,fallback='对应节点'){return peerLabelForService(s,fallback)}
 function peerDefinition(subject){
  const key=subject.peerNodeId||subject.id||subject.peer;
  const nodes=Array.isArray(window.navigationSnapshot?.nodes)?window.navigationSnapshot.nodes:[];
  const snapshotNode=nodes.find(node=>(node.id||node.peer)===key);
- const ubuntuPeer=nodes.find(node=>/ubuntu/i.test(node.label||''))?.id||data.services.find(item=>isNode(item)&&/ubuntu/i.test(item.serviceId||item.id||''))?.peerNodeId;
- const peerLabel=String(snapshotNode?.label||subject.remoteLabel||subject.label||'').trim();
- if(key===ubuntuPeer||/ubuntu/i.test(peerLabel))return {key,title:'Ubuntu → 本机 Mac',order:0};
- if(/windows/i.test(peerLabel))return {key,title:'Windows → 本机 Mac',order:1};
- const title=(peerLabel.replace(/^远端\s*/,'')||'未知设备')+' → 本机 Mac';
- return {key,title,order:2};
+ const configuredLabel=String(snapshotNode?.label||subject.remoteLabel||subject.label||currentHost.managedRemoteName||'').trim();
+ const label=configuredLabel.replace(/^远端\s*/,'')||'未知设备';
+ const nodeOrder=nodes.findIndex(node=>(node.id||node.peer)===key);
+ const serviceOrder=data.services.findIndex(item=>(item.peerNodeId||item.id||item.peer)===key);
+ const order=nodeOrder>=0?nodeOrder:serviceOrder>=0?serviceOrder:Number.MAX_SAFE_INTEGER;
+ return {key,label,title:label+' → '+localName(),order};
 }
-let initialNodePeers=null;
 function peerDefinitions(){
  const peers=new Map();
  const sourceKeys=new Set();
@@ -791,7 +936,7 @@ function peerDefinitions(){
  for(const node of nodes)addPeer(node);
  for(const service of data.services.filter(item=>item.remote&&item.peerNodeId))addPeer(service,service);
  if(!snapshot||snapshot.agent?.available===false){
-  if(!initialNodePeers)initialNodePeers=data.services.filter(item=>item.remote&&item.peerNodeId&&isNode(item)).map(peerDefinition);
+  const initialNodePeers=data.services.filter(item=>item.remote&&item.peerNodeId&&isNode(item)).map(peerDefinition);
   for(const peer of initialNodePeers){if(!peers.has(peer.key)){peers.set(peer.key,{...peer,services:[],sourceAvailable:true});sourceKeys.add(peer.key)}}
  }
  const inventoryUnavailable=!!snapshot&&(snapshot.agent?.available===false||!Array.isArray(snapshot.nodes));
@@ -803,7 +948,7 @@ function peerDefinitions(){
   if(editorPeerIdentity?.key===peer.key)peer.title=editorPeerIdentity.title;
   peer.managementState=editorPeerIdentity?.key===peer.key?(inventoryUnavailable?'unconfirmed':sourceKeys.has(peer.key)?'available':'missing'):'available';
  }
- return [...peers.values()].sort((a,b)=>a.order-b.order||a.title.localeCompare(b.title,'zh-CN'));
+ return [...peers.values()].sort((a,b)=>a.order-b.order||a.label.localeCompare(b.label,'zh-CN'));
 }
 function syncSelectedPeer(peers=peerDefinitions()){
  if(peers.some(peer=>peer.key===selectedPeer))return;
@@ -817,10 +962,10 @@ function mappingRoute(s){
  const box=el('div','mapping-route'),line=el('div','mapping-line');
  function endpoint(label,address,role){const e=el('div','mapping-end mapping-'+role);e.append(el('span','mapping-label',label),el('code','mapping-address',address));return e}
  const hop=el('div','mapping-hop');hop.setAttribute('aria-hidden','true');hop.innerHTML='<span>'+ (s.remote?'P2P':'直连')+'</span><svg viewBox="0 0 24 16"><path d="M2 8h19m-5-5 5 5-5 5"/></svg>';
- const remoteLabel=s.remoteLabel||'远端 Ubuntu';
- if(s.remote)line.append(endpoint(remoteLabel,s.target||'待核实','remote'),hop,endpoint('本机 Mac',s.listen,'local'));
- else line.append(endpoint('Mac 浏览器','本机直接访问','local'),hop,endpoint('Mac 管理服务',s.listen,'local'));
- box.setAttribute('aria-label',s.remote?remoteLabel+' '+s.target+' 经 P2P 转发到本机 Mac '+s.listen:'本机直接访问 '+s.listen);box.append(line);return box;
+ const remoteLabel='远端 '+servicePeerLabel(s);
+ if(s.remote)line.append(endpoint(remoteLabel,s.target||'待核实','remote'),hop,endpoint(localName(),s.listen,'local'));
+ else line.append(endpoint(localName()+' 浏览器','本机直接访问','local'),hop,endpoint(localName()+' 管理服务',s.listen,'local'));
+ box.setAttribute('aria-label',s.remote?remoteLabel+' '+s.target+' 经 P2P 转发到 '+localName()+' '+s.listen:'本机直接访问 '+s.listen);box.append(line);return box;
 }
 function loginHelp(card,s){
  const name={'chromium-web':'Chromium','rustfs-console':'RustFS'}[s.serviceId];
@@ -833,17 +978,17 @@ function loginHelp(card,s){
  card.append(box);
 }
 function serviceCard(s){
- const node=isNode(s),local=s.id==='mac-admin',card=el('article','card'+(node?(local?' node-local':' node-remote'):''));card.dataset.serviceId=s.serviceId||s.id;
+ const node=isNode(s),local=isLocalAdmin(s),card=el('article','card'+(node?(local?' node-local':' node-remote'):''));card.dataset.serviceId=s.serviceId||s.id;
  const heading=el('div','entry-heading'),identity=el('div','entry-identity'),icon=el('span','icon');icon.setAttribute('aria-hidden','true');icon.innerHTML='<svg viewBox="0 0 24 24">'+(icons[groupOf(s)]||icons.应用)+'</svg>';
- identity.append(icon,el('h3','',s.title),el('span','protocol',s.protocol.toUpperCase()));
+ identity.append(icon,el('h3','',localizeText(s.title)),el('span','protocol',s.protocol.toUpperCase()));
  const actions=el('div','actions');
- if(['http','https'].includes(s.protocol)&&s.enabled){const label=node?(local?'打开 Mac 管理':'打开 Ubuntu 管理'):'打开';const a=el('a','primary',label);a.href=s.loginUrl||s.url;a.target='_blank';a.rel='noopener noreferrer';a.setAttribute('aria-label',label);a.insertAdjacentHTML('beforeend','<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6m0-6L10 14M10 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5"/></svg>');actions.append(a)}
- else{const b=el('button','primary',s.protocol==='smb'?'复制 Finder 地址':'复制地址');b.onclick=()=>copy(s.url);actions.append(b)}
+ if(['http','https'].includes(s.protocol)&&s.enabled){const label=node?(local?'打开 '+localName()+' 管理':'打开 '+servicePeerLabel(s,'远端节点')+' 管理'):'打开',href=local&&currentHost.adminUrl?currentHost.adminUrl:s.loginUrl||s.url;const a=el('a','primary',label);a.href=href;a.target='_blank';a.rel='noopener noreferrer';a.setAttribute('aria-label',label);a.insertAdjacentHTML('beforeend','<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6m0-6L10 14M10 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5"/></svg>');actions.append(a)}
+ else{const b=el('button','primary','复制地址');b.onclick=()=>copy(s.url);actions.append(b)}
  if(['http','https'].includes(s.protocol)){const b=el('button','copy','复制地址');b.setAttribute('aria-label','复制'+s.name+'地址');b.onclick=()=>copy(s.url);actions.append(b)}
  heading.append(identity,actions);card.append(heading,mappingRoute(s));
  const bottom=el('div','entry-bottom');bottom.dataset.entryBottom='true';card.append(bottom);
  const extra=el('details','service-extra');extra.append(el('summary','',node?'节点详情与管理令牌':s.login?'服务详情与登录信息':'服务详情'));
- extra.append(el('p','service-description',s.description));
+ extra.append(el('p','service-description',displayDescription(s)));
  const pending=s.targetVerified===false&&!(s.targetSource==='user-confirmed'&&s.authorizedDirectoryVerified);
  const meta=el('p','service-meta');meta.append(document.createTextNode((s.remote?(s.enabled?(s.autoStart?'已启用 · 随节点启动':'已启用 · 手动启动'):'已停用'):'本机直接访问')+(pending?' · 远端配置待核对':'')+' · 服务 ID：'),el('code','',s.serviceId||s.id));extra.append(meta);
  if(s.peerNodeId){const peer=el('p','service-meta');peer.append(document.createTextNode('节点 ID：'),el('code','',s.peerNodeId));extra.append(peer)}
@@ -868,7 +1013,7 @@ function renderPeerFilters(peers){
  peers.forEach((peer,index)=>{
   const button=el('button','tab'),icon=el('span','peer-tab-icon'),label=el('span','',peer.title),count=el('span','group-count',peer.services.length+' 个入口');
   icon.setAttribute('aria-hidden','true');
-  icon.innerHTML=/windows/i.test(peer.title)?'<svg viewBox="0 0 24 24"><path d="M3 4h8v7H3zm10 0h8v7h-8zM3 13h8v7H3zm10 0h8v7h-8z"/></svg>':/ubuntu/i.test(peer.title)?'<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>':'<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>';
+  icon.innerHTML='<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></svg>';
   const selected=peer.key===selectedPeer,locked=!selected&&!!peerSwitchGuard&&!peerSwitchGuard(false);
   button.type='button';button.id='peer-tab-'+index;button.dataset.peer=peer.key;button.dataset.managementState=peer.managementState||'available';button.setAttribute('role','tab');button.setAttribute('aria-controls','services');button.setAttribute('aria-selected',String(selected));button.setAttribute('aria-disabled',String(locked));button.tabIndex=selected?0:-1;button.append(icon,label,count);
   button.onclick=()=>selectPeer(peer.key);
@@ -910,20 +1055,18 @@ function restoreNavigationFocus(choice){
  const button=[...nav.querySelectorAll('.tab')].find(item=>item.dataset[value]===choice.value)||nav.querySelector('[aria-selected=true],[aria-pressed=true]')||nav.querySelector('.tab');
  button?.focus({preventScroll:true});
 }
-function peerName(peer){return peer?.title.replace(/\s*→\s*本机 Mac$/,'')||'当前设备'}
+function peerName(peer){return peer?.label||'当前设备'}
 function updateWorkspaceContext(peer){
  const name=peerName(peer),button=document.getElementById('manage-add'),label=document.getElementById('manage-add-label'),context=document.getElementById('workspace-direction-context');
  if(label)label.textContent='新建端口连接';
  button.dataset.peer=peer?.key||'';
- const action=peer?'新建 '+name+' → 本机 Mac 端口连接':'尚无可用的远端设备';
+ const action=peer?'新建 '+name+' → '+localName()+' 端口连接':'尚无可用的远端设备';
  button.setAttribute('aria-label',action);button.title=action;
  if(context){
   if(!peer)context.textContent='当前没有可用的远端服务设备。';
   else if(peer.managementState==='missing')context.textContent='当前设备已从节点和映射状态中消失；现有草稿保留，保存操作已暂停。';
   else if(peer.managementState==='unconfirmed')context.textContent='当前无法确认设备状态；现有草稿保留，预览和保存已暂停。';
-  else if(/^windows(?:\s|$)/i.test(name))context.textContent='选择 '+name+' 已授权服务，映射到这台 Mac。';
-  else if(/^ubuntu(?:\s|$)/i.test(name))context.textContent='在 '+name+' 发布服务，并映射到这台 Mac。';
-  else context.textContent='选择 '+name+' 已授权服务，映射到这台 Mac。';
+  else context.textContent='选择 '+name+' 的已授权服务，并映射到 '+localName()+'。';
  }
 }
 function updateSearchContext(peer,matched,total){
@@ -953,12 +1096,26 @@ function zeroServiceState(peer){
  }
  return box;
 }
+function refreshLocalChrome(){
+ const name=localName();
+ const setText=(id,value)=>{const node=document.getElementById(id);if(node)node.textContent=value};
+ setText('page-intro','按远端设备管理服务入口，并把可用端口映射到 '+name+'。');
+ setText('editor-caption','把远端服务连接到 '+name+'，保存前可以预览完整变更。');
+ setText('mapping-local-name',name+' 入口');
+ setText('mapping-local-help','只在这台设备上监听，保存前检查端口占用。');
+ setText('mapping-route-destination-label',name);
+ setText('footer-route','远端服务 → '+name+' · 无外部资源');
+ const port=document.getElementById('mapping-port');if(port)port.setAttribute('aria-label',name+' 本机监听端口');
+ const restart=document.getElementById('manage-restart');if(restart)restart.textContent='重启 '+name+' 节点…';
+ if(typeof updateRoute==='function')updateRoute();
+}
 function render(){
+ refreshLocalChrome();
  const focusedChoice=focusedNavigationChoice();
  const expanded=new Set([...document.querySelectorAll('#node-services .service-extra[open],#services .service-extra[open]')].map(item=>item.closest('.card').dataset.ruleId));
  const peers=peerDefinitions();syncSelectedPeer(peers);
  const nodeContainer=document.getElementById('node-services'),nodes=sortedServices(data.services.filter(isNode),'节点管理');
- nodeContainer.replaceChildren(...nodes.length?[serviceGroup({category:'节点管理',title:'节点管理',description:'本机 Mac 与远端 Ubuntu 节点管理入口。'},nodes,expanded,'nodes')]:[]);
+ nodeContainer.replaceChildren(...nodes.length?[serviceGroup({category:'节点管理',title:'节点管理',description:localName()+' 与已配置远端设备的节点管理入口。'},nodes,expanded,'nodes')]:[]);
  const peer=selectedPeerDefinition(peers),container=document.getElementById('services');renderFilters(peer);container.replaceChildren();
  updateWorkspaceContext(peer);renderPeerFilters(peers);
  if(!peer){updateSearchContext(null,0,0);container.removeAttribute('aria-labelledby');container.append(el('p','empty','暂无可用的远端服务。'));restoreNavigationFocus(focusedChoice);return}
@@ -988,7 +1145,7 @@ const ui=id=>document.getElementById(id),root=ui('navigation-management'),editor
 const incumbentRender=render;
 let session=null,snapshot=null,busy=false,plan=null,editing=null,catalog=null,monitor=null,uncertain=false,refreshedAfterUnknown=false,confirmedAction=null,confirmedScope='global',confirmedTarget=null,sourceMode='existing',newTargetDraft='',lastAutoName='',protocolTouched=false,editorReturnTarget=null,pendingEditorFocus=false,pendingEditorReturnFocus=null,navigationOnly=location.protocol==='file:';
 const checks=new Map();
-const names={apply:'保存配置',start:'启动转发',stop:'停止转发',restart_forward:'重启转发',reconnect:'重新连接设备',restart_agent:'重启 Mac 节点'};
+const names={apply:'保存配置',start:'启动转发',stop:'停止转发',restart_forward:'重启转发',reconnect:'重新连接设备',restart_agent:'重启节点'};
 function message(text,error=false,scope='global'){const target=scope==='connection'?ui('connection-message'):ui('manage-message');target.textContent=text;target.classList.toggle('error',error)}
 function isEditing(){return editing!==null||!editorRoot.hidden}
 function connectionConfirmationOpen(){return confirmedScope==='connection'&&!!confirmedAction&&!ui('manage-confirmation').hidden}
@@ -1076,7 +1233,8 @@ function updateControls(){
  for(const b of editorRoot.querySelectorAll('button'))b.disabled=busy||(pending()&&b.id==='mapping-apply');
  for(const input of editorRoot.querySelectorAll('input,select'))input.disabled=busy;
  ui('mapping-peer').disabled=true;ui('mapping-peer').setAttribute('aria-readonly','true');
- if(ui('mapping-service').value==='ubuntu-admin')ui('mapping-target').disabled=true;
+ const selectedService=data.services.find(service=>(service.serviceId||service.id)===ui('mapping-service').value);
+ if(isNode(selectedService))ui('mapping-target').disabled=true;
  ui('mapping-mode-new').disabled=busy||!catalog?.editableTarget;
  if(editorPeerBlocked())for(const id of ['mapping-preview','mapping-apply','mapping-remove'])ui(id).disabled=true;
  ui('manage-resolved').hidden=!uncertain||!refreshedAfterUnknown;ui('manage-resolved').disabled=busy;
@@ -1100,7 +1258,7 @@ async function perform(fn,scope='global'){
 }
 function metrics(){ui('total').textContent=data.services.length;ui('mapped').textContent=data.services.filter(s=>s.remote).length;ui('automatic').textContent=data.services.filter(s=>s.remote&&s.enabled&&s.autoStart).length}
 function renderState(value){
- snapshot=value;window.navigationSnapshot=value;data.services=value.navigation.services;data.updatedAt=value.navigation.updatedAt;
+ applyHost(value);snapshot=value;window.navigationSnapshot=value;data.services=value.navigation.services;data.updatedAt=value.navigation.updatedAt;
  if(connectionConfirmationTargetInvalid(value)){
   dismissConfirmation();
   message('设备或映射已变化，确认已取消，请核对后重试。',false,'connection');
@@ -1111,16 +1269,16 @@ function renderState(value){
  const nodes=ui('manage-nodes');nodes.replaceChildren();
  const symbol='<svg class="node-symbol" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg>';
  function node(label,text,connected,peer=null){const row=el('div','node-signal');row.innerHTML=symbol;const info=el('div','node-info'),state=el('span','node-state');state.append(el('span','status-dot'+(connected?' connected':' failed')),document.createTextNode(text));info.append(el('strong','',label),state);row.append(info);if(peer){const b=button('重连',()=>ask('重新连接 '+peer.label,'该设备的 '+peer.mappings+' 条映射可能短暂断开，其他设备连接保持。','确认重新连接',async()=>{const r=await request('reconnect',{peer:peer.id,confirm:'reconnect_peer',operation:crypto.randomUUID().replaceAll('-','')},true);checks.clear();await refresh();message(r.message)},'global'),'node-reconnect');b.dataset.reconnect='true';b.disabled=busy||pending();b.setAttribute('aria-label','重新连接 '+peer.label);row.append(b)}nodes.append(row)}
- node('本机 Mac',value.agent.available?(value.agent.running?'运行中':'节点已停止')+' · '+value.agent.activeStreams+' 条连接':'管理连接不可用',value.agent.available&&value.agent.running);
- for(const n of [...(value.nodes||[])].sort((a,b)=>(a.label==='Ubuntu'?-1:0)-(b.label==='Ubuntu'?-1:0))){const phase=({connected:'已连接',disconnected:'未连接',failed:'连接失败',authenticating:'认证中',punching:'连接中'})[n.phase]||'状态待确认';node(n.label,phase+(n.rttMs!==null?' · '+n.rttMs+' ms':''),n.phase==='connected',n)}
+ node(localName(),value.agent.available?(value.agent.running?'运行中':'节点已停止')+' · '+value.agent.activeStreams+' 条连接':'管理连接不可用',value.agent.available&&value.agent.running);
+ for(const n of value.nodes||[]){const phase=({connected:'已连接',disconnected:'未连接',failed:'连接失败',authenticating:'认证中',punching:'连接中'})[n.phase]||'状态待确认';node(n.label,phase+(n.rttMs!==null?' · '+n.rttMs+' ms':''),n.phase==='connected',n)}
  const list=ui('manage-history');list.replaceChildren();
- for(const h of value.history||[]){const li=el('li'),heading=el('div','history-heading');heading.append(el('strong','',names[h.action]||h.action),el('span','history-result '+h.state,({complete:'完成',failed:'失败',pending:'待确认',unknown:'待确认'})[h.state]||h.state),el('time','',new Date(h.at).toLocaleString('zh-CN',{hour12:false})));li.append(heading);if(h.subject)li.append(el('div','history-subject',h.subject));li.append(el('div','history-message',h.message));list.append(li)}
+ for(const h of value.history||[]){const li=el('li'),heading=el('div','history-heading'),action=h.action==='restart_agent'?'重启 '+localName()+' 节点':names[h.action]||h.action;heading.append(el('strong','',action),el('span','history-result '+h.state,({complete:'完成',failed:'失败',pending:'待确认',unknown:'待确认'})[h.state]||h.state),el('time','',new Date(h.at).toLocaleString('zh-CN',{hour12:false})));li.append(heading);if(h.subject)li.append(el('div','history-subject',h.subject));li.append(el('div','history-message',h.message));list.append(li)}
  if(!list.childElementCount)list.append(el('li','','暂无操作记录。'));
  const grouped=new Map();for(const line of [...(value.errors||[]),value.agent.lastError,...(value.agent.diagnostics||[])].filter(Boolean))grouped.set(line,(grouped.get(line)||0)+1);
  ui('manage-diagnostics').textContent=[...grouped].map(([line,count])=>line+(count>1?'（'+count+' 次）':'')).join('\n')||'暂无异常诊断。';
  const signal=value.agent.signal?(' · 信令'+({online:'在线',offline:'离线',connecting:'连接中'}[value.agent.signal]||'状态待确认')):'';
  ui('manage-connection').textContent=(value.agent.available?'管理已连接':'管理连接不可用')+signal+(value.remoteConfigAvailable?' · 远端配置已核对':'');
- ui('manage-connection').title='Mac 配置版本 '+(value.revision??'未知')+'；通过“管理选项”核对两端保存的配置。';
+ ui('manage-connection').title=localName()+' 配置版本 '+(value.revision??'未知')+'；通过“管理选项”核对两端保存的配置。';
 }
 async function refresh(remote=false){const value=await request('state',{refreshRemote:remote});renderState(value);if(uncertain)refreshedAfterUnknown=true;return value}
 function showNodeReadState(title,detail){
@@ -1142,7 +1300,7 @@ async function connect(){
   if(!response.ok)throw new Error('bootstrap unavailable');
   let value;try{value=await response.json()}catch{throw new Error('bootstrap response invalid')}
   if(!value?.token)throw new Error('bootstrap token missing');
-  session=value.token;await refresh();message('')
+  applyHost(value);render();session=value.token;await refresh();message('')
  }catch{
   session=null;stopMonitor();ui('manage-connect').hidden=false;
   ui('manage-connection').textContent='管理台连接失败 · 导航仍可使用';
@@ -1152,7 +1310,7 @@ async function connect(){
  }
 }
 function diagnosticText(v){
- const parts=['Mac 监听：'+(v.listening?'已监听':'未监听'),'P2P：'+(v.peerReady?'已连接':'未就绪')];
+ const parts=[localName()+' 监听：'+(v.listening?'已监听':'未监听'),'P2P：'+(v.peerReady?'已连接':'未就绪')];
  if(v.target)parts.push('远端目标 TCP：'+(v.target.reachable?'可连接':'连接失败'));
  else parts.push(v.targetError?'远端目标：独立检测失败':'远端目标：未检测');
  if(v.http){const h=v.http;parts.push('HTTP '+h.status+' · '+h.path+(h.status===401||h.status===403?'（需要鉴权）':h.status===404?'（路径未找到）':''));if(h.healthCheck)parts.push('健康检查：'+(h.healthy?'通过':'未通过'));else parts.push('应用健康：未配置检查路径');if(h.tlsVerified===false)parts.push('HTTPS：已连接，未校验证书')}
@@ -1200,6 +1358,7 @@ function syncListen(){const raw=ui('mapping-bind-host').value.trim(),host=raw.in
 function updateRoute(){
  const node=sourceNode(),web=['http','https'].includes(ui('mapping-protocol').value),path=ui('mapping-path').value||'/';
  ui('mapping-peer').title=ui('mapping-peer').value;ui('mapping-route-source-label').textContent='远端 '+(node?.label||'设备');
+ ui('mapping-route-destination-label').textContent=localName();
  const selected=catalog?.services.find(s=>s.id===ui('mapping-service').value);
  ui('mapping-route-source').textContent=catalog?.editableTarget?(ui('mapping-target').value||'填写服务目标'):(selected?.name||'选择授权服务');
  ui('mapping-route-destination').textContent=ui('mapping-port').value?ui('mapping-listen').value:'填写本机端口';
@@ -1210,11 +1369,11 @@ function selectService(){
  const value=ui('mapping-service').value,isNew=value==='__new__';sourceMode=isNew?'new':'existing';
  ui('mapping-mode-existing').setAttribute('aria-pressed',String(!isNew));ui('mapping-mode-new').setAttribute('aria-pressed',String(isNew));
  ui('mapping-service-wrap').hidden=isNew;ui('mapping-new-wrap').hidden=!isNew;ui('mapping-new-id').required=isNew;
- const service=catalog?.services.find(s=>s.id===value),node=sourceNode();
+ const service=catalog?.services.find(s=>s.id===value),node=sourceNode(),protectedNode=isNode(data.services.find(item=>(item.serviceId||item.id)===value));
  ui('mapping-target-wrap').hidden=!catalog?.editableTarget;ui('mapping-target').value=isNew?newTargetDraft:service?.target||'';
- ui('mapping-target').required=!!catalog?.editableTarget;ui('mapping-target').readOnly=!isNew;ui('mapping-target').disabled=value==='ubuntu-admin';
- ui('mapping-edit-target').hidden=isNew||!catalog?.editableTarget||value==='ubuntu-admin';
- ui('mapping-target-note').textContent=isNew?'填写 '+(node?.label||'远端设备')+' 能够访问的 IP 和端口。':value==='ubuntu-admin'?'管理服务目标受保护，请在原节点管理页修改。':'这是远端设备上的目标；回环地址属于 '+(node?.label||'远端设备')+'。';
+ ui('mapping-target').required=!!catalog?.editableTarget;ui('mapping-target').readOnly=!isNew;ui('mapping-target').disabled=protectedNode;
+ ui('mapping-edit-target').hidden=isNew||!catalog?.editableTarget||protectedNode;
+ ui('mapping-target-note').textContent=isNew?'填写 '+(node?.label||'远端设备')+' 能够访问的 IP 和端口。':protectedNode?'管理服务目标受保护，请在原节点管理页修改。':'这是远端设备上的目标；回环地址属于 '+(node?.label||'远端设备')+'。';
  if(isNew&&!ui('mapping-new-id').value)ui('mapping-new-id').value='service-'+crypto.randomUUID().slice(0,8);
  if(!editing){
   const known=data.services.find(s=>s.peerNodeId===ui('mapping-peer').value&&s.serviceId===value);
@@ -1239,8 +1398,8 @@ async function loadCatalog(selected){
   if(catalog.editableTarget){const option=new Option('创建新服务','__new__');option.hidden=true;select.append(option)}
   if(selected&&!Array.from(select.options).some(o=>o.value===selected))select.append(new Option(selected+'（未在授权目录找到）',selected));
   if(selected)select.value=selected;else select.value=catalog.services.find(s=>s.enabled!==false&&s.authorized!==false)?.id||(catalog.editableTarget?'__new__':'');select.disabled=false;
-  ui('mapping-mode-new').disabled=!catalog.editableTarget;ui('mapping-mode-new').title=catalog.editableTarget?'在远端创建服务并授权这台 Mac':'请先在此设备上发布并授权服务';
-  ui('mapping-catalog-note').textContent=catalog.editableTarget?'已读取远端发布的服务。':'此设备已授权给这台 Mac 的服务。';selectService();
+  ui('mapping-mode-new').disabled=!catalog.editableTarget;ui('mapping-mode-new').title=catalog.editableTarget?'在远端创建服务并授权 '+localName():'请先在此设备上发布并授权服务';
+  ui('mapping-catalog-note').textContent=catalog.editableTarget?'已读取远端发布的服务。':'此设备已授权给 '+localName()+' 的服务。';selectService();
  }catch(e){ui('mapping-service').replaceChildren(new Option(selected||'读取失败，请重试',selected||''));ui('mapping-catalog-note').textContent=e.message;updateRoute();throw e}
 }
 async function openEditor(s=null,trigger=null){
@@ -1252,14 +1411,14 @@ async function openEditor(s=null,trigger=null){
  editing=s;pendingEditorFocus=true;sourceMode='existing';newTargetDraft='';lastAutoName='';protocolTouched=false;invalidate();message('',false,'connection');
  const peer=selectedPeerDefinition(),direction=peerName(peer);
  editorPeerIdentity=peer?{key:peer.key,title:peer.title,order:peer.order}:null;
- editorRoot.hidden=false;ui('editor-title').textContent=s?'编辑 '+s.name+' · '+direction+' → 本机 Mac':'新建 '+direction+' → 本机 Mac 端口连接';editorRoot.querySelector('.editor-advanced').open=false;
- ui('mapping-peer').replaceChildren(...[...snapshot.nodes].filter(n=>n.id===peer?.key||!/mac|本机/i.test(n.label||'')).sort((a,b)=>Number(b.label==='Ubuntu')-Number(a.label==='Ubuntu')).map(n=>{const option=new Option(n.label,n.id);option.title=n.id;return option}));
+ editorRoot.hidden=false;ui('editor-title').textContent=s?'编辑 '+localizeText(s.name)+' · '+direction+' → '+localName():'新建 '+direction+' → '+localName()+' 端口连接';editorRoot.querySelector('.editor-advanced').open=false;
+ ui('mapping-peer').replaceChildren(...[...snapshot.nodes].filter(n=>n.id===peer?.key||serviceIdentity(n)!==localAdminId()).map(n=>{const option=new Option(n.label,n.id);option.title=n.id;return option}));
  if(s)ui('mapping-peer').value=s.peerNodeId;
  else if(selectedPeer&&[...ui('mapping-peer').options].some(option=>option.value===selectedPeer))ui('mapping-peer').value=selectedPeer;
  ui('mapping-peer').disabled=true;ui('mapping-peer').setAttribute('aria-readonly','true');
  const listener=s?.listen||'127.0.0.1:18080',match=listener.match(/^(\[[^\]]+\]|[^:]+):(\d+)$/);
  ui('mapping-bind-host').value=match?.[1]||'127.0.0.1';ui('mapping-port').value=match?.[2]||'18080';ui('mapping-listen').value=listener;
- ui('mapping-name').value=s?.name||'';ui('mapping-new-id').value='';ui('mapping-protocol').value=s?.protocol||'tcp';ui('mapping-category').value=s?.category||'其他';ui('mapping-path').value=s?new URL(s.url.startsWith('http')?s.url:'http://example/').pathname:'/';ui('mapping-health').value=s?.healthPath||'';ui('mapping-enabled').checked=s?.ruleEnabled??s?.enabled??true;ui('mapping-auto').checked=s?.autoStart??true;ui('mapping-remove').hidden=!s||s.serviceId==='ubuntu-admin';
+ ui('mapping-name').value=s?localizeText(s.name):'';ui('mapping-new-id').value='';ui('mapping-protocol').value=s?.protocol||'tcp';ui('mapping-category').value=s?.category||'其他';ui('mapping-path').value=s?new URL(s.url.startsWith('http')?s.url:'http://example/').pathname:'/';ui('mapping-health').value=s?.healthPath||'';ui('mapping-enabled').checked=s?.ruleEnabled??s?.enabled??true;ui('mapping-auto').checked=s?.autoStart??true;ui('mapping-remove').hidden=!s||isNode(s);
  syncListen();updateControls();editorRoot.scrollIntoView({block:'start',behavior:'instant'});await loadCatalog(s?.serviceId);updateControls();if(!busy)handoffEditorFocus();
 }
 function formValue(){return {id:editing?.id,name:ui('mapping-name').value,peer:ui('mapping-peer').value,serviceId:ui('mapping-service').value==='__new__'?ui('mapping-new-id').value:ui('mapping-service').value,listen:ui('mapping-listen').value,target:catalog?.editableTarget?ui('mapping-target').value:'',protocol:ui('mapping-protocol').value,category:ui('mapping-category').value,path:ui('mapping-path').value,healthPath:ui('mapping-health').value,enabled:ui('mapping-enabled').checked,autoStart:ui('mapping-auto').checked}}
@@ -1286,7 +1445,7 @@ ui('manage-monitor').onchange=()=>{const wanted=ui('manage-monitor').checked;sto
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stopMonitor()});window.addEventListener('pagehide',stopMonitor);
 window.addEventListener('blur',()=>{if(monitor){stopMonitor();message('实时状态已暂停。')}});
 ui('manage-resolved').onclick=()=>{uncertain=false;refreshedAfterUnknown=false;message('已解除操作暂停。下一次配置保存仍会重新检查两端版本。');updateControls();decorate()};
-ui('manage-restart').onclick=()=>{ui('management-tools').open=false;ask('重启 Mac 节点','将短暂断开全部 '+(snapshot?.navigation.services.filter(s=>s.remote).length||0)+' 条转发，当前有 '+(snapshot?.agent.activeStreams||0)+' 个 TCP 流。管理网页会保持可用。','确认重启节点',async()=>{const result=await request('restart_agent',{confirm:'restart_all',operation:crypto.randomUUID().replaceAll('-','')},true);checks.clear();await refresh();message(result.message)})};
+ui('manage-restart').onclick=()=>{ui('management-tools').open=false;ask('重启 '+localName()+' 节点','重启 '+localName()+' 会短暂断开全部 '+(snapshot?.navigation.services.filter(s=>s.remote).length||0)+' 条转发，当前有 '+(snapshot?.agent.activeStreams||0)+' 个 TCP 流。管理网页会保持可用。','确认重启节点',async()=>{const result=await request('restart_agent',{confirm:'restart_all',operation:crypto.randomUUID().replaceAll('-','')},true);checks.clear();await refresh();message(result.message)})};
 const originalControls=updateControls;updateControls=function(){originalControls();root.querySelectorAll('[data-reconnect]').forEach(b=>b.disabled=busy||pending())};
 ui('manage-activity-toggle').onclick=()=>{const open=ui('manage-activity').hidden;ui('manage-activity').hidden=!open;ui('manage-activity-toggle').setAttribute('aria-expanded',String(open))};
 function activityTab(key){for(const name of ['history','diagnostics']){const selected=name===key;ui('activity-'+name+'-tab').setAttribute('aria-selected',String(selected));ui('activity-'+name+'-tab').tabIndex=selected?0:-1;ui('activity-'+name+'-panel').hidden=!selected}}

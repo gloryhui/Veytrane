@@ -481,12 +481,70 @@ impl Agent {
 
 /// The caller initializes node.json explicitly before running this host.
 pub async fn run(paths: AgentPaths) -> io::Result<()> {
-    run_with_recovery(paths, false).await
+    run_with_recovery(paths, false, None).await.map(|_| ())
 }
 pub async fn run_managed(paths: AgentPaths) -> io::Result<()> {
-    run_with_recovery(paths, true).await
+    run_with_recovery(paths, true, None).await.map(|_| ())
 }
-async fn run_with_recovery(paths: AgentPaths, managed: bool) -> io::Result<()> {
+
+/// The HTTP adapter lives beside the core, so a user-requested core restart
+/// releases all ownership before rebuilding it while the navigation stays up.
+pub async fn run_integrated(
+    paths: AgentPaths,
+    managed: bool,
+    configuration: std::path::PathBuf,
+) -> io::Result<()> {
+    let (restart, restart_rx) = watch::channel(false);
+    let (shutdown, shutdown_rx) = watch::channel(false);
+    let web_paths = paths.clone();
+    let web = tokio::spawn(async move {
+        if let Err(error) = crate::node::adapters::navigation::serve(
+            web_paths,
+            &configuration,
+            restart,
+            shutdown_rx,
+        )
+        .await
+        {
+            // A presentation failure must not tear down established forwards.
+            tracing::error!(%error, "内置导航不可用，P2P 核心继续运行");
+        }
+    });
+    let mut restart_rx = restart_rx;
+    let result = loop {
+        match run_with_recovery(paths.clone(), managed, Some(restart_rx.clone())).await {
+            Ok(true) => {
+                restart_rx.borrow_and_update();
+            }
+            Ok(false) => break Ok(()),
+            Err(error) => break Err(error),
+        }
+    };
+    let _ = shutdown.send(true);
+    let abort = web.abort_handle();
+    if tokio::time::timeout(Duration::from_secs(45), web)
+        .await
+        .is_err()
+    {
+        abort.abort();
+    }
+    result
+}
+
+async fn navigation_restart(receiver: &mut Option<watch::Receiver<bool>>) {
+    if let Some(receiver) = receiver
+        && receiver.changed().await.is_ok()
+    {
+        return;
+    }
+    std::future::pending::<()>().await;
+}
+
+async fn run_with_recovery(
+    paths: AgentPaths,
+    managed: bool,
+    mut navigation: Option<watch::Receiver<bool>>,
+) -> io::Result<bool> {
     let _directory_lock =
         crate::instance_lock::InstanceLock::acquire(&paths.lock()).map_err(io::Error::other)?;
     let record = ConfigRecord::load(&paths.config()).map_err(io::Error::other)?;
@@ -576,8 +634,13 @@ async fn run_with_recovery(paths: AgentPaths, managed: bool) -> io::Result<()> {
     tokio::pin!(reload);
     let recovery = host_recovery(agent.control.clone(), managed);
     tokio::pin!(recovery);
+    let mut restart_requested = false;
     let outcome = loop {
         tokio::select! {
+            _=navigation_restart(&mut navigation)=>{
+                restart_requested = true;
+                break Ok(());
+            },
             _=stopping.changed()=>break Ok(()),
             signal=&mut shutdown=>break signal,
             error=&mut recovery=>break Err(error),
@@ -629,7 +692,7 @@ async fn run_with_recovery(paths: AgentPaths, managed: bool) -> io::Result<()> {
         .map_err(io::Error::other)?;
     drain.abort();
     let _ = drain.await;
-    outcome
+    outcome.map(|()| restart_requested)
 }
 async fn host_recovery(control: NodeControl, managed: bool) -> io::Error {
     if !managed {

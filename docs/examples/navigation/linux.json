@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "local_name": "Linux desktop",
+  "installed": "/home/example/.local/lib/p2p-file-node/installed.json",
+  "page": "/home/example/.local/share/p2p-file/navigation/service-navigation.html",
+  "state_dir": "/home/example/.local/share/p2p-file/navigation/control",
+  "http": {
+    "port": 3001,
+    "public_port": 3001
+  },
+  "remote": null,
+  "peers": {
+    "22222222222222222222222222222222": {
+      "name": "Windows workstation",
+      "platform": "windows",
+      "targets": {
+        "windows-rdp": "192.0.2.20:3389"
+      }
+    }
+  },
+  "lifecycle": {
+    "kind": "systemd",
+    "service": "p2p-file-agent.service",
+    "definition": "/home/example/.config/systemd/user/p2p-file-agent.service"
+  },
+  "agent_web": "http://127.0.0.1:7789/"
+}

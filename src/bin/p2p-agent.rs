@@ -17,6 +17,12 @@ struct Args {
     /// Enable macOS supervisor fallback if the network core exits.
     #[arg(long)]
     managed: bool,
+    /// Serve the navigation UI and API in this Agent process.
+    #[arg(long, conflicts_with = "no_navigation")]
+    navigation_config: Option<PathBuf>,
+    /// Disable the optional navigation adapter even if its config exists.
+    #[arg(long)]
+    no_navigation: bool,
 }
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -40,7 +46,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.initialize && !paths.config().try_exists()? {
         management_cli::initialize(&paths)?;
     }
-    if args.managed {
+    let navigation = if args.no_navigation {
+        None
+    } else if let Some(path) = args.navigation_config {
+        Some(path)
+    } else {
+        paths
+            .root
+            .parent()
+            .map(|root| root.join("navigation/config.json"))
+            .filter(|path| path.is_file())
+    };
+    if let Some(config) = navigation {
+        agent::run_integrated(paths, args.managed, config).await?;
+    } else if args.managed {
         agent::run_managed(paths).await?;
     } else {
         agent::run(paths).await?;
