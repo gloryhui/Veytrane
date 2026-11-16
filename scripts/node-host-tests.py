@@ -19,6 +19,35 @@ spec.loader.exec_module(host)
 
 
 class Hosting(unittest.TestCase):
+    def test_windows_powershell_prefers_pwsh_and_preserves_structured_environment(self):
+        captured = {}
+        def choose(command):
+            captured.setdefault('lookups', []).append(command)
+            return r'C:\Program Files\PowerShell\7\pwsh.exe' if command == 'pwsh' else r'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+        def invoke(argv, *, check=True, env=None):
+            captured['argv'] = argv
+            captured['check'] = check
+            captured['env'] = env
+            return subprocess.CompletedProcess(argv, 0, 'ok', '')
+        with patch.object(host.shutil, 'which', side_effect=choose), \
+                patch.object(host, 'run', side_effect=invoke), \
+                patch.dict(host.os.environ, {'PSModulePath': 'legacy-module-path'}, clear=False):
+            result = host.powershell('Write-Output $s.value', {'value': 'fixture'})
+        self.assertEqual(result.stdout, 'ok')
+        self.assertEqual(captured['lookups'], ['pwsh'])
+        self.assertEqual(captured['argv'][0], r'C:\Program Files\PowerShell\7\pwsh.exe')
+        self.assertIn('$PSVersionTable.PSVersion.Major -lt 7', captured['argv'][-1])
+        self.assertNotIn('PSModulePath', captured['env'])
+        self.assertEqual(json.loads(captured['env']['P2P_NODE_HOST_SETTINGS']), {'value': 'fixture'})
+
+    def test_windows_powershell_missing_pwsh_fails_without_legacy_fallback(self):
+        with patch.object(host.shutil, 'which', return_value=None) as choose, \
+                patch.object(host, 'run') as invoke:
+            with self.assertRaisesRegex(RuntimeError, r'PowerShell 7\+ \(pwsh\).*not found on PATH.*5\.1 is not selected'):
+                host.powershell('Write-Output "not executed"')
+        choose.assert_called_once_with('pwsh')
+        invoke.assert_not_called()
+
     def test_mac_login_host_enables_managed_recovery_and_keeps_intentional_stop(self):
         import plistlib
         with tempfile.TemporaryDirectory() as directory:

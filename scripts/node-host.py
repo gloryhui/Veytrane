@@ -48,14 +48,20 @@ def user_data():
 
 
 def powershell(script, settings=None):
-    host = shutil.which('powershell.exe') or shutil.which('pwsh')
+    host = shutil.which('pwsh')
     if not host:
-        raise RuntimeError('PowerShell is required for the current-user scheduled task')
+        raise RuntimeError(
+            'PowerShell 7+ (pwsh) is required for the current-user scheduled task; '
+            'pwsh was not found on PATH and PowerShell 5.1 is not selected automatically'
+        )
     env = os.environ.copy()
     env.pop('PSModulePath', None)
     env['P2P_NODE_HOST_SETTINGS'] = json.dumps(settings or {}, ensure_ascii=True)
     return run([host, '-NoProfile', '-NonInteractive', '-Command',
-                "$ErrorActionPreference='Stop';$s=$env:P2P_NODE_HOST_SETTINGS|ConvertFrom-Json;" + script], env=env)
+                "$ErrorActionPreference='Stop';"
+                "if($PSVersionTable.PSVersion.Major -lt 7){"
+                "throw 'PowerShell 7 or newer is required; pwsh did not provide a compatible PowerShell runtime'};"
+                "$s=$env:P2P_NODE_HOST_SETTINGS|ConvertFrom-Json;" + script], env=env)
 
 
 def task_name():
