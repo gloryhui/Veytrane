@@ -2,6 +2,8 @@
 
 核验日期：2026-11-16，Asia/Shanghai。本文接续 `WINDOWS_RECOVERY_VALIDATION_20261116.md` 的 17:10 阶段记录；不包含身份私钥、密码、原始打洞 token 或完整私有配置。
 
+后续 19:01 的受控单设备重连已完成，详见 `WINDOWS_MAC_CONTROLLED_RECONNECT_20261116.md`：同轮 PUNCH token、QUIC Initial/Handshake 和 Windows 侧 generation 100 已对齐，原 Ubuntu TCP 流 210 个心跳连续、正常退出。本报告的 UAC 取消和证据缺口属于前序窗口，按各节时间理解。
+
 ## 结论与完成边界
 
 用户明确授权以本机 PowerShell 7、管理员身份、现有 RemoteSigned 执行已准备的升级脚本后，Windows Agent 于 **17:25:23** 完成升级。实际运行 SHA 为 `fc13ff9ec92db112bf71d6ad8e428c9f459b52db`，包含 `b981f07` 的 primary/recovery 修复及本次短时诊断；身份、revision、配置、信任与授权、映射、导航和原启动方式均保留。
