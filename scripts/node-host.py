@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import ntpath
 import os
 from pathlib import Path
 import platform
@@ -60,6 +61,173 @@ def powershell(script, settings=None):
 def task_name():
     sid = powershell('[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value').stdout.strip()
     return 'P2PFile-Agent-' + hashlib.sha256(sid.encode()).hexdigest()[:12]
+
+
+def windows_path(value):
+    return ntpath.normcase(ntpath.normpath(str(value)))
+
+
+def windows_data_dirs(arguments):
+    pattern = r'(?:^|\s)--data-dir(?:=|\s+)(?:"([^"]*)"|([^\s]+))(?=\s|$)'
+    return [quoted or bare for quoted, bare in re.findall(pattern, arguments or '', re.IGNORECASE)]
+
+
+def windows_task_preflight(state):
+    if platform.system() != 'Windows':
+        raise RuntimeError('Windows task preflight requires Windows')
+    script = r'''
+$current=[System.Security.Principal.WindowsIdentity]::GetCurrent();
+$tasks=@();
+foreach($task in @(Get-ScheduledTask -ErrorAction SilentlyContinue)){
+  $principalSid=$null;
+  $principalUser=$task.Principal.UserId;
+  if($principalUser -match '^S-\d-\d+(-\d+)+$'){
+    $principalSid=$principalUser;
+  } else {
+    try {$principalSid=(New-Object System.Security.Principal.NTAccount($principalUser)).Translate([System.Security.Principal.SecurityIdentifier]).Value} catch {};
+  };
+  $actions=@();
+  foreach($action in @($task.Actions)){
+    $actions += [pscustomobject]@{
+      execute=$action.Execute;
+      arguments=$action.Arguments;
+      working_directory=$action.WorkingDirectory
+    };
+  };
+  $tasks += [pscustomobject]@{
+    name=$task.TaskName;
+    path=$task.TaskPath;
+    principal_user=$principalUser;
+    principal_sid=$principalSid;
+    logon_type=$task.Principal.LogonType.ToString();
+    actions=$actions
+  };
+};
+[pscustomobject]@{
+  current_sid=$current.User.Value;
+  tasks=$tasks
+}|ConvertTo-Json -Compress -Depth 7
+'''
+    result = powershell(script)
+    try:
+        value = json.loads(result.stdout.lstrip('\ufeff'))
+    except (TypeError, ValueError) as error:
+        raise RuntimeError(f'Windows startup task preflight returned invalid data: {error}') from error
+    if not isinstance(value, dict) or not isinstance(value.get('tasks'), list):
+        raise RuntimeError('Windows startup task preflight returned incomplete data')
+    return value
+
+
+def select_windows_startup_task(preflight, state):
+    current_sid = preflight.get('current_sid')
+    if not current_sid:
+        raise RuntimeError('Windows startup task preflight did not identify the current user SID')
+    expected_agent = windows_path(Path(state['bin_dir']) / 'p2p-agent.exe')
+    expected_data = windows_path(state['data_dir'])
+    matches = []
+    for task in preflight['tasks']:
+        if not isinstance(task, dict):
+            continue
+        for index, action in enumerate(task.get('actions') or []):
+            if not isinstance(action, dict) or windows_path(action.get('execute') or '') != expected_agent:
+                continue
+            data_dirs = windows_data_dirs(action.get('arguments'))
+            if len(data_dirs) == 1 and windows_path(data_dirs[0]) == expected_data:
+                matches.append((task, index))
+    if not matches:
+        raise RuntimeError('no Windows startup task action exactly matches the old Agent executable and --data-dir; upgrade refused before Agent shutdown')
+    if len(matches) != 1:
+        labels = ', '.join(f"{task.get('path', '')}{task.get('name', '')}" for task, _ in matches)
+        raise RuntimeError(f'ambiguous Windows startup task selection ({labels}); upgrade refused before Agent shutdown')
+    task, action_index = matches[0]
+    label = f"{task.get('path', '')}{task.get('name', '')}"
+    action = task['actions'][action_index]
+    if task.get('principal_sid') != current_sid:
+        raise RuntimeError(f'Windows startup task {label} belongs to a different account; upgrade refused before Agent shutdown')
+    return {'name': task.get('name'), 'path': task.get('path') or '\\', 'action_index': action_index}
+
+
+def update_windows_task(task, old, candidate):
+    settings = {
+        'name': task['name'],
+        'path': task['path'],
+        'old_agent': str(Path(old['bin_dir']) / 'p2p-agent.exe'),
+        'old_working_directory': str(Path(old['bin_dir'])),
+        'new_agent': str(Path(candidate['bin_dir']) / 'p2p-agent.exe'),
+        'new_working_directory': str(Path(candidate['bin_dir'])),
+        'data_dir': str(Path(old['data_dir'])),
+    }
+    script = r'''
+function Test-SamePath([string]$left,[string]$right){
+  if(-not $left -or -not $right){return $false};
+  return [string]::Equals([IO.Path]::GetFullPath($left),[IO.Path]::GetFullPath($right),[StringComparison]::OrdinalIgnoreCase)
+};
+$task=Get-ScheduledTask -TaskName $s.name -TaskPath $s.path -ErrorAction Stop;
+if($null -eq $task){throw 'startup task disappeared'};
+$before=[xml](Export-ScheduledTask -TaskName $s.name -TaskPath $s.path);
+$beforePrincipal=$before.Task.Principals.OuterXml;
+$beforeTriggers=$before.Task.Triggers.OuterXml;
+$beforeSettings=$before.Task.Settings.OuterXml;
+$beforeActions=@($before.Task.Actions.ChildNodes);
+$pattern='(?:^|\s)--data-dir(?:=|\s+)(?:"'+[regex]::Escape($s.data_dir)+'"|'+[regex]::Escape($s.data_dir)+')(?=\s|$)';
+$matched=@();
+$actions=@($task.Actions);
+for($index=0;$index -lt $actions.Count;$index++){
+  $action=$actions[$index];
+  if((Test-SamePath $action.Execute $s.old_agent) -and
+     [regex]::IsMatch($action.Arguments,$pattern,[Text.RegularExpressions.RegexOptions]::IgnoreCase)){
+    $matched+=@($index);
+  };
+};
+if($matched.Count -ne 1){throw 'startup task no longer has one exact old installation action'};
+$actionIndex=$matched[0];
+$beforeArguments=$actions[$actionIndex].Arguments;
+$updateWorkingDirectory=(Test-SamePath $actions[$actionIndex].WorkingDirectory $s.old_working_directory);
+$actions[$matched[0]].Execute=$s.new_agent;
+if($updateWorkingDirectory){$actions[$matched[0]].WorkingDirectory=$s.new_working_directory};
+$updated=Set-ScheduledTask -TaskName $s.name -TaskPath $s.path -Action $actions -ErrorAction Stop;
+$after=[xml](Export-ScheduledTask -TaskName $s.name -TaskPath $s.path);
+$afterActions=@($after.Task.Actions.ChildNodes);
+if($after.Task.Principals.OuterXml -ne $beforePrincipal -or
+   $after.Task.Triggers.OuterXml -ne $beforeTriggers -or
+   $after.Task.Settings.OuterXml -ne $beforeSettings -or
+   $afterActions.Count -ne $beforeActions.Count){throw 'task principal, triggers, settings, or action count changed'};
+for($index=0;$index -lt $beforeActions.Count;$index++){
+  if($index -eq $actionIndex){
+    $beforeAction=$beforeActions[$index];
+    $afterAction=$afterActions[$index];
+    if($beforeAction.Attributes.Count -ne $afterAction.Attributes.Count){throw 'matched task action attributes changed'};
+    foreach($attribute in @($beforeAction.Attributes)){
+      if($afterAction.GetAttribute($attribute.Name) -ne $attribute.Value){throw 'matched task action attributes changed'};
+    };
+    if($afterAction.Arguments -ne $beforeArguments -or
+       $afterAction.Command -ne $s.new_agent -or
+       ($updateWorkingDirectory -and $afterAction.WorkingDirectory -ne $s.new_working_directory) -or
+       (-not $updateWorkingDirectory -and $afterAction.WorkingDirectory -ne $beforeAction.WorkingDirectory)){
+      throw 'matched task action did not preserve arguments or apply only the allowed path update';
+    };
+  } elseif($afterActions[$index].OuterXml -ne $beforeActions[$index].OuterXml){
+    throw 'another task action changed';
+  };
+};
+[pscustomobject]@{name=$updated.TaskName;path=$updated.TaskPath;logon_type=$updated.Principal.LogonType.ToString()}|ConvertTo-Json -Compress
+'''
+    try:
+        result = powershell(script, settings)
+    except RuntimeError as error:
+        raise RuntimeError('Windows startup task update or verification failed before Agent shutdown; the old Agent is still running and no credentials were requested') from error
+    try:
+        value = json.loads(result.stdout.lstrip('\ufeff'))
+    except (TypeError, ValueError) as error:
+        raise RuntimeError(f'Windows startup task update returned invalid data: {error}') from error
+    if value.get('name') != task['name'] or value.get('path') != task['path']:
+        raise RuntimeError('Windows startup task identity changed during update')
+    return value
+
+
+def start_windows_task(task):
+    powershell('Start-ScheduledTask -TaskName $s.name -TaskPath $s.path',
+               {'name': task['name'], 'path': task['path']})
 
 
 def locations():
@@ -224,16 +392,23 @@ def main():
         data_dir = (args.data_dir or (Path(old['data_dir']) if old else user_data())).resolve()
         if old and data_dir != Path(old['data_dir']):
             parser.error('upgrade cannot change the identity/data directory')
+        startup_task = select_windows_startup_task(windows_task_preflight(old), old) if old and platform.system() == 'Windows' else None
         previous_status = response(old, ['status']) if old else None
         candidate = install(args.bin_dir.resolve(), base, data_dir, args.allow_dirty)
         if old:
-            stop(old, service)
             atomic_json(base / 'previous-install.json', {'installation': old, 'status': previous_status})
-            disable(old, service)
+            if startup_task:
+                update_windows_task(startup_task, old, candidate)
+            stop(old, service)
+            if not startup_task:
+                disable(old, service)
         atomic_json(state_file, candidate)
         if old:
-            enable(candidate, service)
-            start(candidate, service)
+            if startup_task:
+                start_windows_task(startup_task)
+            else:
+                enable(candidate, service)
+                start(candidate, service)
             deadline = time.monotonic() + 30
             while time.monotonic() < deadline:
                 status = response(candidate, ['status'], check=False)

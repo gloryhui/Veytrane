@@ -79,6 +79,108 @@ class Hosting(unittest.TestCase):
                     host.install(source,root/'install',root/'data',False)
             self.assertFalse((root/'data').exists(),'install initialized identity/data')
 
+    def test_windows_upgrade_selects_unique_existing_task_and_keeps_extra_arguments(self):
+        old={'bin_dir':r'C:\Users\glory\AppData\Local\p2p-file\bin\abc123',
+             'data_dir':r'C:\Users\glory\AppData\Local\p2p-file\node'}
+        preflight={'current_sid':'S-1-5-21-1','tasks':[{
+            'name':'Veytrane-Agent-Boot','path':'\\','principal_sid':'S-1-5-21-1',
+            'logon_type':'Password',
+            'actions':[{'execute':r'C:\Users\glory\AppData\Local\p2p-file\bin\abc123\p2p-agent.exe',
+                        'arguments':r'--data-dir "C:\Users\glory\AppData\Local\p2p-file\node" --managed',
+                        'working_directory':r'C:\Users\glory\AppData\Local\p2p-file\bin\abc123'}]}]}
+        selected=host.select_windows_startup_task(preflight,old)
+        self.assertEqual(selected,{'name':'Veytrane-Agent-Boot','path':'\\','action_index':0})
+
+    def test_windows_task_preflight_accepts_principal_sid(self):
+        snapshot={'current_sid':'S-1-5-21-1','tasks':[]}
+        with patch.object(host.platform,'system',return_value='Windows'), \
+                patch.object(host,'powershell',return_value=subprocess.CompletedProcess(
+                    [],0,json.dumps(snapshot),'')) as shell:
+            self.assertEqual(host.windows_task_preflight({}),snapshot)
+        script=shell.call_args.args[0]
+        self.assertIn("if($principalUser -match '^S-\\d-\\d+(-\\d+)+$')",script)
+        self.assertIn('New-Object System.Security.Principal.NTAccount($principalUser)',script)
+
+    def test_windows_upgrade_discovers_exact_task_and_preserves_other_working_directory(self):
+        old={'bin_dir':r'C:\install\old','data_dir':r'C:\data\node'}
+        action={'execute':r'C:\install\old\p2p-agent.exe','arguments':r'--data-dir "C:\data\node"',
+                'working_directory':None}
+        base={'principal_sid':'S-1-5-21-1','logon_type':'Password','actions':[action]}
+        with self.assertRaisesRegex(RuntimeError,'no Windows startup task'):
+            host.select_windows_startup_task({'current_sid':'S-1-5-21-1','tasks':[]},old)
+        ambiguous=[dict(base,name='first',path='\\'),dict(base,name='second',path='\\')]
+        with self.assertRaisesRegex(RuntimeError,'ambiguous Windows startup task'):
+            host.select_windows_startup_task({'current_sid':'S-1-5-21-1','tasks':ambiguous},old)
+        selected=host.select_windows_startup_task(
+            {'current_sid':'S-1-5-21-1','tasks':[dict(base,name='boot',path='\\')]},old)
+        self.assertEqual(selected,{'name':'boot','path':'\\','action_index':0})
+
+    def test_windows_upgrade_updates_only_existing_task_action(self):
+        old={'bin_dir':r'C:\install\old','data_dir':r'C:\data\node'}
+        candidate={'bin_dir':r'C:\install\new'}
+        task={'name':'Veytrane-Agent-Boot','path':'\\','action_index':0}
+        with patch.object(host,'powershell',return_value=subprocess.CompletedProcess(
+                [],0,json.dumps({'name':'Veytrane-Agent-Boot','path':'\\','logon_type':'Password'}),'')) as shell:
+            result=host.update_windows_task(task,old,candidate)
+        self.assertEqual(result['logon_type'],'Password')
+        script,settings=shell.call_args.args
+        self.assertIn('Set-ScheduledTask -TaskName $s.name -TaskPath $s.path -Action $actions',script)
+        self.assertNotIn('Register-ScheduledTask',script)
+        self.assertNotIn('New-ScheduledTaskAction',script)
+        self.assertNotIn('New-ScheduledTaskPrincipal',script)
+        self.assertNotIn('-Password',script)
+        self.assertNotIn('-Principal',script)
+        self.assertNotIn('AtLogOn',script)
+        self.assertNotIn('Interactive',script)
+        self.assertNotIn('.Arguments =',script)
+        self.assertIn('Export-ScheduledTask -TaskName $s.name -TaskPath $s.path',script)
+        self.assertIn('$after.Task.Principals.OuterXml -ne $beforePrincipal',script)
+        self.assertIn('$after.Task.Triggers.OuterXml -ne $beforeTriggers',script)
+        self.assertIn('$after.Task.Settings.OuterXml -ne $beforeSettings',script)
+        self.assertIn('another task action changed',script)
+        self.assertIn('$updateWorkingDirectory=(Test-SamePath $actions[$actionIndex].WorkingDirectory $s.old_working_directory)',script)
+        self.assertEqual(settings['new_agent'],r'C:\install\new\p2p-agent.exe')
+        self.assertEqual(settings['new_working_directory'],r'C:\install\new')
+
+    def test_windows_upgrade_update_failure_happens_before_stop(self):
+        with tempfile.TemporaryDirectory() as root:
+            root=Path(root);base=root/'bin';base.mkdir();data=root/'node';source=root/'candidate';source.mkdir()
+            old={'schema':1,'bin_dir':str(base/'old'),'data_dir':str(data),
+                 'build':{'build_sha':'a'*40,'source_state':'clean','api_version':1}}
+            candidate={'schema':1,'bin_dir':str(base/'new'),'data_dir':str(data),
+                       'build':{'build_sha':'b'*40,'source_state':'clean','api_version':1}}
+            host.atomic_json(base/'installed.json',old)
+            preflight={'current_sid':'S-1-5-21-1','tasks':[{
+                'name':'Veytrane-Agent-Boot','path':'\\','principal_sid':'S-1-5-21-1','logon_type':'Password',
+                'actions':[{'execute':str(Path(old['bin_dir'])/'p2p-agent.exe'),
+                            'arguments':'--data-dir "'+old['data_dir']+'"',
+                            'working_directory':old['bin_dir']}]}]}
+            argv=['node-host.py','upgrade','--bin-dir',str(source)]
+            events=[]
+            def installed(*args):
+                events.append('candidate')
+                return candidate
+            def previous_metadata(path,value):
+                self.assertEqual(path,base/'previous-install.json')
+                self.assertEqual(value,{'installation':old,'status':{'node':{'node_id':'node'},'revision':1}})
+                events.append('previous')
+            def blocked_update(*args):
+                events.append('update')
+                raise RuntimeError('task update blocked')
+            with patch.object(sys,'argv',argv),patch.object(host,'locations',return_value=(base,None)), \
+                    patch.object(host.platform,'system',return_value='Windows'), \
+                    patch.object(host,'windows_task_preflight',return_value=preflight), \
+                    patch.object(host,'install',side_effect=installed), \
+                    patch.object(host,'response',return_value={'node':{'node_id':'node'},'revision':1}), \
+                    patch.object(host,'atomic_json',side_effect=previous_metadata), \
+                    patch.object(host,'update_windows_task',side_effect=blocked_update) as update, \
+                    patch.object(host,'stop') as stop:
+                with self.assertRaisesRegex(RuntimeError,'task update blocked'):
+                    host.main()
+            self.assertEqual(events,['candidate','previous','update'])
+            update.assert_called_once()
+            stop.assert_not_called()
+
 
 def live_windows(binary_dir):
     if os.name!='nt':
