@@ -1,5 +1,134 @@
 use super::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{
+    Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
+
+#[derive(Clone, Debug, Default)]
+struct ProxyStats {
+    received: usize,
+    forwarded: usize,
+    dropped: usize,
+    unknown_sources: usize,
+    dropped_sources: HashSet<SocketAddr>,
+}
+
+fn loopback_address(address: SocketAddr) -> SocketAddr {
+    SocketAddr::new(
+        if address.is_ipv6() {
+            "::1".parse().unwrap()
+        } else {
+            "127.0.0.1".parse().unwrap()
+        },
+        address.port(),
+    )
+}
+
+async fn run_restricted_proxy(
+    proxy: Arc<tokio::net::UdpSocket>,
+    private_target: SocketAddr,
+    proxies_by_private: Arc<HashMap<SocketAddr, Arc<tokio::net::UdpSocket>>>,
+    allowed: Arc<Mutex<HashMap<SocketAddr, HashSet<SocketAddr>>>>,
+    stats: Arc<Mutex<HashMap<SocketAddr, ProxyStats>>>,
+) {
+    let own_public = proxy.local_addr().unwrap();
+    let mut buffer = vec![0; 65_535];
+    loop {
+        let (length, source) = match proxy.recv_from(&mut buffer).await {
+            Ok(received) => received,
+            Err(_) => return,
+        };
+        let Some(sender_proxy) = proxies_by_private.get(&source).cloned() else {
+            let mut current = stats.lock().unwrap();
+            let entry = current.entry(own_public).or_default();
+            entry.received += 1;
+            entry.unknown_sources += 1;
+            continue;
+        };
+        let sender_public = sender_proxy.local_addr().unwrap();
+
+        let forward = {
+            let mut current = allowed.lock().unwrap();
+            current.entry(source).or_default().insert(own_public);
+            current
+                .get(&private_target)
+                .is_some_and(|sources| sources.contains(&sender_public))
+        };
+
+        {
+            let mut current = stats.lock().unwrap();
+            let entry = current.entry(own_public).or_default();
+            entry.received += 1;
+            if forward {
+                entry.forwarded += 1;
+            } else {
+                entry.dropped += 1;
+                entry.dropped_sources.insert(source);
+            }
+        }
+
+        if forward {
+            let _ = sender_proxy
+                .send_to(&buffer[..length], private_target)
+                .await;
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+async fn restricted_nat_harness() -> (
+    Vec<DesktopNetwork>,
+    HashMap<SocketAddr, SocketAddr>,
+    Arc<Mutex<HashMap<SocketAddr, HashSet<SocketAddr>>>>,
+    Arc<Mutex<HashMap<SocketAddr, ProxyStats>>>,
+    JoinSet<()>,
+) {
+    let config = DesktopNetworkConfig {
+        families: crate::net::NetworkFamilies::Ipv4Only,
+        stun_servers: Vec::new(),
+        include_loopback: true,
+        ..Default::default()
+    };
+    let networks = vec![
+        prepare_desktop_network(&config).await.unwrap(),
+        prepare_desktop_network(&config).await.unwrap(),
+        prepare_desktop_network(&config).await.unwrap(),
+        prepare_desktop_network(&config).await.unwrap(),
+    ];
+    let mut proxies_by_private = HashMap::new();
+    let mut proxies = Vec::new();
+    for network in &networks {
+        let private = loopback_address(network.paths[0].local_addr);
+        let proxy = Arc::new(tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        proxies_by_private.insert(private, proxy.clone());
+        proxies.push((private, proxy));
+    }
+
+    let proxies_by_private = Arc::new(proxies_by_private);
+    let public_by_private = proxies_by_private
+        .iter()
+        .map(|(private, proxy)| (*private, proxy.local_addr().unwrap()))
+        .collect::<HashMap<_, _>>();
+    let allowed = Arc::new(Mutex::new(HashMap::new()));
+    let stats = Arc::new(Mutex::new(
+        public_by_private
+            .values()
+            .copied()
+            .map(|public| (public, ProxyStats::default()))
+            .collect::<HashMap<_, _>>(),
+    ));
+    let mut tasks = JoinSet::new();
+    for (private, proxy) in proxies {
+        tasks.spawn(run_restricted_proxy(
+            proxy.clone(),
+            private,
+            proxies_by_private.clone(),
+            allowed.clone(),
+            stats.clone(),
+        ));
+    }
+    (networks, public_by_private, allowed, stats, tasks)
+}
 
 #[tokio::test]
 async fn simultaneous_private_socket_recovery_uses_primary_probe_bridges() {
@@ -21,18 +150,18 @@ async fn simultaneous_private_socket_recovery_uses_primary_probe_bridges() {
         let a = Identity::generate();
         let b = Identity::generate();
         let ap = prepare_desktop_network(&config).await.unwrap();
-        let af = prepare_desktop_network(&config).await.unwrap();
+        let ar = prepare_desktop_network(&config).await.unwrap();
         let bp = prepare_desktop_network(&config).await.unwrap();
-        let bf = prepare_desktop_network(&config).await.unwrap();
+        let br = prepare_desktop_network(&config).await.unwrap();
         let token = PunchToken::random();
         let (a_in, a_rx) = mpsc::channel(MAX_CANDIDATES);
         let (b_in, b_rx) = mpsc::channel(MAX_CANDIDATES);
         let mut accepts = JoinSet::new();
         for (network, route, sender, peer) in [
             (&ap, 1, &a_in, b.node_id()),
-            (&af, 2, &a_in, b.node_id()),
+            (&ar, 2, &a_in, b.node_id()),
             (&bp, 1, &b_in, a.node_id()),
-            (&bf, 2, &b_in, a.node_id()),
+            (&br, 2, &b_in, a.node_id()),
         ] {
             let path = network.paths[0].clone();
             let sender = sender.clone();
@@ -69,8 +198,18 @@ async fn simultaneous_private_socket_recovery_uses_primary_probe_bridges() {
             tokio::join!(
                 race_peer_paths(
                     2,
-                    vec![(af.paths[0].clone(), vec![address(&bp)])],
-                    ap.paths.clone(),
+                    vec![
+                        AttemptPath {
+                            route: 1,
+                            path: ap.paths[0].clone(),
+                            candidates: vec![address(&bp)],
+                        },
+                        AttemptPath {
+                            route: 2,
+                            path: ar.paths[0].clone(),
+                            candidates: vec![address(&bp)],
+                        },
+                    ],
                     token,
                     b.node_id(),
                     1,
@@ -81,8 +220,18 @@ async fn simultaneous_private_socket_recovery_uses_primary_probe_bridges() {
                 ),
                 race_peer_paths(
                     2,
-                    vec![(bf.paths[0].clone(), vec![address(&ap)])],
-                    bp.paths.clone(),
+                    vec![
+                        AttemptPath {
+                            route: 1,
+                            path: bp.paths[0].clone(),
+                            candidates: vec![address(&ap)],
+                        },
+                        AttemptPath {
+                            route: 2,
+                            path: br.paths[0].clone(),
+                            candidates: vec![address(&ap)],
+                        },
+                    ],
                     token,
                     a.node_id(),
                     1,
@@ -95,19 +244,22 @@ async fn simultaneous_private_socket_recovery_uses_primary_probe_bridges() {
         })
         .await
         .expect(
-            "both sides must discover fresh probe sources without changing published candidates",
+            "both sides must race every local path without changing published primary candidates",
         );
-        let (ar, ac) = result.0.unwrap();
-        let (br, bc) = result.1.unwrap();
-        if should_initiate_quic(a.node_id(), b.node_id()) {
-            assert_eq!((ar, br), (2, 1));
-            assert_eq!(ac.connection().remote_address(), address(&bp));
-            assert_eq!(bc.connection().remote_address(), address(&af));
-        } else {
-            assert_eq!((ar, br), (1, 2));
-            assert_eq!(ac.connection().remote_address(), address(&bf));
-            assert_eq!(bc.connection().remote_address(), address(&ap));
-        }
+        let (a_route, a_guard) = result.0.unwrap();
+        let (b_route, b_guard) = result.1.unwrap();
+        let a_remote = match b_route {
+            1 => address(&bp),
+            2 => address(&br),
+            _ => panic!("unexpected B route {b_route}"),
+        };
+        let b_remote = match a_route {
+            1 => address(&ap),
+            2 => address(&ar),
+            _ => panic!("unexpected A route {a_route}"),
+        };
+        assert_eq!(a_guard.connection().remote_address(), a_remote);
+        assert_eq!(b_guard.connection().remote_address(), b_remote);
         // A completed handshake can already be queued when its attempt is
         // cancelled. It must not publish during the gap before a new generation.
         let mut registry = PeerRegistry::default();
@@ -119,16 +271,318 @@ async fn simultaneous_private_socket_recovery_uses_primary_probe_bridges() {
             &registry,
             b.node_id(),
             generation,
-            ac.connection()
+            a_guard.connection()
         ));
-        assert!(ac.connection().close_reason().is_some());
-        drop((ac, bc));
+        assert!(a_guard.connection().close_reason().is_some());
+        drop((a_guard, b_guard));
         accepts.abort_all();
         while accepts.join_next().await.is_some() {}
-        for network in [&ap, &af, &bp, &bf] {
+        for network in [&ap, &ar, &bp, &br] {
             network.close();
         }
     }
+}
+
+#[tokio::test]
+async fn port_restricted_recovery_races_primary_for_both_quic_roles() {
+    for a_initiates in [false, true] {
+        let a = Identity::generate();
+        let mut b = Identity::generate();
+        while should_initiate_quic(a.node_id(), b.node_id()) != a_initiates {
+            b = Identity::generate();
+        }
+        let token = PunchToken::random();
+        let (networks, public, allowed, stats, mut proxies) = restricted_nat_harness().await;
+        let (ap, ar, bp, br) = (&networks[0], &networks[1], &networks[2], &networks[3]);
+        let a_primary_public = public[&loopback_address(ap.paths[0].local_addr)];
+        let b_primary_public = public[&loopback_address(bp.paths[0].local_addr)];
+        let a_candidates = vec![Candidate::host(a_primary_public)];
+        let b_candidates = vec![Candidate::host(b_primary_public)];
+        let a_primary_private = loopback_address(ap.paths[0].local_addr);
+        let a_recovery_private = loopback_address(ar.paths[0].local_addr);
+        let b_primary_private = loopback_address(bp.paths[0].local_addr);
+        let b_recovery_private = loopback_address(br.paths[0].local_addr);
+        let (a_in, a_rx) = mpsc::channel(MAX_CANDIDATES);
+        let (b_in, b_rx) = mpsc::channel(MAX_CANDIDATES);
+        let mut accepts = JoinSet::new();
+        for (network, route, sender, peer) in [
+            (ap, 1, &a_in, b.node_id()),
+            (ar, 2, &a_in, b.node_id()),
+            (bp, 1, &b_in, a.node_id()),
+            (br, 2, &b_in, a.node_id()),
+        ] {
+            let path = network.paths[0].clone();
+            let sender = sender.clone();
+            accepts.spawn(async move {
+                while let Some(incoming) = path.endpoint.accept().await {
+                    if path
+                        .punch_socket
+                        .claim_authorized_peer(incoming.remote_address())
+                        == Some((peer, 1))
+                    {
+                        if let Err(error) = sender.send((route, incoming)).await {
+                            error.0.1.refuse();
+                            break;
+                        }
+                    } else {
+                        incoming.refuse();
+                    }
+                }
+            });
+        }
+
+        let a_paths = peer_attempt_paths(2, ar, Some((1, ap)), &b_candidates);
+        let b_paths = peer_attempt_paths(2, br, Some((1, bp)), &a_candidates);
+        let result = time::timeout(Duration::from_secs(15), async {
+            tokio::join!(
+                race_peer_paths(
+                    2,
+                    a_paths,
+                    token,
+                    b.node_id(),
+                    1,
+                    a.node_id(),
+                    a.clone(),
+                    a_rx,
+                    None,
+                ),
+                race_peer_paths(
+                    2,
+                    b_paths,
+                    token,
+                    a.node_id(),
+                    1,
+                    b.node_id(),
+                    b.clone(),
+                    b_rx,
+                    None,
+                ),
+            )
+        })
+        .await
+        .expect("port-restricted primary/recovery race must complete");
+        let (ar, ac) = result.0.unwrap();
+        let (br, bc) = result.1.unwrap();
+        assert_eq!((ar, br), (1, 1));
+        assert_eq!(ac.connection().remote_address(), b_primary_public);
+        assert_eq!(bc.connection().remote_address(), a_primary_public);
+        assert!(ac.connection().close_reason().is_none());
+        assert!(bc.connection().close_reason().is_none());
+        {
+            let current = stats.lock().unwrap();
+            for endpoint in [a_primary_public, b_primary_public] {
+                let endpoint_stats = &current[&endpoint];
+                assert!(
+                    endpoint_stats.forwarded > 0,
+                    "primary proxy must forward reciprocal traffic"
+                );
+                assert!(
+                    endpoint_stats.dropped > 0,
+                    "recovery traffic toward a primary-only allowed set must be dropped"
+                );
+                assert_eq!(endpoint_stats.unknown_sources, 0);
+            }
+            assert!(
+                current[&b_primary_public]
+                    .dropped_sources
+                    .contains(&a_recovery_private)
+            );
+            assert!(
+                current[&a_primary_public]
+                    .dropped_sources
+                    .contains(&b_recovery_private)
+            );
+        }
+        {
+            let current = allowed.lock().unwrap();
+            let a_primary_allowed = &current[&a_primary_private];
+            let b_primary_allowed = &current[&b_primary_private];
+            assert_eq!(a_primary_allowed.len(), 1);
+            assert!(a_primary_allowed.contains(&b_primary_public));
+            assert!(!a_primary_allowed.contains(&public[&b_recovery_private]));
+            assert_eq!(b_primary_allowed.len(), 1);
+            assert!(b_primary_allowed.contains(&a_primary_public));
+            assert!(!b_primary_allowed.contains(&public[&a_recovery_private]));
+        }
+        drop((ac, bc));
+        accepts.abort_all();
+        while accepts.join_next().await.is_some() {}
+        proxies.abort_all();
+        while proxies.join_next().await.is_some() {}
+        for network in &networks {
+            network.close();
+        }
+    }
+}
+
+#[tokio::test]
+async fn port_restricted_recovery_only_cannot_pass_for_either_quic_role() {
+    for a_initiates in [false, true] {
+        let a = Identity::generate();
+        let mut b = Identity::generate();
+        while should_initiate_quic(a.node_id(), b.node_id()) != a_initiates {
+            b = Identity::generate();
+        }
+        let token = PunchToken::random();
+        let (networks, public, _, stats, mut proxies) = restricted_nat_harness().await;
+        let (ar, br) = (&networks[1], &networks[3]);
+        let (a_primary_public, b_primary_public) = (
+            public[&loopback_address(networks[0].paths[0].local_addr)],
+            public[&loopback_address(networks[2].paths[0].local_addr)],
+        );
+        let a_candidates = vec![Candidate::host(a_primary_public)];
+        let b_candidates = vec![Candidate::host(b_primary_public)];
+        let (a_in, a_rx) = mpsc::channel(MAX_CANDIDATES);
+        let (b_in, b_rx) = mpsc::channel(MAX_CANDIDATES);
+        let mut accepts = JoinSet::new();
+        for (network, route, sender, peer) in [
+            (&networks[0], 1, &a_in, b.node_id()),
+            (ar, 2, &a_in, b.node_id()),
+            (&networks[2], 1, &b_in, a.node_id()),
+            (br, 2, &b_in, a.node_id()),
+        ] {
+            let path = network.paths[0].clone();
+            let sender = sender.clone();
+            accepts.spawn(async move {
+                while let Some(incoming) = path.endpoint.accept().await {
+                    if path
+                        .punch_socket
+                        .claim_authorized_peer(incoming.remote_address())
+                        == Some((peer, 1))
+                    {
+                        if let Err(error) = sender.send((route, incoming)).await {
+                            error.0.1.refuse();
+                            break;
+                        }
+                    } else {
+                        incoming.refuse();
+                    }
+                }
+            });
+        }
+
+        let result = time::timeout(Duration::from_secs(3), async {
+            tokio::join!(
+                race_peer_paths(
+                    2,
+                    peer_attempt_paths(2, ar, None, &b_candidates),
+                    token,
+                    b.node_id(),
+                    1,
+                    a.node_id(),
+                    a.clone(),
+                    a_rx,
+                    None,
+                ),
+                race_peer_paths(
+                    2,
+                    peer_attempt_paths(2, br, None, &a_candidates),
+                    token,
+                    a.node_id(),
+                    1,
+                    b.node_id(),
+                    b.clone(),
+                    b_rx,
+                    None,
+                )
+            )
+        })
+        .await;
+        assert!(
+            result.is_err(),
+            "recovery-only paths must not complete against primary-only filtered candidates"
+        );
+        {
+            let current = stats.lock().unwrap();
+            for endpoint in [a_primary_public, b_primary_public] {
+                let endpoint_stats = &current[&endpoint];
+                assert!(endpoint_stats.dropped > 0);
+                assert_eq!(
+                    endpoint_stats.forwarded, 0,
+                    "no recovery-only datagram may cross the restricted proxy"
+                );
+                assert_eq!(endpoint_stats.unknown_sources, 0);
+            }
+        }
+        accepts.abort_all();
+        while accepts.join_next().await.is_some() {}
+        proxies.abort_all();
+        while proxies.join_next().await.is_some() {}
+        for network in &networks {
+            network.close();
+        }
+    }
+}
+
+#[tokio::test]
+async fn clearing_reconnect_probe_releases_old_token_for_same_source() {
+    let config = DesktopNetworkConfig {
+        families: crate::net::NetworkFamilies::Ipv4Only,
+        stun_servers: Vec::new(),
+        include_loopback: true,
+        ..Default::default()
+    };
+    let network = prepare_desktop_network(&config).await.unwrap();
+    let path = network.paths[0].clone();
+    let peer = Identity::generate().node_id();
+    let old_token = PunchToken::random();
+    let new_token = PunchToken::random();
+    let old_receiver = path
+        .punch_socket
+        .register_peer_probe(&old_token, peer, 1)
+        .unwrap();
+    let mut reconnect_probes = HashMap::from([(
+        peer,
+        VecDeque::from([ReconnectProbe {
+            generation: 1,
+            network: 2,
+            candidates: Vec::new(),
+            token: old_token,
+            receivers: vec![old_receiver],
+            deadline: Box::pin(time::sleep(Duration::from_secs(5))),
+        }]),
+    )]);
+    let mut new_receiver = path
+        .punch_socket
+        .register_peer_probe(&new_token, peer, 2)
+        .unwrap();
+    let sender = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let destination = loopback_address(path.local_addr);
+
+    sender
+        .send_to(&crate::nat::punch::probe_packet(&old_token), destination)
+        .await
+        .unwrap();
+    let source = time::timeout(
+        Duration::from_secs(2),
+        reconnect_probes.get_mut(&peer).unwrap()[0].receivers[0].recv(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    sender
+        .send_to(&crate::nat::punch::probe_packet(&new_token), destination)
+        .await
+        .unwrap();
+    let new_source = time::timeout(Duration::from_secs(2), new_receiver.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(source, new_source);
+    assert_eq!(
+        path.punch_socket.claim_authorized_peer(source),
+        None,
+        "the same source must remain ambiguous while both token generations are live"
+    );
+
+    reconnect_probes.remove(&peer);
+    assert_eq!(
+        path.punch_socket.claim_authorized_peer(source),
+        Some((peer, 2)),
+        "clearing the superseded reconnect watch must release its source claim"
+    );
+    drop(new_receiver);
+    network.close();
 }
 
 #[tokio::test]
@@ -152,17 +606,36 @@ async fn expired_pending_lookup_releases_its_private_socket() {
         },
     )]);
     let mut pending = HashSet::from([peer]);
-    release_unused_recovery_networks(&mut networks, &HashMap::new(), &HashMap::new(), &pending)
-        .await;
+    let healthy_peer = Identity::generate().node_id();
+    let mut connections = HashMap::from([(healthy_peer, 1)]);
+    let mut attempts = HashMap::new();
+    release_unused_recovery_networks(&mut networks, &connections, &attempts, &pending).await;
     assert_eq!(
         networks.len(),
         1,
         "an outstanding lookup still owns its socket"
     );
     pending.remove(&peer);
-    release_unused_recovery_networks(&mut networks, &HashMap::new(), &HashMap::new(), &pending)
-        .await;
+    connections.insert(peer, 2);
+    release_unused_recovery_networks(&mut networks, &connections, &attempts, &pending).await;
+    assert_eq!(
+        networks.len(),
+        1,
+        "a recovery route winner must retain its socket until replaced"
+    );
+    connections.insert(peer, 1);
+    attempts.insert((peer, 1), 2);
+    release_unused_recovery_networks(&mut networks, &connections, &attempts, &pending).await;
+    assert_eq!(
+        networks.len(),
+        1,
+        "an active recovery attempt must retain its socket"
+    );
+    attempts.insert((peer, 1), 1);
+    release_unused_recovery_networks(&mut networks, &connections, &attempts, &pending).await;
     assert!(networks.is_empty());
+    assert_eq!(connections.get(&peer), Some(&1));
+    assert_eq!(connections.get(&healthy_peer), Some(&1));
     // Quinn's socket driver relinquishes its final handle asynchronously.
     time::timeout(Duration::from_secs(3), async {
         loop {
@@ -255,7 +728,6 @@ async fn failed_peer_automatically_recovers_without_breaking_another_peers_tcp_s
         wait_specific_tunnel_state(&mut ea, &rule.id, TunnelRuntimeState::Running).await;
         let (_, healthy_a) = inspect(&ha).await[&b.node_id()].clone();
         let (_, healthy_b) = inspect(&hb).await[&a.node_id()].clone();
-        let primary_address = healthy_b.remote_address();
         let mut stream = tokio::net::TcpStream::connect(rule.listen).await.unwrap();
         let ticks = Arc::new(AtomicUsize::new(0));
         let tick_count = ticks.clone();
@@ -338,35 +810,16 @@ async fn failed_peer_automatically_recovers_without_breaking_another_peers_tcp_s
         );
         assert!(healthy_a.close_reason().is_none());
         assert!(healthy_b.close_reason().is_none());
-        if local_initiates {
-            assert_ne!(
-                inspect(&hc).await[&a.node_id()].1.remote_address(),
-                primary_address,
-                "the recovered initiator must use its fresh UDP socket"
-            );
-        }
+        assert!(
+            inspect(&hc).await[&a.node_id()]
+                .1
+                .remote_address()
+                .is_ipv4()
+        );
         assert!(ticks.load(Ordering::SeqCst) > 20);
-        if local_initiates {
-            let private_address = inspect(&hc).await[&a.node_id()].1.remote_address();
-            ha.disconnect_peer(c.node_id()).await.unwrap();
-            time::timeout(Duration::from_secs(8), async {
-                loop {
-                    match std::net::UdpSocket::bind(private_address) {
-                        Ok(socket) => {
-                            drop(socket);
-                            break;
-                        }
-                        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
-                            time::sleep(Duration::from_millis(20)).await;
-                        }
-                        Err(error) => panic!("unexpected private socket cleanup error: {error}"),
-                    }
-                }
-            })
-            .await
-            .expect("disconnect must release the private recovery socket");
-            assert!(healthy_a.close_reason().is_none());
-        }
+        ha.disconnect_peer(c.node_id()).await.unwrap();
+        assert!(healthy_a.close_reason().is_none());
+        assert!(healthy_b.close_reason().is_none());
         stop.send_replace(true);
         heartbeat.await.unwrap();
         ha.shutdown();

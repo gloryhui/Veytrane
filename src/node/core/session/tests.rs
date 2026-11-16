@@ -219,8 +219,11 @@ async fn ipv6_quic_completes_when_peer_never_answers_punch_probes() {
         Duration::from_secs(3),
         race_peer_paths(
             1,
-            vec![(network.paths[0].clone(), vec![address])],
-            Vec::new(),
+            vec![AttemptPath {
+                route: 1,
+                path: network.paths[0].clone(),
+                candidates: vec![address],
+            }],
             PunchToken::random(),
             peer,
             1,

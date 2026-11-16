@@ -3529,6 +3529,7 @@ async fn run_session(
                         .get(&node_id)
                         .map(|recovery| (recovery.route, &recovery.network))
                         .unwrap_or((current_network_id, &network));
+                    reconnect_probes.remove(&node_id);
                     if let Some((generation, attempt)) = start_peer_attempt(
                         node_id,
                         candidates,
@@ -3537,7 +3538,8 @@ async fn run_session(
                         identity.clone(),
                         attempt_route,
                         attempt_network,
-                        (attempt_route != current_network_id).then_some(&network),
+                        (attempt_route != current_network_id)
+                            .then_some((current_network_id, &network)),
                         &events,
                         &input_tx,
                         &semaphore,
@@ -4369,7 +4371,7 @@ async fn run_session(
                     identity.clone(),
                     network_id,
                     attempt_network,
-                    (network_id != current_network_id).then_some(&network),
+                    (network_id != current_network_id).then_some((current_network_id, &network)),
                     &events,
                     &input_tx,
                     &semaphore,
@@ -5159,6 +5161,44 @@ struct AttemptOptions {
     capabilities: u64,
 }
 
+struct AttemptPath {
+    route: NetworkRoute,
+    path: NetworkPath,
+    candidates: Vec<SocketAddr>,
+}
+
+fn peer_attempt_paths(
+    route: NetworkRoute,
+    network: &DesktopNetwork,
+    primary: Option<(NetworkRoute, &DesktopNetwork)>,
+    candidates: &[Candidate],
+) -> Vec<AttemptPath> {
+    let mut paths = Vec::new();
+    for path in &network.paths {
+        let candidates = path.reachable_candidates(candidates);
+        if !candidates.is_empty() {
+            paths.push(AttemptPath {
+                route,
+                path: path.clone(),
+                candidates,
+            });
+        }
+    }
+    if let Some((primary_route, primary)) = primary {
+        for path in &primary.paths {
+            let candidates = path.reachable_candidates(candidates);
+            if !candidates.is_empty() {
+                paths.push(AttemptPath {
+                    route: primary_route,
+                    path: path.clone(),
+                    candidates,
+                });
+            }
+        }
+    }
+    paths
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn start_peer_attempt(
     peer: NodeId,
@@ -5168,7 +5208,7 @@ async fn start_peer_attempt(
     identity: Identity,
     route: NetworkRoute,
     network: &DesktopNetwork,
-    primary: Option<&DesktopNetwork>,
+    primary: Option<(NetworkRoute, &DesktopNetwork)>,
     events: &SessionEvents,
     inputs: &mpsc::Sender<SessionInput>,
     semaphore: &Arc<Semaphore>,
@@ -5217,7 +5257,7 @@ async fn start_peer_attempt(
         .into_iter()
         .filter(|candidate| candidate.kind != CandidateKind::Relay)
         .collect::<Vec<_>>();
-    let reachable = network.reachable_candidates(&filtered);
+    let paths = peer_attempt_paths(route, network, primary, &filtered);
     let _ = events
         .send(SessionEvent::PeerCandidates {
             peer,
@@ -5235,16 +5275,15 @@ async fn start_peer_attempt(
                 peer.short(),
                 filtered.iter().filter(|c| c.addr.is_ipv6()).count(),
                 filtered.iter().filter(|c| c.addr.is_ipv4()).count(),
-                network
-                    .paths
+                paths
                     .iter()
-                    .map(|p| p.family.to_string())
+                    .map(|attempt| format!("{}:{}", attempt.route, attempt.path.family))
                     .collect::<Vec<_>>()
                     .join(" / ")
             ),
         })
         .await;
-    if reachable.is_empty() && network.relay.is_none() {
+    if paths.is_empty() && network.relay.is_none() {
         let detail = "对端候选地址与本机 UDP 地址族不匹配".to_owned();
         peers.transition(peer, generation, PeerLifecycle::Failed(detail.clone()));
         emit_peer_state(
@@ -5276,17 +5315,6 @@ async fn start_peer_attempt(
         }));
         relay
     });
-    let paths: Vec<_> = network
-        .paths
-        .iter()
-        .filter_map(|path| {
-            let candidates = path.reachable_candidates(&filtered);
-            (!candidates.is_empty()).then(|| (path.clone(), candidates))
-        })
-        .collect();
-    let bridge_paths = primary
-        .map(|primary| primary.paths.clone())
-        .unwrap_or_default();
     let attempt = tasks.spawn(async move {
         let result = run_peer_attempt(
             peer,
@@ -5295,7 +5323,6 @@ async fn start_peer_attempt(
             identity,
             route,
             paths,
-            bridge_paths,
             relay,
             token,
             inbound_rx,
@@ -5327,8 +5354,7 @@ async fn run_peer_attempt(
     local_node: NodeId,
     identity: Identity,
     route: NetworkRoute,
-    paths: Vec<(NetworkPath, Vec<SocketAddr>)>,
-    bridge_paths: Vec<NetworkPath>,
+    paths: Vec<AttemptPath>,
     relay: Option<crate::relay::client::Fallback>,
     token: PunchToken,
     inbound: mpsc::Receiver<(NetworkRoute, quinn::Incoming)>,
@@ -5349,7 +5375,6 @@ async fn run_peer_attempt(
     let (selected_route, guard) = race_peer_paths(
         route,
         paths,
-        bridge_paths,
         token,
         peer,
         generation,
@@ -5477,8 +5502,7 @@ fn transport_can_publish(
 #[allow(clippy::too_many_arguments)]
 async fn race_peer_paths(
     route: NetworkRoute,
-    paths: Vec<(NetworkPath, Vec<SocketAddr>)>,
-    bridge_paths: Vec<NetworkPath>,
+    paths: Vec<AttemptPath>,
     token: PunchToken,
     peer: NodeId,
     generation: u64,
@@ -5487,43 +5511,26 @@ async fn race_peer_paths(
     mut inbound: mpsc::Receiver<(NetworkRoute, quinn::Incoming)>,
     relay: Option<crate::relay::client::Fallback>,
 ) -> Result<(NetworkRoute, ConnectionGuard)> {
-    // Keep the original advertised socket able to answer this pairing's token.
-    // This also bridges simultaneous private-socket recovery: at least one side
-    // can dial the other side's still-published primary without changing the
-    // candidate set observed by unrelated (including older) peers.
-    let mut bridges = JoinSet::new();
-    for path in bridge_paths {
-        let mut receiver = path
-            .punch_socket
-            .register_peer_probe(&token, peer, generation)?;
-        bridges.spawn(async move {
-            while let Some(source) = receiver.recv().await {
-                if path
-                    .punch_socket
-                    .send_probe_to(&token, source)
-                    .await
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
-    }
     let initiator = should_initiate_quic(local, peer);
     // Registration is synchronous and per path, before awaiting probes or any incoming connection.
     let mut routes = Vec::new();
-    for (path, candidates) in paths {
+    for AttemptPath {
+        route,
+        path,
+        candidates,
+    } in paths
+    {
         let receiver = path
             .punch_socket
             .register_peer_probe(&token, peer, generation)?;
-        routes.push((path, candidates, receiver));
+        routes.push((route, path, candidates, receiver));
     }
     if initiator {
         let mut tasks = JoinSet::new();
         let has_v6 = routes
             .iter()
-            .any(|(p, _, _)| p.family == AddressFamily::Ipv6);
-        for (path, candidates, mut receiver) in routes {
+            .any(|(_, path, _, _)| path.family == AddressFamily::Ipv6);
+        for (path_route, path, candidates, mut receiver) in routes {
             let identity = identity.clone();
             tasks.spawn(async move {
                 if has_v6 && path.family == AddressFamily::Ipv4 {
@@ -5564,18 +5571,23 @@ async fn race_peer_paths(
                         })?
                     });
                 }
-                crate::net::race::select_prepared(dials).await
+                crate::net::race::select_prepared(dials)
+                    .await
+                    .map(|prepared| (path_route, prepared))
             });
         }
         if let Some(relay) = relay {
-            tasks.spawn(async move { relay.prepare(identity, peer, token).await });
+            tasks.spawn(async move {
+                relay
+                    .prepare(identity, peer, token)
+                    .await
+                    .map(|prepared| (route, prepared))
+            });
         }
-        return crate::net::race::finish_prepared_guard(tasks)
-            .await
-            .map(|winner| (route, winner));
+        return finish_routed_prepared(tasks).await;
     }
     let mut probes = JoinSet::new();
-    for (path, candidates, mut receiver) in routes {
+    for (_, path, candidates, mut receiver) in routes {
         probes.spawn(async move {
             let _ = punch_candidates(&path.punch_socket, &mut receiver, &candidates, &token).await;
             // Retain the token/source route even after a successful probe; Quinn's
@@ -5625,6 +5637,37 @@ async fn race_peer_paths(
     while probes.join_next().await.is_some() {}
     while authentication.join_next().await.is_some() {}
     result
+}
+
+async fn finish_routed_prepared(
+    mut tasks: JoinSet<Result<(NetworkRoute, PreparedTransport)>>,
+) -> Result<(NetworkRoute, ConnectionGuard)> {
+    let mut failures = Vec::new();
+    let selected = loop {
+        match tasks.join_next().await {
+            Some(Ok(Ok(selected))) => break Some(selected),
+            Some(Ok(Err(error))) => failures.push(error.to_string()),
+            Some(Err(error)) => failures.push(error.to_string()),
+            None => break None,
+        }
+    };
+    tasks.abort_all();
+    while tasks.join_next().await.is_some() {}
+    let (route, selected) = selected.ok_or_else(|| {
+        Error::Transport(format!("no authenticated path: {}", failures.join("; ")))
+    })?;
+    let guard = time::timeout(crate::net::race::PATH_TIMEOUT, selected.finish())
+        .await
+        .map_err(|_| Error::Transport("selected identity handshake timed out".into()))??;
+    let connection = guard.connection();
+    tracing::info!(
+        route,
+        path_kind = if guard.is_relay() { "relay" } else { "direct" },
+        family = %AddressFamily::of(connection.remote_address()),
+        remote = %connection.remote_address(),
+        "authenticated winner transport"
+    );
+    Ok((route, guard))
 }
 
 async fn punch_candidates(
