@@ -126,6 +126,22 @@ Windows 17:45 样本的 Mac generation 53 仍 failed；17:54:44 样本已到 gen
 
 四个 WSL 后端问题独立于 P2P 认证；没有启动或修改它们。此次升级后复核全程使用 PowerShell 7，没有进入 WSL。此前阶段 WSL 只读查询的生命周期限制保留在阶段报告中，不将那次短暂运行状态当作业务服务已修复。实际私有导航的 Mac peer 没有管理通道字段，SSH 配置没有明确 Mac 别名，当前可见 Mac 服务目录也只有两个业务服务，故不能从本机执行六条 Mac 回环入口验收。
 
+## 受控单设备重连准备：本轮未触发
+
+用户随后授权一次 Mac↔Windows 受控单设备重连，要求不启用 Relay、不重启其他服务，并验证 Ubuntu 健康 TCP 流保持。代码审核确认应调用现有 `/api/navigation/reconnect`，它只对指定完整 peer 执行一次 disconnect/connect；单独 Connect 已连接 peer 可能复用现有 transport，而单独 Disconnect 会留下手动断开标记，不能用于自动恢复验收。
+
+本轮私有准备目录为上述备份目录下 `controlled-reconnect-20261116-183038`。已经准备有界 180 秒 IPv4 IP 捕获、只读 Agent event journal helper、0.5 秒事件和 1 秒状态采样、单次 210 秒 Ubuntu SSH 心跳，以及带抓包/心跳/身份/epoch/revision/无 Relay 前置检查的唯一重连请求。事件 helper 只调用现有 Agent 的 Events IPC，不启动第二个网络 owner、不初始化身份；工具均保存在用户私有目录，没有修改 Agent 程序。
+
+管理员 PowerShell 7 的 `Start-Process -Verb RunAs` 返回“操作已被用户取消”。这是本轮 Windows UAC 的返回结果，不推断用户取消的原因。抓包没有启动，pcap/started marker 不存在；Ubuntu 专用心跳尚未启动，重连 request/result 文件也不存在，因此本轮没有向任何设备发出 disconnect/connect。
+
+在确认 PID 和专用脚本命令行后，停止了本任务等待中的协调器；只读 observer 通过 stop marker 正常退出。observer 运行 165.091 秒、error_count=0，收尾确认两项辅助进程均不再运行。18:42:43.556 收尾状态为 Mac generation 99、Ubuntu generation 2 均 connected 且双向 trusted，唯一 Windows owner 仍为 PID 4460，epoch 和 revision 13 不变。18:34 的准备基线中 Mac 为 generation 96；这些状态变化不能归因于未发送的受控重连请求。
+
+准备期间只读 Events preflight 查询（after=922、resync=false）另外保留了 Mac 的有序恢复记录：sequence 925 为 gen96 disconnected；927/931/933/935 为 gen97 pending/punching/authenticating/failed；938/940/942 为 gen98 punching/authenticating/failed；945/947/949/950/953 为 gen99 punching/authenticating/negotiating/authorization_pending/connected，最后双向 trusted。事件没有原始 wallclock，只能确认整批已在 18:37:10.659 前被观察；不能给每个 sequence 编造发生时间，也未取得初始断开原因或同轮 token。preflight 到 sequence 955，observer baseline 为 958，956–957 的内容未知。
+
+18:39:58.464–18:42:43.011 的 156 个 runtime 样本中，Mac 已始终为 gen99、Ubuntu 始终为 gen2，均 connected/双向 trusted；两份事件记录没有观察到 Ubuntu 非 connected 的 PeerState。该记录证明非本次受控操作触发的 Mac 失败/恢复阶段确实存在，不等于完成了有 PUNCH 抓包和连续健康 TCP 流的本次验收。
+
+八项文件摘要（身份、管理凭据、节点/任务配置、导航配置/页面、installed/previous-install 元数据）与本轮准备前一致，RemoteSigned 不变。没有更改代理/TUN/防火墙规则、Relay、授权或映射，也没有重启任何服务。本轮的单设备重连、同轮 token/PUNCH/QUIC 取证及连续 Ubuntu TCP 流验证均未执行，不能用收尾 connected 状态替代验收。
+
 ## 提交、私有证据与恢复
 
 - `14ba770`：保留 Windows 原启动任务的升级适配。
