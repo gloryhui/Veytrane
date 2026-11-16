@@ -269,7 +269,18 @@ impl PunchSocketHandle {
     }
 
     pub fn register_probe(&self, token: &PunchToken) -> Result<PunchProbeReceiver> {
-        self.router.register(token, None, 0)
+        let local_addr = self.router.local_addr;
+        let result = self.router.register(token, None, 0);
+        #[cfg(feature = "node")]
+        crate::transport::diagnostic::punch_watch_register(
+            local_addr,
+            token,
+            result.as_ref().ok().map(|receiver| receiver.id),
+            None,
+            0,
+            result.is_ok(),
+        );
+        result
     }
 
     pub fn register_peer_probe(
@@ -278,7 +289,18 @@ impl PunchSocketHandle {
         peer: crate::identity::NodeId,
         generation: u64,
     ) -> Result<PunchProbeReceiver> {
-        self.router.register(token, Some(peer), generation)
+        let local_addr = self.router.local_addr;
+        let result = self.router.register(token, Some(peer), generation);
+        #[cfg(feature = "node")]
+        crate::transport::diagnostic::punch_watch_register(
+            local_addr,
+            token,
+            result.as_ref().ok().map(|receiver| receiver.id),
+            Some(peer),
+            generation,
+            result.is_ok(),
+        );
+        result
     }
 
     /// Consume an address authorization created by a token-validated punch datagram.
@@ -294,20 +316,51 @@ impl PunchSocketHandle {
         token: &PunchToken,
         destination: SocketAddr,
     ) -> io::Result<()> {
-        if !crate::net::AddressFamily::of(self.local_addr()?).accepts(destination) {
-            return Err(io::Error::new(
+        let local = self.local_addr()?;
+        if !crate::net::AddressFamily::of(local).accepts(destination) {
+            let error = io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "punch address family mismatch",
-            ));
+            );
+            #[cfg(feature = "node")]
+            crate::transport::diagnostic::punch_send_error(
+                Some(local),
+                token,
+                destination,
+                &error,
+            );
+            return Err(error);
         }
         let packet = crate::nat::punch::probe_packet(token);
-        let sent = self.io.send_to(&packet, destination).await?;
+        let sent = match self.io.send_to(&packet, destination).await {
+            Ok(sent) => sent,
+            Err(error) => {
+                #[cfg(feature = "node")]
+                crate::transport::diagnostic::punch_send_error(
+                    Some(local),
+                    token,
+                    destination,
+                    &error,
+                );
+                return Err(error);
+            }
+        };
         if sent != packet.len() {
-            return Err(io::Error::new(
+            let error = io::Error::new(
                 io::ErrorKind::WriteZero,
                 "UDP punch probe was only partially sent",
-            ));
+            );
+            #[cfg(feature = "node")]
+            crate::transport::diagnostic::punch_send_error(
+                Some(local),
+                token,
+                destination,
+                &error,
+            );
+            return Err(error);
         }
+        #[cfg(feature = "node")]
+        crate::transport::diagnostic::punch_send_ok(Some(local), token, destination);
         Ok(())
     }
 }
@@ -339,6 +392,7 @@ struct PunchRoutes {
 struct PunchRouter {
     routes: Arc<Mutex<PunchRoutes>>,
     next_id: Arc<AtomicU64>,
+    local_addr: Option<SocketAddr>,
 }
 
 const MAX_PUNCH_ROUTES: usize = 48;
@@ -380,6 +434,9 @@ impl PunchRouter {
             id,
             router: self.clone(),
             receiver,
+            local_addr: self.local_addr,
+            expected_peer,
+            generation,
         })
     }
 
@@ -399,14 +456,47 @@ impl PunchRouter {
             Ok(routes) => routes,
             // The packet has the exact punch shape, so drop it if internal routing is
             // unavailable. Passing it to QUIC must never create punch progress.
-            Err(_) => return true,
+            Err(_) => {
+                #[cfg(feature = "node")]
+                crate::transport::diagnostic::punch_recv(
+                    self.local_addr,
+                    &PunchToken::from_bytes(token),
+                    source,
+                    "unknown",
+                    None,
+                    None,
+                    Some("routes_unavailable"),
+                );
+                return true;
+            }
         };
         let Some(route) = routes.by_token.get(&token) else {
+            drop(routes);
+            #[cfg(feature = "node")]
+            crate::transport::diagnostic::punch_recv(
+                self.local_addr,
+                &PunchToken::from_bytes(token),
+                source,
+                "unknown",
+                None,
+                None,
+                None,
+            );
             return false;
         };
         let route_id = route.id;
         let expected_peer = route.expected_peer;
         let generation = route.generation;
+        #[cfg(feature = "node")]
+        crate::transport::diagnostic::punch_recv(
+            self.local_addr,
+            &PunchToken::from_bytes(token),
+            source,
+            "matched",
+            expected_peer,
+            Some(generation),
+            expected_peer.is_none().then_some("unbound_watch"),
+        );
         let already_registered = route.sources.contains(&source);
         let sender = route.sender.clone();
         if let Some(peer) = expected_peer
@@ -415,6 +505,16 @@ impl PunchRouter {
             if route.sources.len() >= MAX_PUNCH_SOURCES_PER_ROUTE
                 || routes.source_count >= MAX_AUTHORIZED_PUNCH_SOURCES
             {
+                #[cfg(feature = "node")]
+                crate::transport::diagnostic::punch_recv(
+                    self.local_addr,
+                    &PunchToken::from_bytes(token),
+                    source,
+                    "matched",
+                    Some(peer),
+                    Some(generation),
+                    Some("source_limit"),
+                );
                 return true;
             }
             routes
@@ -453,6 +553,23 @@ impl PunchRouter {
         // unregistering a stale route can make a later incoming QUIC connection
         // unambiguous instead of permanently consuming the authorization here.
         if active_authorizations.next().is_some() {
+            #[cfg(feature = "node")]
+            crate::transport::diagnostic::punch_claim(
+                self.local_addr,
+                source,
+                "ambiguous",
+                Some(authorization.peer),
+                Some(authorization.generation),
+                authorizations
+                    .iter()
+                    .filter(|authorization| {
+                        routes
+                            .by_token
+                            .values()
+                            .any(|route| route.id == authorization.route_id)
+                    })
+                    .count(),
+            );
             return None;
         }
 
@@ -462,6 +579,15 @@ impl PunchRouter {
         for route in routes.by_token.values_mut() {
             route.sources.remove(&source);
         }
+        #[cfg(feature = "node")]
+        crate::transport::diagnostic::punch_claim(
+            self.local_addr,
+            source,
+            "matched",
+            Some(authorization.peer),
+            Some(authorization.generation),
+            1,
+        );
         Some((authorization.peer, authorization.generation))
     }
 
@@ -496,6 +622,9 @@ pub struct PunchProbeReceiver {
     id: u64,
     router: PunchRouter,
     receiver: mpsc::Receiver<SocketAddr>,
+    local_addr: Option<SocketAddr>,
+    expected_peer: Option<crate::identity::NodeId>,
+    generation: u64,
 }
 
 impl PunchProbeReceiver {
@@ -513,6 +642,14 @@ impl PunchProbeReceiver {
 impl Drop for PunchProbeReceiver {
     fn drop(&mut self) {
         self.router.unregister(&self.token, self.id);
+        #[cfg(feature = "node")]
+        crate::transport::diagnostic::punch_watch_drop(
+            self.local_addr,
+            &PunchToken::from_bytes(self.token),
+            self.id,
+            self.expected_peer,
+            self.generation,
+        );
     }
 }
 
@@ -532,7 +669,10 @@ pub fn endpoint_from_socket_with_punch_dispatcher(
         UdpSocket::from_std(socket)
             .map_err(|err| Error::Transport(format!("接管 UDP socket 失败: {err}")))?,
     );
-    let router = PunchRouter::default();
+    let router = PunchRouter {
+        local_addr: io.local_addr().ok(),
+        ..PunchRouter::default()
+    };
     let state = quinn::udp::UdpSocketState::new((&*io).into())
         .map_err(|err| Error::Transport(format!("初始化 QUIC UDP 状态失败: {err}")))?;
     let adapter: Arc<dyn AsyncUdpSocket> = Arc::new(PunchAwareUdpSocket {

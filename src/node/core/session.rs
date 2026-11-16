@@ -30,6 +30,8 @@ use crate::transport::quic::{
     ACCEPT_FIRST_BI_STREAM_TIMEOUT, APPLICATION_HANDSHAKE_TIMEOUT, ChannelBinding,
     QUIC_HANDSHAKE_TIMEOUT,
 };
+#[cfg(feature = "node")]
+use crate::transport::diagnostic as udp_diag;
 
 use crate::discovery::short_id::ShortId;
 use crate::node::core::remote_auth::{
@@ -3851,17 +3853,35 @@ async fn run_session(
                     connection.close(0u32.into(), b"connection network generation retired");
                     continue;
                 };
+                let connection_remote = connection.remote_address();
+                let connection_family = AddressFamily::of(connection_remote);
+                let connection_local = connection_network
+                    .path(connection_family)
+                    .map(|path| path.local_addr);
                 let relay = connection_network
                     .relay
                     .as_ref()
                     .is_some_and(|relay| relay.endpoints.is_relay(&connection));
+                udp_diag::session_winner(
+                    peer,
+                    generation,
+                    network_id,
+                    if network_id == current_network_id {
+                        "primary"
+                    } else {
+                        "recovery"
+                    },
+                    connection_local,
+                    connection_remote,
+                    if relay { "relay" } else { "direct" },
+                );
                 let transport_label = connection_network.transport_label(&connection);
                 let _ = events
                     .send(SessionEvent::PeerTransport {
                         peer,
                         generation,
                         relay,
-                        family: AddressFamily::of(connection.remote_address()),
+                        family: connection_family,
                     })
                     .await;
                 let _ = events
@@ -5257,7 +5277,23 @@ async fn start_peer_attempt(
         .into_iter()
         .filter(|candidate| candidate.kind != CandidateKind::Relay)
         .collect::<Vec<_>>();
+    let primary_route = primary.map(|(route, _)| route);
     let paths = peer_attempt_paths(route, network, primary, &filtered);
+    for path in &paths {
+        let route_kind = if primary_route.is_none() || primary_route == Some(path.route) {
+            "primary"
+        } else {
+            "recovery"
+        };
+        udp_diag::session_attempt_path(
+            peer,
+            generation,
+            route_kind,
+            path.route,
+            path.path.local_addr,
+            &path.candidates,
+        );
+    }
     let _ = events
         .send(SessionEvent::PeerCandidates {
             peer,
@@ -5532,6 +5568,7 @@ async fn race_peer_paths(
             .any(|(_, path, _, _)| path.family == AddressFamily::Ipv6);
         for (path_route, path, candidates, mut receiver) in routes {
             let identity = identity.clone();
+            let path_local = path.local_addr;
             tasks.spawn(async move {
                 if has_v6 && path.family == AddressFamily::Ipv4 {
                     time::sleep(crate::net::race::FAMILY_STAGGER).await;
@@ -5561,14 +5598,34 @@ async fn race_peer_paths(
                     let endpoint = path.endpoint.clone();
                     dials.spawn(async move {
                         time::sleep(crate::net::race::CANDIDATE_STAGGER * index as u32).await;
-                        time::timeout(
+                        udp_diag::session_quic(
+                            peer,
+                            generation,
+                            path_route,
+                            "dial",
+                            "start",
+                            Some(path_local),
+                            Some(remote),
+                        );
+                        let result = time::timeout(
                             crate::net::race::PATH_TIMEOUT,
                             PreparedTransport::dial(&endpoint, remote, &identity, peer),
                         )
                         .await
                         .map_err(|_| {
                             Error::Transport(format!("{remote} authenticated path timeout"))
-                        })?
+                        })
+                        .and_then(|result| result);
+                        udp_diag::session_quic(
+                            peer,
+                            generation,
+                            path_route,
+                            "dial",
+                            if result.is_ok() { "ready" } else { "failed" },
+                            Some(path_local),
+                            Some(remote),
+                        );
+                        result
                     });
                 }
                 crate::net::race::select_prepared(dials)
@@ -5578,10 +5635,23 @@ async fn race_peer_paths(
         }
         if let Some(relay) = relay {
             tasks.spawn(async move {
-                relay
+                udp_diag::session_quic(
+                    peer, generation, route, "relay_prepare", "start", None, None,
+                );
+                let result = relay
                     .prepare(identity, peer, token)
                     .await
-                    .map(|prepared| (route, prepared))
+                    .map(|prepared| (route, prepared));
+                udp_diag::session_quic(
+                    peer,
+                    generation,
+                    route,
+                    "relay_prepare",
+                    if result.is_ok() { "ready" } else { "failed" },
+                    None,
+                    None,
+                );
+                result
             });
         }
         return finish_routed_prepared(tasks).await;
@@ -5601,10 +5671,29 @@ async fn race_peer_paths(
     if let Some(relay) = relay {
         let relay_identity = identity.clone();
         authentication.spawn(async move {
-            relay
+            udp_diag::session_quic(
+                peer,
+                generation,
+                route,
+                "relay_wait",
+                "start",
+                None,
+                None,
+            );
+            let result = relay
                 .wait(relay_identity, peer, token)
                 .await
-                .map(|winner| (route, winner))
+                .map(|winner| (route, winner));
+            udp_diag::session_quic(
+                peer,
+                generation,
+                route,
+                "relay_wait",
+                if result.is_ok() { "ready" } else { "failed" },
+                None,
+                None,
+            );
+            result
         });
     }
     let deadline = time::sleep(if has_relay {
@@ -5621,9 +5710,32 @@ async fn race_peer_paths(
             incoming = inbound.recv() => {
                 let Some((incoming_route, incoming)) = incoming else { break Err(Error::Transport("incoming generation retired".into())); };
                 if authentication.len() >= MAX_CANDIDATES { incoming.refuse(); continue; }
+                let remote = incoming.remote_address();
+                udp_diag::session_quic(
+                    peer,
+                    generation,
+                    incoming_route,
+                    "accept",
+                    "start",
+                    None,
+                    Some(remote),
+                );
                 let identity = identity.clone();
                 authentication.spawn(async move {
-                    authenticate_incoming(incoming, &identity, peer).await.map(|connection| (incoming_route, ConnectionGuard::new(connection))).map_err(Error::Transport)
+                    let result = authenticate_incoming(incoming, &identity, peer)
+                        .await
+                        .map(|connection| (incoming_route, ConnectionGuard::new(connection)))
+                        .map_err(Error::Transport);
+                    udp_diag::session_quic(
+                        peer,
+                        generation,
+                        incoming_route,
+                        "accept",
+                        if result.is_ok() { "ready" } else { "failed" },
+                        None,
+                        Some(remote),
+                    );
+                    result
                 });
             }
             result = authentication.join_next(), if !authentication.is_empty() => {

@@ -23,6 +23,16 @@ struct Args {
     /// Disable the optional navigation adapter even if its config exists.
     #[arg(long)]
     no_navigation: bool,
+    /// Create a private, bounded UDP/PUNCH JSONL diagnostic file.
+    #[arg(long, value_name = "PATH")]
+    diagnostic_log: Option<PathBuf>,
+    /// Stop diagnostic writes after this many seconds (default: 90, maximum: 3600).
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        requires = "diagnostic_log"
+    )]
+    diagnostic_seconds: Option<u64>,
 }
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -45,6 +55,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if args.initialize && !paths.config().try_exists()? {
         management_cli::initialize(&paths)?;
+    }
+    if let Some(path) = args.diagnostic_log.as_deref() {
+        let seconds = args.diagnostic_seconds.unwrap_or(90);
+        p2p_file::transport::diagnostic::configure(path, seconds)?;
+        p2p_file::transport::diagnostic::startup(seconds);
     }
     let navigation = if args.no_navigation {
         None

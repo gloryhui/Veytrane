@@ -2,6 +2,8 @@
 
 pub mod handshake;
 pub mod quic;
+#[cfg(feature = "node")]
+pub mod diagnostic;
 
 pub use handshake::{HandshakeOutcome, handshake_initiator, handshake_responder};
 pub use quic::{
