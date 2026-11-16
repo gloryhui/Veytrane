@@ -6,9 +6,11 @@
 
 用户明确授权以本机 PowerShell 7、管理员身份、现有 RemoteSigned 执行已准备的升级脚本后，Windows Agent 于 **17:25:23** 完成升级。实际运行 SHA 为 `fc13ff9ec92db112bf71d6ad8e428c9f459b52db`，包含 `b981f07` 的 primary/recovery 修复及本次短时诊断；身份、revision、配置、信任与授权、映射、导航和原启动方式均保留。
 
-Mac↔Windows 仍未建立已认证会话。Windows 应用层日志已按 peer、generation、token 摘要和 socket 对齐，证明 primary 与 recovery 都主动发送了 PUNCH；但未取得 Mac PUNCH 入站。包级取证仍有缺口：PktMon collector 连正常 Ubuntu 流量也未记录，附加 IP 层观察的 UAC 请求返回取消，未启动该观察，也没有继续替代或重试提权。不能据此声称 Windows 网卡没有收到包或 Mac 没有发送。
+**18:04:48.583 的首次成功状态样本中，Mac 已在 generation 96 建立双向已认证会话**，Windows Agent 仍为 PID 4460、原 epoch，Ubuntu generation 2 也保持 connected。前一个 17:54:44 样本中 Mac generation 72 仍 failed，实际恢复时刻只能限定在两次样本之间，不能用首次观察时刻代替握手完成时刻。
 
-Ubuntu↔Windows 已重新建立双向已认证会话，既有 Windows `127.0.0.1:2222` SSH/P2P 入口可用。六项 Windows 发布和 Mac 授权都正确保留；四项 WSL 后端无监听。Mac 独立管理通道未配置或无法确认，六条 Mac 入口均未端到端验收。
+用户随后明确重新授权 UAC，已在管理员 PowerShell 7、原 RemoteSigned 下完成 18:04:53–18:05:38 的有效 IP 层捕获，观察到 primary IPv4 socket 的双向 UDP。捕获开始前 Mac 已 connected；本窗口没有 PeerCandidates 或 PUNCH，不能补成成功 generation 96 的 token/握手证据。早期失败 generation 的应用日志仍证明 primary/recovery 均主动发出 PUNCH 调用，但不能与本窗口强行配对。
+
+Ubuntu↔Windows 双向认证及既有 Windows `127.0.0.1:2222` SSH/P2P 入口保持可用。Windows→Mac 原 RustDesk 转发也已收到协议帧。六项 Windows 发布和 Mac 授权都正确保留；四项 WSL 后端仍无监听。未发现已配置的 Mac 独立管理通道，六条 Mac→Windows 入口均未端到端验收。
 
 ## 实际安装、启动和保留检查
 
@@ -74,28 +76,55 @@ Mac generation 6 的四路 attempt 始于 17:25:55.264，generation 7 始于 17:
 
 首轮脚本还发现了状态判断错误：PktMon “没有运行”也返回 0，最初被误判成已有监视会话，故首轮只取得 Agent 日志。补充捕获改为检查实际状态内容。两个时间窗口没有强行拼接 token/generation。
 
-附加的 45 秒 Winsock IP 层观察只准备了工具，其 UAC 请求返回“操作已被用户取消”，未创建 raw socket、未生成 ip-window.pcapng，未改收包模式；随后没有再发起提权或换方式采集。
+首次附加 Winsock IP 层观察的 UAC 请求返回“操作已被用户取消”，当时未创建 raw socket 或 ip-window.pcapng。随后用户明确重新授权 UAC，才进行了下述 45 秒捕获；没有修改执行策略。
 
 17:42:46–17:43:32，通过既有 Windows P2P SSH 入口保持同一条 Ubuntu TCP 会话，连续收到 0–45 共 46 个心跳，正常退出码 0。17:47 只读复核：Ubuntu 仍运行 `b981f07`、revision 26，Windows peer generation 6、Mac peer generation 5 均 connected、双向 trusted；Windows 侧 Ubuntu generation 2 connected。没有重启或部署远端 Ubuntu、Mac、信令服务器或业务服务。
 
-Windows 17 条出站规则均有实际监听，15 条 Ubuntu 规则 peer_ready=true，两条 Mac 规则 peer_ready=false。`ubuntu-ssh` 的状态仍保留一条无时间戳的 last_error 10054；本次 46 个心跳及后续只读 SSH 登录均成功，未把这一历史字段清除或据此宣称所有 Ubuntu 业务都已验收。
+17:54 阶段 Windows 17 条出站规则均有实际监听，15 条 Ubuntu 规则 peer_ready=true，两条 Mac 规则 peer_ready=false；18:04 后 17 条规则全部 peer_ready=true。`ubuntu-ssh` 的状态仍保留一条无时间戳的 last_error 10054；本次 46 个心跳及后续只读 SSH 登录均成功，未把这一历史字段清除或据此宣称所有 Ubuntu 业务都已验收。
 
-Windows 17:45 样本的 Mac generation 53 仍 failed；交付前 17:54:44 样本已到 generation 72，仍 failed，Ubuntu generation 2 仍双向 trusted/connected，17 个原出站监听完整、其中 15 个 peer_ready。当前能定位到的阶段是 **Windows IPv4 等待正确 token 的 PUNCH 回应，以及 IPv6 本机无路由**；缺少 Windows 网卡有效观测和 Mac 同轮包证据，不能再把丢包定位到某个 NAT、出口或防火墙。
+Windows 17:45 样本的 Mac generation 53 仍 failed；17:54:44 样本已到 generation 72，仍 failed。这一历史失败阶段能定位到 **Windows IPv4 等待正确 token 的 PUNCH 回应，以及 IPv6 本机无路由**。18:04 之后状态已恢复，历史失败不能描述为当前阻塞，也不能用恢复后的 IP 包反推此前丢包发生在哪个 NAT、出口或防火墙。
+
+## 重新授权后的 IP 层捕获与恢复状态
+
+18:04:52 经 UAC 启动已准备的 `capture-ip.ps1`，使用管理员 PowerShell 7.6.10 及原 RemoteSigned。collector 使用 IPv4 `SIO_RCVALL / RCVALL_IPLEVEL`，分别绑定实际以太网、vgate0、WSL 虚拟网卡 IP；没有进入 WSL、修改代理/TUN/防火墙规则或重启任何服务。
+
+捕获标记时间为 18:04:53.104，结束为 18:05:38.108，包时间范围 18:04:53.183–18:05:38.011。三个接口共读取 32,096 个 IP 包，其中以太网 32,088，另外两接口各 4；筛选持久化 127 包（121 UDP、6 TCP），全部来自以太网，文件 20,904 字节，未触及 16 MiB 上限。三个 receive-all socket 均成功恢复 RCVALL_OFF 并关闭；stderr 为空，管理员 helper 已退出，捕获文件以只读独占打开成功。没有保留后台捕获进程。
+
+| IP 层流向 | 包数 | 当前能够确认的范围 |
+| --- | --- | --- |
+| `192.168.100.169:56297` → `61.52.86.166:65243` | 6 | 与 Mac 恢复状态一致的远端流；对端端口已不同于历史候选 53542 |
+| `61.52.86.166:65243` → `192.168.100.169:56297` | 7 | 反向 UDP 已到达 Windows IP 观察点；未获得本轮 token 或连接 ID 到 peer 的直接关联 |
+| `192.168.100.169:56297` → `39.151.73.27:17948` | 52 | 既有 Ubuntu 路径的同窗双向流量 |
+| `39.151.73.27:17948` → `192.168.100.169:56297` | 53 | Ubuntu 心跳期间保持活动 |
+| `192.168.100.169:56297` → `111.206.174.2:3478` | 3 | STUN 类流量 |
+| `192.168.100.169:54692` ↔ `47.101.183.194:8900` | 各 3 | 生产 SignalMessage 解码得到 18:05:23.610 Ping / 18:05:23.637 Pong |
+
+捕获内 32 次 runtime 样本的 Mac 均为 generation 96、connected、inbound/outbound trusted，Ubuntu 均为 generation 2 双向 trusted/connected；epoch 始终 `814df6c9f93513f71ed2736e8b46e9df`。同窗 Agent 只有 primary IPv4 `0.0.0.0:56297`、primary IPv6 `[::]:56296` 及回环 UDP 53314，未见 recovery socket 残留。包证据支持当前 primary IPv4 路径活动，但没有记录 generation 96 的 QUIC winner 事件，不能据此重建当时的握手竞争顺序。
+
+18:05:08.340–18:05:39.345，原 Windows 2222 P2P SSH 通道同一会话连续返回 Ubuntu 0–31 共 32 个心跳，退出码 0；其中前 30 个处于捕获窗口。该会话与包内 Ubuntu 双向 UDP、信令 Ping/Pong 一起证明本轮 collector 有效；它与此前全空的 PktMon 结果不同。
+
+恢复后的只读 Mac 服务目录查询成功，返回 `rustdesk-mac`、`streamdesk-v2-hooks`；没有新增管理或业务映射。18:09:32 前完成 Windows 已有 `127.0.0.1:22118` → Mac `rustdesk-mac` 入口复核，收到 RustDesk Message.hash 帧，未登录或建立桌面会话。这是 Windows→Mac 数据面验证，不能替代下面六条 Mac→Windows 入口验收。
+
+本窗口 **0 个完整 PUNCH、0 个 PeerCandidates、无 token 摘要**，没有新 pairing 可对齐；不能把早期 generation 6/7 的 token 或 Mac 候选填入 generation 96。仍缺成功轮次中两端候选接收、primary/recovery 的 PUNCH 往返及 QUIC 握手/认证阶段日志，Mac 侧同轮独立证据也未取得。IP 层观察不是 L2、NAT 后或 Mac 侧抓包；出站本地源端口不证明公网 NAT 端口，QUIC 形状启发式也不证明认证。当前会话已恢复并保持，历史失败根因尚不能进一步归到某一跳。
+
+捕获后身份、admin token、node.json、tasks.json、导航 config.json/私有 HTML 与原备份的六项 SHA256 比较全部相同；revision 仍为 13，Agent 仍为唯一 PID 4460。原启动任务未再次修改。新增私有证据包括 `ip-window.pcapng`、`raw-capture-result.json`、`raw-endpoints.jsonl`、`raw-ip-detail-summary.json`、`signal-ip-analysis.json`、`raw-healthy-tcp-live.log`、`post-raw-protected-hashes.json` 和 `post-raw-cleanup-check.json`。
+
+18:12:08.672 最后一次只读状态复核中，Mac generation 96、Ubuntu generation 2 仍双向 trusted/connected，17 条原出站规则全部 listening/peer_ready，revision 13、运行 SHA 和 epoch 均保持。该状态样本与运行历史一并保存在私有目录。
 
 ## 六条映射的升级后验收
 
-17:33:39–17:35:20 重新读取六项实际目标、启用状态及完整 Mac NodeId 授权，均保持原值，没有扩大授权或重建映射。
+17:33:39–17:35:20 及恢复后的 18:06:56–18:09:32 两次重新核对六项实际目标、启用状态及完整 Mac NodeId 授权，均保持原值，没有扩大授权或重建映射。下表协议结果在后一窗口再次确认。
 
 | Mac 规则 / 监听 | Windows service_id / 实际目标 | 发布 / Mac 授权 | Windows 升级后监听及协议结果 | Mac 入口 |
 | --- | --- | --- | --- | --- |
-| windows-rustdesk / 22118 | rustdesk-win / `127.0.0.1:21118` | 启用 / 保留 | RustDesk PID 8012 有监听；17:34:24 收到紧凑帧和 Message.hash protobuf；未登录会话 | 未验收 |
+| windows-rustdesk / 22118 | rustdesk-win / `127.0.0.1:21118` | 启用 / 保留 | RustDesk PID 8012 有监听；收到紧凑帧和 Message.hash protobuf；未登录会话 | 未验收 |
 | windows-wsl-llama / 18090 | wsl-llama / `127.0.0.1:18090` | 启用 / 保留 | 无监听；/health、/v1/models 在 HTTP 前连接被拒绝 | 未验收 |
 | windows-streamdesk-wsl-media / 18098 | streamdesk-wsl-media / `127.0.0.1:18097` | 启用 / 保留 | 无监听；/worker/v1/capabilities 连接被拒绝 | 未验收 |
 | windows-streamdesk-wsl-srs-api / 21986 | streamdesk-wsl-srs-api / `127.0.0.1:21985` | 启用 / 保留 | 无监听；/api/v1/versions、/api/v1/streams 连接被拒绝 | 未验收 |
 | windows-streamdesk-wsl-srs-hls / 28099 | streamdesk-wsl-srs-hls / `127.0.0.1:28098` | 启用 / 保留 | 无监听；根路径连接被拒绝，实际 m3u8 未发现且未猜测 | 未验收 |
 | windows-rdp / 13389 | windows-rdp / `127.0.0.1:3389` | 启用 / 保留 | TermService PID 1764 有 IPv4/IPv6 监听；X.224 协商响应成功，selectedProtocol 0x00000002；未执行 TLS/NLA/登录 | 未验收 |
 
-四个 WSL 后端问题独立于 P2P 认证；没有启动或修改它们。此次升级后复核全程使用 PowerShell 7，没有进入 WSL。此前阶段 WSL 只读查询的生命周期限制保留在阶段报告中，不将那次短暂运行状态当作业务服务已修复。
+四个 WSL 后端问题独立于 P2P 认证；没有启动或修改它们。此次升级后复核全程使用 PowerShell 7，没有进入 WSL。此前阶段 WSL 只读查询的生命周期限制保留在阶段报告中，不将那次短暂运行状态当作业务服务已修复。实际私有导航的 Mac peer 没有管理通道字段，SSH 配置没有明确 Mac 别名，当前可见 Mac 服务目录也只有两个业务服务，故不能从本机执行六条 Mac 回环入口验收。
 
 ## 提交、私有证据与恢复
 
@@ -112,8 +141,8 @@ Windows 17:45 样本的 Mac generation 53 仍 failed；交付前 17:54:44 样本
 C:\Users\glory\AppData\Local\p2p-file\backups\windows-recovery-20261116-veytrane
 ```
 
-该目录保留 before manifest、原任务 XML、installed/previous-install 副本、候选与运行 SHA、锁释放、管理员进程路径/所有者、前后保留检查、Agent 日志及 UDP 脱敏汇总、空 PktMon 结果和停止状态、实机 SSH 心跳。六服务后升级证据位于 `verification\service-verification-20261116-164621\post-upgrade-20261116-173339`。本机 `C:\Users\glory\.codex\INFRASTRUCTURE.md` 已按实际运行状态更新，没有写入凭据。
+该目录保留 before manifest、原任务 XML、installed/previous-install 副本、候选与运行 SHA、锁释放、管理员进程路径/所有者、前后保留检查、Agent 日志及 UDP 脱敏汇总、空 PktMon 结果和停止状态、实机 SSH 心跳及本次有效 IP 捕获。六服务证据位于 `verification\service-verification-20261116-164621\post-upgrade-20261116-173339` 及 `post-connect-gen96-20261116-180656`。本机 `C:\Users\glory\.codex\INFRASTRUCTURE.md` 已按实际运行状态更新，没有写入凭据。
 
 旧 `bin\c67b847dca54ac25730b0f59b2fc0a0b7b34e92d` 和 `bin\previous-install.json` 保留。若需回退，应先核对活动业务，在符合当前策略的管理员入口恢复原任务 Action，优雅停止现有 owner 并确认锁释放，再按旧 installed 元数据启动旧二进制；不覆盖身份、权限、配置或真实数据。旧版仍具有已知恢复缺陷。
 
-Windows 升级与其可执行的定向验证已完成；Mac 直连恢复、有效包级双向证据和 Mac 六入口验收仍未完成。继续缩小 Mac 路径需要一次获准且具备正对照的 Windows 包观察，以及 Mac 对同一 token 摘要的收发证据，不能用“Ubuntu 可连”代替，也不保证该修复适用于任意 NAT。
+Windows 升级与定向验证已完成，Mac↔Windows 当前双向认证已恢复，本机有效 IP 层双向 UDP 与 Windows→Mac 业务协议正控已取得。成功轮次的 token/PUNCH/QUIC 完整证据链、历史失败的精确丢包跳点及 Mac 六入口验收仍有缺口；四项 Windows 后端无监听是已确认的独立失败项。没有证据保证该修复适用于任意 NAT。
