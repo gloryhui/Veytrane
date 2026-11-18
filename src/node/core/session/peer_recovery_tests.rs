@@ -4,6 +4,9 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
+#[path = "recovery_republish_tests.rs"]
+mod republish;
+
 #[derive(Clone, Debug, Default)]
 struct ProxyStats {
     received: usize,
@@ -30,6 +33,7 @@ async fn run_restricted_proxy(
     proxies_by_private: Arc<HashMap<SocketAddr, Arc<tokio::net::UdpSocket>>>,
     allowed: Arc<Mutex<HashMap<SocketAddr, HashSet<SocketAddr>>>>,
     stats: Arc<Mutex<HashMap<SocketAddr, ProxyStats>>>,
+    blocked: Arc<HashSet<(SocketAddr, SocketAddr)>>,
 ) {
     let own_public = proxy.local_addr().unwrap();
     let mut buffer = vec![0; 65_535];
@@ -47,7 +51,9 @@ async fn run_restricted_proxy(
         };
         let sender_public = sender_proxy.local_addr().unwrap();
 
-        let forward = {
+        let forward = if blocked.contains(&(source, private_target)) {
+            false
+        } else {
             let mut current = allowed.lock().unwrap();
             current.entry(source).or_default().insert(own_public);
             current
@@ -75,14 +81,19 @@ async fn run_restricted_proxy(
     }
 }
 
-#[allow(clippy::type_complexity)]
-async fn restricted_nat_harness() -> (
+type RestrictedNatHarness = (
     Vec<DesktopNetwork>,
     HashMap<SocketAddr, SocketAddr>,
     Arc<Mutex<HashMap<SocketAddr, HashSet<SocketAddr>>>>,
     Arc<Mutex<HashMap<SocketAddr, ProxyStats>>>,
     JoinSet<()>,
-) {
+);
+
+async fn restricted_nat_harness() -> RestrictedNatHarness {
+    restricted_nat_harness_blocking(&[]).await
+}
+
+async fn restricted_nat_harness_blocking(blocked_links: &[(usize, usize)]) -> RestrictedNatHarness {
     let config = DesktopNetworkConfig {
         families: crate::net::NetworkFamilies::Ipv4Only,
         stun_servers: Vec::new(),
@@ -117,6 +128,12 @@ async fn restricted_nat_harness() -> (
             .map(|public| (public, ProxyStats::default()))
             .collect::<HashMap<_, _>>(),
     ));
+    let blocked = Arc::new(
+        blocked_links
+            .iter()
+            .map(|&(from, to)| (proxies[from].0, proxies[to].0))
+            .collect::<HashSet<_>>(),
+    );
     let mut tasks = JoinSet::new();
     for (private, proxy) in proxies {
         tasks.spawn(run_restricted_proxy(
@@ -125,6 +142,7 @@ async fn restricted_nat_harness() -> (
             proxies_by_private.clone(),
             allowed.clone(),
             stats.clone(),
+            blocked.clone(),
         ));
     }
     (networks, public_by_private, allowed, stats, tasks)

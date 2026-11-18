@@ -71,6 +71,10 @@ pub const DEFAULT_SIGNAL_PORT: u16 = 7000;
 pub const SIGNAL_PROTOCOL_VERSION: u32 = 2;
 /// Opt-in extension; legacy v2 wire/signatures stay unchanged.
 pub const SHORT_ID_PROTOCOL_VERSION: u32 = 3;
+/// Desktop signaling with signed, peer-scoped recovery candidates.
+pub const RECOVERY_PROTOCOL_VERSION: u32 = 4;
+const RECOVERY_CANDIDATE_TTL: Duration = Duration::from_secs(15);
+const RECOVERY_DOMAIN: &[u8] = b"p2p_file/signal-recovery-lookup/v1";
 const SHORT_LOOKUP_WINDOW: Duration = Duration::from_secs(10);
 const MAX_SHORT_LOOKUP_IPS: usize = 1024;
 const SHORT_LOOKUP_UNAVAILABLE: &str = "设备查询不可用或请求过多，请稍后重试";
@@ -350,6 +354,13 @@ pub enum SignalMessage {
         short_id: ShortId,
         node_id: Option<NodeId>,
     },
+    /// A lookup with candidates scoped to this target and registration.
+    RecoveryLookup {
+        node_id: NodeId,
+        candidates: Vec<Candidate>,
+        sequence: u64,
+        signature: Vec<u8>,
+    },
 }
 
 impl SignalMessage {
@@ -371,6 +382,7 @@ impl SignalMessage {
             Self::RegisteredShort { .. } => "RegisteredShort",
             Self::LookupShort { .. } => "LookupShort",
             Self::ShortResolved { .. } => "ShortResolved",
+            Self::RecoveryLookup { .. } => "RecoveryLookup",
             Self::Lookup { .. } => "Lookup",
             Self::PeerCandidates { .. } => "PeerCandidates",
             Self::PeerPending { .. } => "PeerPending",
@@ -408,6 +420,21 @@ pub fn register_payload(
     Ok(payload)
 }
 
+fn recovery_payload(
+    challenge: &[u8; CHALLENGE_LEN],
+    target: NodeId,
+    candidates: &[Candidate],
+    sequence: u64,
+) -> Result<Vec<u8>> {
+    let mut payload = Vec::new();
+    payload.extend_from_slice(RECOVERY_DOMAIN);
+    payload.extend_from_slice(challenge);
+    payload.extend_from_slice(target.as_bytes());
+    payload.extend_from_slice(&sequence.to_be_bytes());
+    payload.extend_from_slice(blake3::hash(&postcard::to_allocvec(candidates)?).as_bytes());
+    Ok(payload)
+}
+
 // ---------------------------------------------------------------------------
 // 信令服务器
 // ---------------------------------------------------------------------------
@@ -418,6 +445,8 @@ struct ActiveRegistration {
     protocol_version: u32,
     node_id: NodeId,
     connection_id: u64,
+    challenge: [u8; CHALLENGE_LEN],
+    public_key: [u8; 32],
 }
 
 /// 正在等待 `Register` 的注册。
@@ -450,6 +479,11 @@ struct WaiterKey {
     connection_id: u64,
 }
 
+struct RecoveryCandidates {
+    candidates: Vec<Candidate>,
+    expires_at: tokio::time::Instant,
+}
+
 /// 内存里的在线表。进程重启即清空——客户端会重新登记。
 #[derive(Default)]
 struct Registry {
@@ -465,6 +499,7 @@ struct Registry {
     /// 目标上线、`try_pair` 消费掉 waiter 时，这里会同步删除，配额随之释放；
     /// handler 本地记的话就会把「已经完成的历史目标」永久算进配额。
     pending_by_connection: HashMap<WaiterKey, HashSet<NodeId>>,
+    recovery: HashMap<WaiterKey, HashMap<NodeId, RecoveryCandidates>>,
 }
 
 #[derive(Debug)]
@@ -574,6 +609,55 @@ impl ShortIdResources {
 }
 
 impl Registry {
+    fn store_recovery(
+        &mut self,
+        requester: WaiterKey,
+        target: NodeId,
+        candidates: Vec<Candidate>,
+        limit: usize,
+    ) -> bool {
+        let now = tokio::time::Instant::now();
+        let entries = self.recovery.entry(requester).or_default();
+        entries.retain(|_, entry| entry.expires_at > now);
+        if !entries.contains_key(&target) && entries.len() >= limit {
+            if entries.is_empty() {
+                self.recovery.remove(&requester);
+            }
+            return false;
+        }
+        entries.insert(
+            target,
+            RecoveryCandidates {
+                candidates,
+                expires_at: now + RECOVERY_CANDIDATE_TTL,
+            },
+        );
+        true
+    }
+
+    fn candidates_for(&self, source: NodeId, target: NodeId, limit: usize) -> Vec<Candidate> {
+        let Some(record) = self.peers.get(&source) else {
+            return Vec::new();
+        };
+        let key = WaiterKey {
+            requester: source,
+            connection_id: record.connection_id,
+        };
+        let fresh = self
+            .recovery
+            .get(&key)
+            .and_then(|entries| entries.get(&target));
+        let Some(fresh) = fresh.filter(|entry| entry.expires_at > tokio::time::Instant::now())
+        else {
+            return record.candidates.clone();
+        };
+        let mut candidates = fresh.candidates.clone();
+        candidates.extend_from_slice(&record.candidates);
+        dedup_candidates(&mut candidates);
+        candidates.truncate(limit.min(MAX_CANDIDATES));
+        candidates
+    }
+
     fn take_node_lookup(&mut self, ip: IpAddr, config: &SignalServerConfig) -> bool {
         self.node_lookup_ips
             .retain(|_, bucket| !bucket.expired_after(NODE_LOOKUP_WINDOW));
@@ -652,12 +736,12 @@ impl Registry {
     }
 
     /// 双方都在线就互相推送候选，只推一次。
-    fn try_pair(&self, a: NodeId, b: NodeId) {
+    fn try_pair(&self, a: NodeId, b: NodeId, max_candidates: usize) {
         let (Some(record_a), Some(record_b)) = (self.peers.get(&a), self.peers.get(&b)) else {
             return;
         };
-        let candidates_a = record_a.candidates.clone();
-        let candidates_b = record_b.candidates.clone();
+        let candidates_a = self.candidates_for(a, b, max_candidates);
+        let candidates_b = self.candidates_for(b, a, max_candidates);
         let outbox_a = record_a.outbox.clone();
         let outbox_b = record_b.outbox.clone();
         let close_a = record_a.close.clone();
@@ -723,6 +807,10 @@ impl Registry {
         if owned {
             // 记录已经被更新的连接取代时，绝不能在这里删掉。
             self.peers.remove(&node_id);
+            self.recovery.retain(|_, entries| {
+                entries.remove(&node_id);
+                !entries.is_empty()
+            });
         }
 
         // 只清这条连接登记过的 waiter：旧连接的清理不能删掉新连接创建的等待。
@@ -730,6 +818,7 @@ impl Registry {
             requester: node_id,
             connection_id,
         };
+        self.recovery.remove(&key);
         if let Some(targets) = self.pending_by_connection.remove(&key) {
             for target in targets {
                 if let Some(waiters) = self.waiters.get_mut(&target) {
@@ -958,6 +1047,7 @@ async fn handle_signal_io(
     let mut reader = BufReader::new(read_half);
     let mut pending: Option<PendingRegistration> = None;
     let mut active: Option<ActiveRegistration> = None;
+    let mut recovery_sequence = 0u64;
 
     let disconnect_reason: &str = loop {
         // 未登记时给一个较短的窗口，避免匿名连接长期占着资源。
@@ -1001,6 +1091,19 @@ async fn handle_signal_io(
             }
         };
 
+        let (message, recovery_lookup) = match message {
+            SignalMessage::RecoveryLookup {
+                node_id,
+                candidates,
+                sequence,
+                signature,
+            } => (
+                SignalMessage::Lookup { node_id },
+                Some((candidates, sequence, signature)),
+            ),
+            other => (other, None),
+        };
+
         match message {
             SignalMessage::RegisterHello {
                 protocol_version,
@@ -1014,11 +1117,16 @@ async fn handle_signal_io(
                     reject(&outbox, "本连接已经开始或完成注册，不能重复 RegisterHello");
                     break "重复 RegisterHello";
                 }
-                if ![SIGNAL_PROTOCOL_VERSION, SHORT_ID_PROTOCOL_VERSION].contains(&protocol_version)
+                if ![
+                    SIGNAL_PROTOCOL_VERSION,
+                    SHORT_ID_PROTOCOL_VERSION,
+                    RECOVERY_PROTOCOL_VERSION,
+                ]
+                .contains(&protocol_version)
                 {
                     reject(
                         &outbox,
-                        format!("信令协议版本不兼容：支持 2/3，对端 {protocol_version}"),
+                        format!("信令协议版本不兼容：支持 2/3/4，对端 {protocol_version}"),
                     );
                     break "信令协议版本不兼容";
                 }
@@ -1157,6 +1265,12 @@ async fn handle_signal_io(
                         reject(&outbox, "服务器在线表已满");
                         break "在线表已满";
                     }
+                    if !is_new {
+                        reg.recovery.retain(|key, entries| {
+                            entries.remove(&node_id);
+                            key.requester != node_id && !entries.is_empty()
+                        });
+                    }
                     // 同 NodeId 的新连接取代旧连接：把旧连接的 close 握在手里，
                     // 稍后主动断开它。否则旧连接可以靠 Ping 无限续命，堆积
                     // socket/task，而 `peers` 只算一条、`max_registered_peers` 挡不住。
@@ -1182,6 +1296,8 @@ async fn handle_signal_io(
                     protocol_version: pending_registration.protocol_version,
                     node_id,
                     connection_id,
+                    challenge: pending_registration.challenge,
+                    public_key,
                 });
 
                 tracing::info!(
@@ -1192,7 +1308,7 @@ async fn handle_signal_io(
                 );
 
                 let registered =
-                    if pending_registration.protocol_version == SHORT_ID_PROTOCOL_VERSION {
+                    if pending_registration.protocol_version >= SHORT_ID_PROTOCOL_VERSION {
                         SignalMessage::RegisteredShort { short_id }
                     } else {
                         SignalMessage::Registered
@@ -1209,7 +1325,10 @@ async fn handle_signal_io(
 
                 // 有人在等它，现在可以牵线了。
                 for waiter in live_waiters {
-                    registry.lock().await.try_pair(waiter, node_id);
+                    registry
+                        .lock()
+                        .await
+                        .try_pair(waiter, node_id, config.max_candidates);
                 }
             }
 
@@ -1224,7 +1343,7 @@ async fn handle_signal_io(
                     .peers
                     .get(&registration.node_id)
                     .is_some_and(|record| record.connection_id == connection_id);
-                if !owner || registration.protocol_version != SHORT_ID_PROTOCOL_VERSION {
+                if !owner || registration.protocol_version < SHORT_ID_PROTOCOL_VERSION {
                     reject(&outbox, SHORT_LOOKUP_UNAVAILABLE);
                     break "短 ID 查询身份/版本无效";
                 }
@@ -1305,19 +1424,57 @@ async fn handle_signal_io(
                     continue;
                 }
 
+                let recovery = if let Some((candidates, sequence, signature)) = recovery_lookup {
+                    if registration.protocol_version != RECOVERY_PROTOCOL_VERSION
+                        || candidates.len() > config.max_candidates.min(MAX_CANDIDATES)
+                        || sequence <= recovery_sequence
+                    {
+                        drop(reg);
+                        reject(&outbox, "恢复候选版本、数量或序号无效");
+                        break "恢复候选无效";
+                    }
+                    let verified = public_key_from_bytes(&registration.public_key)
+                        .and_then(|key| {
+                            let signature = signature_from_bytes(&signature)?;
+                            let payload = recovery_payload(
+                                &registration.challenge,
+                                target,
+                                &candidates,
+                                sequence,
+                            )?;
+                            verify_signature(&key, &payload, &signature)
+                        })
+                        .is_ok();
+                    if !verified {
+                        drop(reg);
+                        reject(&outbox, "恢复候选签名无效");
+                        break "恢复候选签名无效";
+                    }
+                    recovery_sequence = sequence;
+                    Some(candidates)
+                } else {
+                    None
+                };
+                let key = WaiterKey {
+                    requester: me,
+                    connection_id: my_connection,
+                };
                 if reg.peers.contains_key(&target) {
                     // 目标在线：直接牵线。若之前挂起等过它，waiter 已在它登记
                     // 时被 `take_waiters_for` 消费掉、配额也已释放。
-                    reg.try_pair(me, target);
+                    if let Some(candidates) = recovery
+                        && !reg.store_recovery(key, target, candidates, config.max_pending_lookups)
+                    {
+                        drop(reg);
+                        reject(&outbox, "恢复候选数量已达上限");
+                        continue;
+                    }
+                    reg.try_pair(me, target, config.max_candidates);
                     continue;
                 }
 
                 // 目标不在线：挂起等待，先做去重，再检查上限。
                 // 配额以 Registry 里的**真实 pending**为准，不是 handler 本地的历史集合。
-                let key = WaiterKey {
-                    requester: me,
-                    connection_id: my_connection,
-                };
                 let already_waiting = reg
                     .waiters
                     .get(&target)
@@ -1350,6 +1507,15 @@ async fn handle_signal_io(
                         }
                         continue;
                     }
+                }
+                if let Some(candidates) = recovery
+                    && !reg.store_recovery(key, target, candidates, config.max_pending_lookups)
+                {
+                    drop(reg);
+                    reject(&outbox, "恢复候选数量已达上限");
+                    continue;
+                }
+                if !already_waiting {
                     reg.add_waiter(key, target);
                 }
                 drop(reg);
@@ -1496,8 +1662,15 @@ pub struct SignalingClient {
     outgoing: mpsc::Sender<SignalMessage>,
     /// reader 任务投递进来的服务器消息。
     events: mpsc::Receiver<SignalMessage>,
+    recovery_signer: Option<RecoverySigner>,
     /// 只为了在 drop 时一起收掉后台任务（心跳随之停止）。
     _tasks: ClientTasks,
+}
+
+struct RecoverySigner {
+    identity: Identity,
+    challenge: [u8; CHALLENGE_LEN],
+    sequence: std::sync::Mutex<u64>,
 }
 
 /// 后台任务句柄；`SignalingClient` drop 时一起收掉，心跳也随之停止。
@@ -1543,7 +1716,7 @@ impl SignalingClient {
             candidates,
             Some(DEFAULT_HEARTBEAT_INTERVAL),
             true,
-            SHORT_ID_PROTOCOL_VERSION,
+            RECOVERY_PROTOCOL_VERSION,
             tls,
         )
         .await
@@ -1616,7 +1789,7 @@ impl SignalingClient {
             candidates,
             Some(DEFAULT_HEARTBEAT_INTERVAL),
             true,
-            SHORT_ID_PROTOCOL_VERSION,
+            RECOVERY_PROTOCOL_VERSION,
             None,
         )
         .await
@@ -1681,7 +1854,7 @@ impl SignalingClient {
 
         // 整个注册交换（Hello → Challenge → Register → Registered）都要在
         // 超时内完成，避免服务器不回包时客户端无限等待。
-        let short_id = tokio::time::timeout(
+        let (short_id, challenge) = tokio::time::timeout(
             Duration::from_secs(10),
             register_session(
                 &mut reader,
@@ -1713,6 +1886,13 @@ impl SignalingClient {
             server: server.to_string(),
             outgoing,
             events,
+            recovery_signer: (protocol_version == RECOVERY_PROTOCOL_VERSION).then(|| {
+                RecoverySigner {
+                    identity: identity.clone(),
+                    challenge,
+                    sequence: std::sync::Mutex::new(0),
+                }
+            }),
             _tasks: ClientTasks {
                 writer,
                 reader: reader_task,
@@ -1751,6 +1931,39 @@ impl SignalingClient {
         self.outgoing
             .try_send(SignalMessage::Lookup { node_id: peer })
             .map_err(|error| Error::Discovery(format!("信令查询队列不可用: {error}")))
+    }
+
+    pub(crate) async fn request_recovery_lookup(
+        &self,
+        peer: NodeId,
+        candidates: &[Candidate],
+    ) -> Result<()> {
+        let signer = self
+            .recovery_signer
+            .as_ref()
+            .ok_or_else(|| Error::Discovery("当前信令连接不支持恢复候选".into()))?;
+        if candidates.len() > MAX_CANDIDATES {
+            return Err(Error::Discovery("恢复候选地址过多".into()));
+        }
+        let mut sequence = signer
+            .sequence
+            .lock()
+            .map_err(|_| Error::Discovery("恢复候选序号不可用".into()))?;
+        let next = sequence
+            .checked_add(1)
+            .ok_or_else(|| Error::Discovery("恢复候选序号已耗尽".into()))?;
+        let payload = recovery_payload(&signer.challenge, peer, candidates, next)?;
+        let message = SignalMessage::RecoveryLookup {
+            node_id: peer,
+            candidates: candidates.to_vec(),
+            sequence: next,
+            signature: signer.identity.sign(&payload).to_bytes().to_vec(),
+        };
+        self.outgoing
+            .try_send(message)
+            .map_err(|error| Error::Discovery(format!("信令查询队列不可用: {error}")))?;
+        *sequence = next;
+        Ok(())
     }
 
     /// Receive the next server event from the sole signaling reader.
@@ -1980,7 +2193,7 @@ async fn register_session<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     identity: &Identity,
     candidates: Vec<Candidate>,
     protocol_version: u32,
-) -> Result<Option<ShortId>> {
+) -> Result<(Option<ShortId>, [u8; CHALLENGE_LEN])> {
     let node_id = identity.node_id();
     let public_key = identity.public_key_bytes();
 
@@ -2030,11 +2243,14 @@ async fn register_session<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         .await?
         .ok_or_else(|| Error::Discovery("信令服务器在确认前就关闭了连接".into()))?;
     match SignalMessage::decode(&reply)? {
-        SignalMessage::Registered if protocol_version == SIGNAL_PROTOCOL_VERSION => Ok(None),
+        SignalMessage::Registered if protocol_version == SIGNAL_PROTOCOL_VERSION => {
+            Ok((None, challenge))
+        }
         SignalMessage::RegisteredShort { short_id }
-            if protocol_version == SHORT_ID_PROTOCOL_VERSION =>
+            if protocol_version == SHORT_ID_PROTOCOL_VERSION
+                || protocol_version == RECOVERY_PROTOCOL_VERSION =>
         {
-            Ok(Some(ShortId::new(short_id.value())?))
+            Ok((Some(ShortId::new(short_id.value())?), challenge))
         }
         SignalMessage::Error { reason } => Err(Error::Discovery(format!("登记被拒绝: {reason}"))),
         other => Err(Error::Discovery(format!(
@@ -2529,6 +2745,262 @@ mod tests {
                 .await
                 .unwrap(),
             Some(SignalMessage::Pong)
+        ));
+    }
+
+    #[tokio::test]
+    async fn recovery_lookup_is_scoped_survives_reverse_lookup_and_supports_v3() {
+        let (addr, _) = spawn_signal_server_with(SignalServerConfig::for_tests()).await;
+        let alice = Identity::generate();
+        let bob = Identity::generate();
+        let carol = Identity::generate();
+        let primary = candidate(CandidateKind::Host, "192.0.2.1:1000");
+        let fresh = candidate(CandidateKind::Host, "192.0.2.1:2000");
+        let mut a =
+            SignalingClient::connect_desktop_with_events(&addr.to_string(), &alice, vec![primary])
+                .await
+                .unwrap();
+        let mut b = SignalingClient::connect_with_options(
+            &addr.to_string(),
+            &bob,
+            vec![],
+            None,
+            false,
+            SHORT_ID_PROTOCOL_VERSION,
+            None,
+        )
+        .await
+        .unwrap();
+        let mut c = SignalingClient::connect(&addr.to_string(), &carol, vec![])
+            .await
+            .unwrap();
+
+        a.request_recovery_lookup(bob.node_id(), &[fresh])
+            .await
+            .unwrap();
+        let a_offer = a.next_event().await.unwrap();
+        let b_offer = b.next_event().await.unwrap();
+        let (
+            SignalMessage::PeerCandidates { token: a_token, .. },
+            SignalMessage::PeerCandidates {
+                candidates,
+                token: b_token,
+                ..
+            },
+        ) = (a_offer, b_offer)
+        else {
+            panic!("expected paired offers")
+        };
+        assert_eq!(a_token, b_token);
+        assert_eq!(candidates, vec![fresh, primary]);
+
+        b.request_lookup(alice.node_id()).await.unwrap();
+        let b_offer = b.next_event().await.unwrap();
+        let a_offer = a.next_event().await.unwrap();
+        let (
+            SignalMessage::PeerCandidates {
+                candidates,
+                token: b_token,
+                ..
+            },
+            SignalMessage::PeerCandidates { token: a_token, .. },
+        ) = (b_offer, a_offer)
+        else {
+            panic!("expected reverse paired offers")
+        };
+        assert_eq!(a_token, b_token);
+        assert_eq!(candidates, vec![fresh, primary]);
+
+        c.request_lookup(alice.node_id()).await.unwrap();
+        let c_offer = c.next_event().await.unwrap();
+        let a_offer = a.next_event().await.unwrap();
+        let (
+            SignalMessage::PeerCandidates {
+                candidates,
+                token: c_token,
+                ..
+            },
+            SignalMessage::PeerCandidates { token: a_token, .. },
+        ) = (c_offer, a_offer)
+        else {
+            panic!("expected third-party offers")
+        };
+        assert_eq!(a_token, c_token);
+        assert_eq!(candidates, vec![primary]);
+    }
+
+    #[tokio::test]
+    async fn recovery_lookup_offline_waiter_respects_expiry_and_owner() {
+        let (addr, registry) = spawn_signal_server_with(SignalServerConfig::for_tests()).await;
+        let alice = Identity::generate();
+        let bob = Identity::generate();
+        let primary = candidate(CandidateKind::Host, "192.0.2.1:1000");
+        let fresh = candidate(CandidateKind::Host, "192.0.2.1:2000");
+        let mut a =
+            SignalingClient::connect_desktop_with_events(&addr.to_string(), &alice, vec![primary])
+                .await
+                .unwrap();
+        a.request_recovery_lookup(bob.node_id(), &[fresh])
+            .await
+            .unwrap();
+        assert!(matches!(
+            a.next_event().await.unwrap(),
+            SignalMessage::PeerPending { .. }
+        ));
+        let mut b = SignalingClient::connect(&addr.to_string(), &bob, vec![])
+            .await
+            .unwrap();
+        let a_offer = a.next_event().await.unwrap();
+        let b_offer = b.next_event().await.unwrap();
+        let (
+            SignalMessage::PeerCandidates { token: a_token, .. },
+            SignalMessage::PeerCandidates {
+                candidates,
+                token: b_token,
+                ..
+            },
+        ) = (a_offer, b_offer)
+        else {
+            panic!("expected offline waiter offers")
+        };
+        assert_eq!(a_token, b_token);
+        assert_eq!(candidates, vec![fresh, primary]);
+
+        {
+            let mut reg = registry.lock().await;
+            for entries in reg.recovery.values_mut() {
+                for entry in entries.values_mut() {
+                    entry.expires_at = tokio::time::Instant::now();
+                }
+            }
+        }
+        b.request_lookup(alice.node_id()).await.unwrap();
+        assert!(matches!(b.next_event().await.unwrap(),
+            SignalMessage::PeerCandidates { candidates, .. } if candidates == vec![primary]));
+        let _ = a.next_event().await.unwrap();
+
+        a.request_recovery_lookup(bob.node_id(), &[fresh])
+            .await
+            .unwrap();
+        let _ = a.next_event().await.unwrap();
+        let _ = b.next_event().await.unwrap();
+        let replacement =
+            SignalingClient::connect_desktop_with_events(&addr.to_string(), &alice, vec![primary])
+                .await
+                .unwrap();
+        b.request_lookup(alice.node_id()).await.unwrap();
+        assert!(matches!(b.next_event().await.unwrap(),
+            SignalMessage::PeerCandidates { candidates, .. } if candidates == vec![primary]));
+        drop(replacement);
+    }
+
+    #[tokio::test]
+    async fn recovery_lookup_rejects_replay_and_tampered_candidates() {
+        for tamper in [false, true] {
+            let (addr, _) = spawn_signal_server_with(SignalServerConfig::for_tests()).await;
+            let alice = Identity::generate();
+            let target = Identity::generate().node_id();
+            let fresh = candidate(CandidateKind::Host, "192.0.2.1:2000");
+            let mut raw = Raw::connect(addr).await;
+            raw.send(&SignalMessage::RegisterHello {
+                protocol_version: RECOVERY_PROTOCOL_VERSION,
+                node_id: alice.node_id(),
+                public_key: alice.public_key_bytes(),
+            })
+            .await;
+            let Some(SignalMessage::RegisterChallenge { challenge, .. }) = raw.recv().await else {
+                panic!("expected challenge")
+            };
+            assert!(matches!(
+                raw.register_with(&alice, &alice, &challenge, vec![]).await,
+                Some(SignalMessage::RegisteredShort { .. })
+            ));
+            let signature = alice
+                .sign(&recovery_payload(&challenge, target, &[fresh], 1).unwrap())
+                .to_bytes()
+                .to_vec();
+            let message = SignalMessage::RecoveryLookup {
+                node_id: target,
+                candidates: if tamper { vec![] } else { vec![fresh] },
+                sequence: 1,
+                signature,
+            };
+            raw.send(&message).await;
+            if !tamper {
+                assert!(matches!(
+                    raw.recv().await,
+                    Some(SignalMessage::PeerPending { .. })
+                ));
+                raw.send(&message).await;
+            }
+            assert!(matches!(
+                raw.recv().await,
+                Some(SignalMessage::Error { .. })
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn recovery_lookup_obeys_pending_and_rate_limits() {
+        for rate_limited in [false, true] {
+            let config = SignalServerConfig {
+                max_pending_lookups: 1,
+                node_lookups_per_connection: if rate_limited { 1 } else { 64 },
+                ..SignalServerConfig::for_tests()
+            };
+            let (addr, registry) = spawn_signal_server_with(config).await;
+            let alice = Identity::generate();
+            let first = Identity::generate().node_id();
+            let second = Identity::generate().node_id();
+            let fresh = candidate(CandidateKind::Host, "192.0.2.1:2000");
+            let mut a =
+                SignalingClient::connect_desktop_with_events(&addr.to_string(), &alice, vec![])
+                    .await
+                    .unwrap();
+            a.request_recovery_lookup(first, &[fresh]).await.unwrap();
+            assert!(matches!(
+                a.next_event().await.unwrap(),
+                SignalMessage::PeerPending { .. }
+            ));
+            a.request_recovery_lookup(second, &[fresh]).await.unwrap();
+            assert!(matches!(
+                a.next_event().await.unwrap(),
+                SignalMessage::Error { .. }
+            ));
+            let reg = registry.lock().await;
+            let records = reg.recovery.values().next().unwrap();
+            assert!(records.contains_key(&first));
+            assert!(!records.contains_key(&second));
+        }
+    }
+
+    #[tokio::test]
+    async fn recovery_lookup_prioritizes_fresh_candidates_within_limit() {
+        let config = SignalServerConfig {
+            max_candidates: 2,
+            ..SignalServerConfig::for_tests()
+        };
+        let (addr, _) = spawn_signal_server_with(config).await;
+        let alice = Identity::generate();
+        let bob = Identity::generate();
+        let primary = candidate(CandidateKind::Host, "192.0.2.1:1000");
+        let fresh = candidate(CandidateKind::Host, "192.0.2.1:2000");
+        let a = SignalingClient::connect_desktop_with_events(
+            &addr.to_string(),
+            &alice,
+            vec![primary, fresh],
+        )
+        .await
+        .unwrap();
+        let mut b = SignalingClient::connect(&addr.to_string(), &bob, vec![])
+            .await
+            .unwrap();
+        a.request_recovery_lookup(bob.node_id(), &[fresh])
+            .await
+            .unwrap();
+        assert!(matches!(
+            b.next_event().await.unwrap(),
+            SignalMessage::PeerCandidates { candidates, .. } if candidates == vec![fresh, primary]
         ));
     }
 
@@ -3807,7 +4279,7 @@ mod tests {
             },
         );
 
-        reg.try_pair(a, b);
+        reg.try_pair(a, b, MAX_CANDIDATES);
 
         assert!(
             close_b_rx.has_changed().unwrap_or(false),
@@ -4041,7 +4513,7 @@ mod tests {
         let alice = Identity::generate();
         let mut raw = Raw::connect(addr).await;
         raw.send(&SignalMessage::RegisterHello {
-            protocol_version: SHORT_ID_PROTOCOL_VERSION + 1,
+            protocol_version: RECOVERY_PROTOCOL_VERSION + 1,
             node_id: alice.node_id(),
             public_key: alice.public_key_bytes(),
         })

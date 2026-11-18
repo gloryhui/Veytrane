@@ -189,6 +189,8 @@ pub struct NodeSessionConfig {
     pub config_path: Option<std::path::PathBuf>,
     #[cfg(test)]
     pub test_outgoing_password: Option<SecretPassword>,
+    #[cfg(test)]
+    test_prepared_networks: TestPreparedNetworks,
     pub network: DesktopNetworkConfig,
     pub allowed_forward_targets: Vec<crate::node::core::config::AllowedForwardTarget>,
     pub tunnel_rules: Vec<crate::node::core::config::TunnelRule>,
@@ -215,11 +217,38 @@ impl NodeSessionConfig {
             config_path: None,
             #[cfg(test)]
             test_outgoing_password: None,
+            #[cfg(test)]
+            test_prepared_networks: TestPreparedNetworks::default(),
             network: DesktopNetworkConfig::default(),
             allowed_forward_targets: Vec::new(),
             tunnel_rules: Vec::new(),
             transfer: None,
         }
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Default)]
+struct TestPreparedNetworks(Arc<std::sync::Mutex<VecDeque<DesktopNetwork>>>);
+
+#[cfg(test)]
+impl std::fmt::Debug for TestPreparedNetworks {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TestPreparedNetworks")
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+impl TestPreparedNetworks {
+    fn new(networks: impl IntoIterator<Item = DesktopNetwork>) -> Self {
+        Self(Arc::new(std::sync::Mutex::new(
+            networks.into_iter().collect(),
+        )))
+    }
+
+    fn take(&self) -> Option<DesktopNetwork> {
+        self.0.lock().unwrap().pop_front()
     }
 }
 
@@ -1242,7 +1271,13 @@ async fn run_session(
         preparation.stun_servers.clear();
         preparation.relay_server = None;
     }
-    let prepared = if unconfigured && !config.direct.enabled {
+    #[cfg(test)]
+    let test_network = config.test_prepared_networks.take();
+    #[cfg(not(test))]
+    let test_network = Option::<DesktopNetwork>::None;
+    let prepared = if let Some(prepared) = test_network {
+        Ok(prepared)
+    } else if unconfigured && !config.direct.enabled {
         Ok(crate::net::DesktopNetwork {
             relay: None,
             paths: Vec::new(),
@@ -2787,7 +2822,10 @@ async fn run_session(
                             continue;
                         }
                         if let Some(client) = signal.as_ref() {
-                            if client.request_lookup(peer).await.is_err() {
+                            if request_peer_lookup(client, peer, &recovery_networks)
+                                .await
+                                .is_err()
+                            {
                                 queued_lookups.push_back((peer, generation));
                                 signal = None;
                                 schedule_reconnect(
@@ -2867,8 +2905,15 @@ async fn run_session(
                 let request = rotation_request;
                 rotation_preparing = Some((peer, request));
                 let rotation_inputs = input_tx.clone();
+                #[cfg(test)]
+                let test_network = config.test_prepared_networks.take();
+                #[cfg(not(test))]
+                let test_network = Option::<DesktopNetwork>::None;
                 session_tasks.spawn(async move {
-                    let result = prepare_desktop_network(&preparation).await;
+                    let result = match test_network {
+                        Some(prepared) => Ok(prepared),
+                        None => prepare_desktop_network(&preparation).await,
+                    };
                     let _ = rotation_inputs
                         .send(SessionInput::RotationPrepared {
                             peer,
@@ -2978,7 +3023,10 @@ async fn run_session(
                 fresh_lookup_peers.insert(peer);
                 emit_peer_state(&events, peer, generation, PeerLifecycle::PeerPending).await;
                 if let Some(client) = signal.as_ref() {
-                    if client.request_lookup(peer).await.is_err() {
+                    if request_peer_lookup(client, peer, &recovery_networks)
+                        .await
+                        .is_err()
+                    {
                         queued_lookups.push_back((peer, generation));
                         signal = None;
                         schedule_reconnect(
@@ -2992,7 +3040,7 @@ async fn run_session(
                 } else {
                     queued_lookups.push_back((peer, generation));
                 }
-                warn!(peer = %peer.short(), route, "peer recovery prepared fresh socket; matching only this peer with primary candidates unchanged");
+                warn!(peer = %peer.short(), route, "peer recovery prepared fresh socket and requested peer-scoped matching");
                 let _ = events
                     .send(SessionEvent::Diagnostic(format!(
                         "设备 {} 已准备独立恢复路径，正在重新匹配；其他设备连接保持",
@@ -3849,7 +3897,9 @@ async fn run_session(
                                 queued_lookups.push_front((peer, generation));
                                 break;
                             };
-                            if let Err(error) = client.request_lookup(peer).await {
+                            if let Err(error) =
+                                request_peer_lookup(client, peer, &recovery_networks).await
+                            {
                                 warn!(%error, "发送待处理 lookup 失败");
                                 queued_lookups.push_front((peer, generation));
                                 signal = None;
@@ -4902,6 +4952,21 @@ async fn run_session(
     while peer_tasks.join_next().await.is_some() {}
     while session_tasks.join_next().await.is_some() {}
     let _ = time::timeout(Duration::from_secs(1), network.wait_idle()).await;
+}
+
+async fn request_peer_lookup(
+    client: &SignalingClient,
+    peer: NodeId,
+    recovery: &HashMap<NodeId, RecoveryNetwork>,
+) -> Result<()> {
+    match recovery.get(&peer) {
+        Some(entry) if !entry.network.local_candidates.is_empty() => {
+            client
+                .request_recovery_lookup(peer, &entry.network.local_candidates)
+                .await
+        }
+        _ => client.request_lookup(peer).await,
+    }
 }
 
 async fn release_unused_recovery_networks(
