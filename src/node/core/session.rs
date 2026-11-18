@@ -4,7 +4,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU8, Ordering},
+};
 use std::task::Poll;
 use std::time::Duration;
 
@@ -21,6 +24,8 @@ use crate::net::race::{ConnectionGuard, PreparedTransport};
 use crate::net::{
     AddressFamily, DesktopNetwork, DesktopNetworkConfig, NetworkPath, prepare_desktop_network,
 };
+#[cfg(feature = "node")]
+use crate::transport::diagnostic as udp_diag;
 #[cfg(test)]
 use crate::transport::handshake::handshake_initiator;
 use crate::transport::handshake::handshake_responder;
@@ -30,8 +35,6 @@ use crate::transport::quic::{
     ACCEPT_FIRST_BI_STREAM_TIMEOUT, APPLICATION_HANDSHAKE_TIMEOUT, ChannelBinding,
     QUIC_HANDSHAKE_TIMEOUT,
 };
-#[cfg(feature = "node")]
-use crate::transport::diagnostic as udp_diag;
 
 use crate::discovery::short_id::ShortId;
 use crate::node::core::remote_auth::{
@@ -62,6 +65,109 @@ const PEER_PUNCH_CONFIG: PunchConfig = PunchConfig {
     interval: Duration::from_millis(200),
     attempts: 30,
 };
+const ATTEMPT_PROBING: u8 = 0;
+const ATTEMPT_TRANSPORT_STARTED: u8 = 1;
+const ATTEMPT_SUPERSEDED: u8 = 2;
+
+#[derive(Clone, Debug, Default)]
+struct AttemptProgress {
+    state: Arc<AtomicU8>,
+}
+
+impl AttemptProgress {
+    fn begin_transport(&self) -> bool {
+        match self.state.compare_exchange(
+            ATTEMPT_PROBING,
+            ATTEMPT_TRANSPORT_STARTED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) | Err(ATTEMPT_TRANSPORT_STARTED) => true,
+            Err(_) => false,
+        }
+    }
+
+    fn try_supersede(&self) -> bool {
+        self.state
+            .compare_exchange(
+                ATTEMPT_PROBING,
+                ATTEMPT_SUPERSEDED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+}
+
+fn newer_offer_can_supersede(
+    state: Option<&PeerLifecycle>,
+    current_token: PunchToken,
+    offered_token: PunchToken,
+    progress: &AttemptProgress,
+) -> bool {
+    current_token != offered_token
+        && matches!(
+            state,
+            Some(PeerLifecycle::Punching | PeerLifecycle::Authenticating)
+        )
+        && progress.try_supersede()
+}
+
+async fn wait_for_attempt_cancel(cancel: Option<&mut watch::Receiver<bool>>) {
+    if let Some(cancel) = cancel {
+        loop {
+            if *cancel.borrow_and_update() {
+                return;
+            }
+            if cancel.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+    std::future::pending().await
+}
+
+struct ActivePeerAttempt {
+    generation: u64,
+    token: PunchToken,
+    progress: AttemptProgress,
+    cancel: Option<watch::Sender<bool>>,
+    abort: tokio::task::AbortHandle,
+    join: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl ActivePeerAttempt {
+    fn can_supersede(&self, state: Option<&PeerLifecycle>, offered: PunchToken) -> bool {
+        newer_offer_can_supersede(state, self.token, offered, &self.progress)
+    }
+
+    fn abort(&self) {
+        self.abort.abort();
+    }
+
+    async fn cancel_and_wait(self) {
+        if let Some(cancel) = &self.cancel {
+            cancel.send_replace(true);
+        } else {
+            self.abort.abort();
+        }
+        if let Some(join) = self.join {
+            let _ = join.await;
+        }
+    }
+}
+
+async fn abort_all_peer_attempts(attempts: &mut HashMap<NodeId, ActivePeerAttempt>) {
+    let attempts = std::mem::take(attempts);
+    for attempt in attempts.values() {
+        attempt.abort();
+    }
+    for attempt in attempts.into_values() {
+        if let Some(join) = attempt.join {
+            let _ = join.await;
+        }
+    }
+}
 
 fn is_current_signal_generation(current: u64, result_generation: u64) -> bool {
     current == result_generation
@@ -1258,7 +1364,7 @@ async fn run_session(
 
     let semaphore = Arc::new(Semaphore::new(MAX_PENDING_PEERS));
     let mut peer_tasks = JoinSet::new();
-    let mut peer_attempts: HashMap<NodeId, (PunchToken, tokio::task::AbortHandle)> = HashMap::new();
+    let mut peer_attempts: HashMap<NodeId, ActivePeerAttempt> = HashMap::new();
     let mut deferred_candidates: HashMap<NodeId, (Vec<Candidate>, PunchToken)> = HashMap::new();
     let mut tunnel_tasks: JoinSet<TunnelTaskResult> = JoinSet::new();
     let selection_workers = Arc::new(Semaphore::new(3));
@@ -1696,7 +1802,7 @@ async fn run_session(
                     reconnect_probes.remove(&peer);
                     pending_inbound.retain(|(id, _), _| *id != peer);
                     queued_lookups.retain(|(id, _)| *id != peer);
-                    if let Some((_, attempt)) = peer_attempts.remove(&peer) {
+                    if let Some(attempt) = peer_attempts.remove(&peer) {
                         attempt.abort();
                     }
                     if let Some((_, _, rights)) = authorizations.get(&peer) {
@@ -1791,7 +1897,7 @@ async fn run_session(
                 reconnect_probes.remove(&peer);
                 pending_inbound.retain(|(id, _), _| *id != peer);
                 queued_lookups.retain(|(id, _)| *id != peer);
-                if let Some((_, attempt)) = peer_attempts.remove(&peer) {
+                if let Some(attempt) = peer_attempts.remove(&peer) {
                     attempt.abort();
                 }
                 attempt_routes.retain(|(id, _), _| *id != peer);
@@ -1842,7 +1948,7 @@ async fn run_session(
                     fresh_lookup_peers.remove(&peer);
                     credentials.remove(&peer);
                     credential_retries.remove(&peer);
-                    if let Some((_, attempt)) = peer_attempts.remove(&peer) {
+                    if let Some(attempt) = peer_attempts.remove(&peer) {
                         attempt.abort();
                     }
                     attempt_routes.retain(|(id, _), _| *id != peer);
@@ -1952,7 +2058,7 @@ async fn run_session(
                         // Strong revocation invalidates password and trust grants alike.
                         credentials.remove(&peer);
                         credential_retries.remove(&peer);
-                        if let Some((_, attempt)) = peer_attempts.remove(&peer) {
+                        if let Some(attempt) = peer_attempts.remove(&peer) {
                             attempt.abort();
                         }
                         attempt_routes.retain(|(id, _), _| *id != peer);
@@ -2496,7 +2602,7 @@ async fn run_session(
                     if network.relay.is_some() {
                         deferred_candidates.remove(&peer);
                     }
-                    if let Some((_, attempt)) = peer_attempts.remove(&peer) {
+                    if let Some(attempt) = peer_attempts.remove(&peer) {
                         attempt.abort();
                     }
                     attempt_routes.retain(|(id, _), _| *id != peer);
@@ -2630,7 +2736,19 @@ async fn run_session(
                                         permit,
                                     );
                                     let abort = peer_tasks.spawn(task);
-                                    peer_attempts.insert(peer, (PunchToken::random(), abort));
+                                    let progress = AttemptProgress::default();
+                                    progress.begin_transport();
+                                    peer_attempts.insert(
+                                        peer,
+                                        ActivePeerAttempt {
+                                            generation,
+                                            token: PunchToken::random(),
+                                            progress,
+                                            cancel: None,
+                                            abort,
+                                            join: None,
+                                        },
+                                    );
                                     attempt_routes.insert((peer, generation), current_network_id);
                                     direct_dialing.insert(peer);
                                 }
@@ -2812,7 +2930,7 @@ async fn run_session(
                 // Cancel only this failed peer's producers before replacing its socket.
                 // The primary registration and every other peer retain their candidates,
                 // endpoints, authorization publishers and business streams.
-                if let Some((_, task)) = peer_attempts.remove(&peer) {
+                if let Some(task) = peer_attempts.remove(&peer) {
                     task.abort();
                 }
                 pending_inbound.retain(|(id, _), _| *id != peer);
@@ -2937,7 +3055,7 @@ async fn run_session(
                         let _ = service.settle_network_loss(peer).await;
                     }
                 }
-                peer_attempts.clear();
+                abort_all_peer_attempts(&mut peer_attempts).await;
                 direct_dialing.clear();
                 deferred_candidates.clear();
                 reconnect_probes.clear();
@@ -3143,7 +3261,7 @@ async fn run_session(
                 for (_, (_, connection)) in connections.drain() {
                     connection.close(0u32.into(), b"desktop network reconfigured");
                 }
-                peer_attempts.clear();
+                abort_all_peer_attempts(&mut peer_attempts).await;
                 attempt_routes.clear();
                 connection_routes.clear();
                 fresh_lookup_peers.clear();
@@ -3385,20 +3503,73 @@ async fn run_session(
                     {
                         continue;
                     }
+                    let canonical = canonical_candidates(&candidates);
+                    let (attempt_route, attempt_network) = recovery_networks
+                        .get(&node_id)
+                        .map(|recovery| (recovery.route, &recovery.network))
+                        .unwrap_or((current_network_id, &network));
+                    let primary = (attempt_route != current_network_id)
+                        .then_some((current_network_id, &network));
+                    let filtered_offer = candidates
+                        .iter()
+                        .copied()
+                        .filter(|candidate| candidate.kind != CandidateKind::Relay)
+                        .collect::<Vec<_>>();
+                    let offer_paths = peer_attempt_paths(
+                        attempt_route,
+                        attempt_network,
+                        primary,
+                        &filtered_offer,
+                    );
+                    let offer_usable = candidates.len() <= MAX_CANDIDATES
+                        && (!offer_paths.is_empty() || attempt_network.relay.is_some());
                     if peers
                         .state(node_id)
                         .is_some_and(|state| state.is_active() && !state.is_connected())
-                        && let Some((current_token, _)) = peer_attempts.get(&node_id)
+                        && let Some(attempt) = peer_attempts.get(&node_id)
                     {
                         // A new lookup can arrive before the old auth failure callback.
                         // Retain its authenticated signaling candidates rather than losing
                         // the only matching punch token or cancelling an active transport.
-                        if *current_token != token {
-                            deferred_candidates.insert(node_id, (candidates, token));
+                        let replaced = if attempt.token != token {
+                            if !offer_usable {
+                                let _ = events
+                                    .send(SessionEvent::Diagnostic(
+                                        "忽略无法用于本机路径的最新连接候选".into(),
+                                    ))
+                                    .await;
+                                continue;
+                            }
+                            if attempt.can_supersede(peers.state(node_id), token) {
+                                let generation = attempt.generation;
+                                let attempt = peer_attempts
+                                    .remove(&node_id)
+                                    .expect("attempt was checked above");
+                                attempt.cancel_and_wait().await;
+                                attempt_routes.remove(&(node_id, generation));
+                                pending_inbound.remove(&(node_id, generation));
+                                peer_candidates.remove(&node_id);
+                                reconnect_probes.remove(&node_id);
+                                direct_dialing.remove(&node_id);
+                                deferred_candidates.remove(&node_id);
+                                peers.transition(node_id, generation, PeerLifecycle::Disconnected);
+                                let _ = events
+                                    .send(SessionEvent::Diagnostic(
+                                        "收到更新的认证候选；旧尝试仍在打洞，已切换新令牌".into(),
+                                    ))
+                                    .await;
+                                true
+                            } else {
+                                deferred_candidates.insert(node_id, (candidates, token));
+                                continue;
+                            }
+                        } else {
+                            false
+                        };
+                        if !replaced {
+                            continue;
                         }
-                        continue;
                     }
-                    let canonical = canonical_candidates(&candidates);
                     let connected_network_id = connection_routes
                         .get(&node_id)
                         .copied()
@@ -3527,12 +3698,8 @@ async fn run_session(
                         peer_candidates.remove(&node_id);
                         reconnect_probes.remove(&node_id);
                     }
-                    let (attempt_route, attempt_network) = recovery_networks
-                        .get(&node_id)
-                        .map(|recovery| (recovery.route, &recovery.network))
-                        .unwrap_or((current_network_id, &network));
                     reconnect_probes.remove(&node_id);
-                    if let Some((generation, attempt)) = start_peer_attempt(
+                    if let Some(attempt) = start_peer_attempt(
                         node_id,
                         candidates,
                         token,
@@ -3547,7 +3714,6 @@ async fn run_session(
                         &semaphore,
                         &mut peers,
                         &mut pending_inbound,
-                        &mut peer_tasks,
                         auth_context.clone(),
                         remote_verifier.clone(),
                         AttemptOptions {
@@ -3566,7 +3732,8 @@ async fn run_session(
                     )
                     .await
                     {
-                        peer_attempts.insert(node_id, (token, attempt));
+                        let generation = attempt.generation;
+                        peer_attempts.insert(node_id, attempt);
                         peer_candidates.insert(node_id, (generation, canonical));
                         attempt_routes.insert((node_id, generation), attempt_route);
                     }
@@ -3767,7 +3934,7 @@ async fn run_session(
                 {
                     continue;
                 }
-                if let Some((_, attempt)) = peer_attempts.remove(&peer) {
+                if let Some(attempt) = peer_attempts.remove(&peer) {
                     attempt.abort();
                 }
                 attempt_routes.retain(|(id, _), _| *id != peer);
@@ -3795,7 +3962,19 @@ async fn run_session(
                     permit,
                 );
                 let abort = peer_tasks.spawn(task);
-                peer_attempts.insert(peer, (PunchToken::random(), abort));
+                let progress = AttemptProgress::default();
+                progress.begin_transport();
+                peer_attempts.insert(
+                    peer,
+                    ActivePeerAttempt {
+                        generation,
+                        token: PunchToken::random(),
+                        progress,
+                        cancel: None,
+                        abort,
+                        join: None,
+                    },
+                );
             }
             Wake::Input(Some(SessionInput::PeerPath {
                 peer,
@@ -4383,7 +4562,7 @@ async fn run_session(
                     emit_peer_state(&events, peer, generation, PeerLifecycle::Disconnected).await;
                 }
                 let canonical = canonical_candidates(&candidates);
-                if let Some((generation, attempt)) = start_peer_attempt(
+                if let Some(attempt) = start_peer_attempt(
                     peer,
                     candidates,
                     token,
@@ -4397,7 +4576,6 @@ async fn run_session(
                     &semaphore,
                     &mut peers,
                     &mut pending_inbound,
-                    &mut peer_tasks,
                     auth_context.clone(),
                     remote_verifier.clone(),
                     AttemptOptions {
@@ -4416,7 +4594,8 @@ async fn run_session(
                 )
                 .await
                 {
-                    peer_attempts.insert(peer, (token, attempt));
+                    let generation = attempt.generation;
+                    peer_attempts.insert(peer, attempt);
                     peer_candidates.insert(peer, (generation, canonical));
                     attempt_routes.insert((peer, generation), network_id);
                 }
@@ -4715,6 +4894,7 @@ async fn run_session(
     for (_, retired) in recovery_networks.drain() {
         retired.shutdown().await;
     }
+    abort_all_peer_attempts(&mut peer_attempts).await;
     network.close();
     forward_streams.shutdown().await;
     session_tasks.abort_all();
@@ -5234,12 +5414,11 @@ async fn start_peer_attempt(
     semaphore: &Arc<Semaphore>,
     peers: &mut PeerRegistry,
     pending_inbound: &mut HashMap<(NodeId, u64), mpsc::Sender<(NetworkRoute, quinn::Incoming)>>,
-    tasks: &mut JoinSet<()>,
     auth: AuthContext,
     verifier: Option<RemoteVerifier>,
     options: AttemptOptions,
     password: Option<SecretPassword>,
-) -> Option<(u64, tokio::task::AbortHandle)> {
+) -> Option<ActivePeerAttempt> {
     if peer == local_node {
         return None;
     }
@@ -5351,7 +5530,10 @@ async fn start_peer_attempt(
         }));
         relay
     });
-    let attempt = tasks.spawn(async move {
+    let progress = AttemptProgress::default();
+    let task_progress = progress.clone();
+    let (cancel, cancelled) = watch::channel(false);
+    let join = tokio::spawn(async move {
         let result = run_peer_attempt(
             peer,
             generation,
@@ -5368,6 +5550,8 @@ async fn start_peer_attempt(
             verifier,
             options,
             password,
+            task_progress,
+            cancelled,
         )
         .await;
         if let Err(detail) = result {
@@ -5380,7 +5564,15 @@ async fn start_peer_attempt(
                 .await;
         }
     });
-    Some((generation, attempt))
+    let abort = join.abort_handle();
+    Some(ActivePeerAttempt {
+        generation,
+        token,
+        progress,
+        cancel: Some(cancel),
+        abort,
+        join: Some(join),
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -5400,6 +5592,8 @@ async fn run_peer_attempt(
     verifier: Option<RemoteVerifier>,
     options: AttemptOptions,
     password: Option<SecretPassword>,
+    progress: AttemptProgress,
+    cancel: watch::Receiver<bool>,
 ) -> std::result::Result<(), String> {
     let _ = inputs
         .send(SessionInput::PeerProgress {
@@ -5408,7 +5602,7 @@ async fn run_peer_attempt(
             state: PeerLifecycle::Authenticating,
         })
         .await;
-    let (selected_route, guard) = race_peer_paths(
+    let (selected_route, guard) = race_peer_paths_observed(
         route,
         paths,
         token,
@@ -5418,6 +5612,8 @@ async fn run_peer_attempt(
         identity,
         inbound,
         relay.clone(),
+        Some(progress),
+        Some(cancel),
     )
     .await
     .map_err(|error| error.to_string())?;
@@ -5536,7 +5732,26 @@ fn transport_can_publish(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[cfg(test)]
 async fn race_peer_paths(
+    route: NetworkRoute,
+    paths: Vec<AttemptPath>,
+    token: PunchToken,
+    peer: NodeId,
+    generation: u64,
+    local: NodeId,
+    identity: Identity,
+    inbound: mpsc::Receiver<(NetworkRoute, quinn::Incoming)>,
+    relay: Option<crate::relay::client::Fallback>,
+) -> Result<(NetworkRoute, ConnectionGuard)> {
+    race_peer_paths_observed(
+        route, paths, token, peer, generation, local, identity, inbound, relay, None, None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn race_peer_paths_observed(
     route: NetworkRoute,
     paths: Vec<AttemptPath>,
     token: PunchToken,
@@ -5546,7 +5761,10 @@ async fn race_peer_paths(
     identity: Identity,
     mut inbound: mpsc::Receiver<(NetworkRoute, quinn::Incoming)>,
     relay: Option<crate::relay::client::Fallback>,
+    progress: Option<AttemptProgress>,
+    cancel: Option<watch::Receiver<bool>>,
 ) -> Result<(NetworkRoute, ConnectionGuard)> {
+    let mut cancel = cancel;
     let initiator = should_initiate_quic(local, peer);
     // Registration is synchronous and per path, before awaiting probes or any incoming connection.
     let mut routes = Vec::new();
@@ -5561,6 +5779,9 @@ async fn race_peer_paths(
             .register_peer_probe(&token, peer, generation)?;
         routes.push((route, path, candidates, receiver));
     }
+    if cancel.as_ref().is_some_and(|cancel| *cancel.borrow()) {
+        return Err(Error::Transport("peer attempt superseded".into()));
+    }
     if initiator {
         let mut tasks = JoinSet::new();
         let has_v6 = routes
@@ -5569,6 +5790,7 @@ async fn race_peer_paths(
         for (path_route, path, candidates, mut receiver) in routes {
             let identity = identity.clone();
             let path_local = path.local_addr;
+            let path_progress = progress.clone();
             tasks.spawn(async move {
                 if has_v6 && path.family == AddressFamily::Ipv4 {
                     time::sleep(crate::net::race::FAMILY_STAGGER).await;
@@ -5596,6 +5818,7 @@ async fn race_peer_paths(
                 for (index, remote) in ordered.into_iter().enumerate() {
                     let identity = identity.clone();
                     let endpoint = path.endpoint.clone();
+                    let dial_progress = path_progress.clone();
                     dials.spawn(async move {
                         time::sleep(crate::net::race::CANDIDATE_STAGGER * index as u32).await;
                         udp_diag::session_quic(
@@ -5616,6 +5839,15 @@ async fn race_peer_paths(
                             Error::Transport(format!("{remote} authenticated path timeout"))
                         })
                         .and_then(|result| result);
+                        if result.is_ok()
+                            && dial_progress
+                                .as_ref()
+                                .is_some_and(|progress| !progress.begin_transport())
+                        {
+                            return Err(Error::Transport(
+                                "peer attempt superseded after authenticated QUIC".into(),
+                            ));
+                        }
                         udp_diag::session_quic(
                             peer,
                             generation,
@@ -5636,7 +5868,13 @@ async fn race_peer_paths(
         if let Some(relay) = relay {
             tasks.spawn(async move {
                 udp_diag::session_quic(
-                    peer, generation, route, "relay_prepare", "start", None, None,
+                    peer,
+                    generation,
+                    route,
+                    "relay_prepare",
+                    "start",
+                    None,
+                    None,
                 );
                 let result = relay
                     .prepare(identity, peer, token)
@@ -5654,7 +5892,7 @@ async fn race_peer_paths(
                 result
             });
         }
-        return finish_routed_prepared(tasks).await;
+        return finish_routed_prepared(tasks, cancel.as_mut()).await;
     }
     let mut probes = JoinSet::new();
     for (_, path, candidates, mut receiver) in routes {
@@ -5671,15 +5909,7 @@ async fn race_peer_paths(
     if let Some(relay) = relay {
         let relay_identity = identity.clone();
         authentication.spawn(async move {
-            udp_diag::session_quic(
-                peer,
-                generation,
-                route,
-                "relay_wait",
-                "start",
-                None,
-                None,
-            );
+            udp_diag::session_quic(peer, generation, route, "relay_wait", "start", None, None);
             let result = relay
                 .wait(relay_identity, peer, token)
                 .await
@@ -5721,11 +5951,19 @@ async fn race_peer_paths(
                     Some(remote),
                 );
                 let identity = identity.clone();
+                let progress = progress.clone();
                 authentication.spawn(async move {
                     let result = authenticate_incoming(incoming, &identity, peer)
                         .await
                         .map(|connection| (incoming_route, ConnectionGuard::new(connection)))
                         .map_err(Error::Transport);
+                    if result.is_ok()
+                        && progress.as_ref().is_some_and(|progress| !progress.begin_transport())
+                    {
+                        return Err(Error::Transport(
+                            "peer attempt superseded after authenticated incoming QUIC".into(),
+                        ));
+                    }
                     udp_diag::session_quic(
                         peer,
                         generation,
@@ -5741,6 +5979,9 @@ async fn race_peer_paths(
             result = authentication.join_next(), if !authentication.is_empty() => {
                 if let Some(Ok(Ok(winner))) = result { break Ok(winner); }
             }
+            _ = wait_for_attempt_cancel(cancel.as_mut()) => {
+                break Err(Error::Transport("peer attempt superseded".into()));
+            }
             _ = &mut deadline => break Err(Error::Transport("all incoming paths timed out".into())),
         }
     };
@@ -5753,14 +5994,22 @@ async fn race_peer_paths(
 
 async fn finish_routed_prepared(
     mut tasks: JoinSet<Result<(NetworkRoute, PreparedTransport)>>,
+    mut cancel: Option<&mut watch::Receiver<bool>>,
 ) -> Result<(NetworkRoute, ConnectionGuard)> {
     let mut failures = Vec::new();
     let selected = loop {
-        match tasks.join_next().await {
-            Some(Ok(Ok(selected))) => break Some(selected),
-            Some(Ok(Err(error))) => failures.push(error.to_string()),
-            Some(Err(error)) => failures.push(error.to_string()),
-            None => break None,
+        tokio::select! {
+            joined = tasks.join_next() => match joined {
+                Some(Ok(Ok(selected))) => break Some(selected),
+                Some(Ok(Err(error))) => failures.push(error.to_string()),
+                Some(Err(error)) => failures.push(error.to_string()),
+                None => break None,
+            },
+            _ = wait_for_attempt_cancel(cancel.as_deref_mut()) => {
+                tasks.abort_all();
+                while tasks.join_next().await.is_some() {}
+                return Err(Error::Transport("peer attempt superseded".into()));
+            }
         }
     };
     tasks.abort_all();

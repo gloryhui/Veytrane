@@ -586,6 +586,228 @@ async fn clearing_reconnect_probe_releases_old_token_for_same_source() {
 }
 
 #[tokio::test]
+async fn newer_offer_sends_punch_before_the_previous_round_times_out() {
+    let (signal, server) = start_local_server().await;
+    for local_initiates in [true, false] {
+        let local = Identity::generate();
+        let mut peer = Identity::generate();
+        while should_initiate_quic(local.node_id(), peer.node_id()) != local_initiates {
+            peer = Identity::generate();
+        }
+        let mut config = local_config(signal);
+        config.network.families = crate::net::NetworkFamilies::Ipv4Only;
+        let (handle, mut events) = spawn(local.clone(), config).unwrap();
+        wait_signal_online(&mut events).await;
+
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut client = SignalingClient::connect_with_events(
+            &signal.to_string(),
+            &peer,
+            vec![Candidate::host(socket.local_addr().unwrap())],
+        )
+        .await
+        .unwrap();
+        let mut previous = None;
+        for _ in 0..2 {
+            let crate::discovery::signal::LookupOutcome::Ready(offer) =
+                client.lookup(local.node_id()).await.unwrap()
+            else {
+                panic!("local session already registered");
+            };
+            assert_ne!(previous, Some(offer.token));
+            previous = Some(offer.token);
+            time::timeout(Duration::from_secs(2), async {
+                let mut buffer = [0; 1024];
+                loop {
+                    let (len, _) = socket.recv_from(&mut buffer).await.unwrap();
+                    if crate::nat::punch::is_probe_with_token(&buffer[..len], &offer.token) {
+                        break;
+                    }
+                }
+            })
+            .await
+            .expect("the local session must send this token without waiting for the old deadline");
+        }
+        handle.shutdown();
+    }
+    server.abort();
+}
+
+#[tokio::test]
+async fn newer_offer_supersedes_probe_only_attempt_for_both_quic_roles() {
+    for local_initiates in [false, true] {
+        let config = DesktopNetworkConfig {
+            families: crate::net::NetworkFamilies::Ipv4Only,
+            stun_servers: Vec::new(),
+            include_loopback: true,
+            ..Default::default()
+        };
+        let local = Identity::generate();
+        let mut remote = Identity::generate();
+        while should_initiate_quic(local.node_id(), remote.node_id()) != local_initiates {
+            remote = Identity::generate();
+        }
+        let network = prepare_desktop_network(&config).await.unwrap();
+        let path = network.paths[0].clone();
+        let sender = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let source = sender.local_addr().unwrap();
+        let destination = loopback_address(path.local_addr);
+        let old_token = PunchToken::from_bytes([0x31; 16]);
+        let child_token = PunchToken::from_bytes([0x32; 16]);
+        let new_token = PunchToken::from_bytes([0x33; 16]);
+        let old_generation = 1;
+        let (cancel, cancelled) = watch::channel(false);
+        let (child_ready_tx, child_ready_rx) = oneshot::channel();
+        let (registered_tx, registered_rx) = oneshot::channel();
+        let (authorized_tx, authorized_rx) = oneshot::channel();
+        let task_path = path.clone();
+        let task_peer = remote.node_id();
+        let join = tokio::spawn(async move {
+            let mut cancelled = cancelled;
+            let mut children = JoinSet::new();
+            let child_path = task_path.clone();
+            children.spawn(async move {
+                let _receiver = child_path
+                    .punch_socket
+                    .register_peer_probe(&child_token, task_peer, old_generation)
+                    .unwrap();
+                let _ = child_ready_tx.send(());
+                std::future::pending::<()>().await;
+            });
+            child_ready_rx.await.unwrap();
+            let mut receiver = task_path
+                .punch_socket
+                .register_peer_probe(&old_token, task_peer, old_generation)
+                .unwrap();
+            let _ = registered_tx.send(());
+            receiver.recv().await.unwrap();
+            let _ = authorized_tx.send(());
+            let _ = cancelled.changed().await;
+            children.abort_all();
+            while children.join_next().await.is_some() {}
+        });
+        registered_rx.await.unwrap();
+        sender
+            .send_to(&crate::nat::punch::probe_packet(&old_token), destination)
+            .await
+            .unwrap();
+        time::timeout(Duration::from_secs(2), authorized_rx)
+            .await
+            .expect("old PUNCH token must be routed before supersession")
+            .unwrap();
+        assert_eq!(
+            path.punch_socket.claim_authorized_peer(source),
+            Some((remote.node_id(), old_generation))
+        );
+
+        let abort = join.abort_handle();
+        let mut attempts = HashMap::from([(
+            remote.node_id(),
+            ActivePeerAttempt {
+                generation: old_generation,
+                token: old_token,
+                progress: AttemptProgress::default(),
+                cancel: Some(cancel),
+                abort,
+                join: Some(join),
+            },
+        )]);
+        let mut peers = PeerRegistry::default();
+        let BeginPeerAttempt::Started(generation) = peers.begin_attempt(remote.node_id()) else {
+            panic!("first test attempt must start");
+        };
+        assert_eq!(generation, old_generation);
+        assert!(peers.transition(remote.node_id(), generation, PeerLifecycle::Authenticating,));
+        assert!(
+            !newer_offer_can_supersede(
+                Some(&PeerLifecycle::Authenticating),
+                old_token,
+                old_token,
+                &AttemptProgress::default(),
+            ),
+            "a duplicate token must not churn the active attempt"
+        );
+        assert!(
+            attempts
+                .get(&remote.node_id())
+                .unwrap()
+                .can_supersede(peers.state(remote.node_id()), new_token),
+            "a newer token must replace an attempt that has only been probing for both QUIC roles"
+        );
+        attempts
+            .remove(&remote.node_id())
+            .unwrap()
+            .cancel_and_wait()
+            .await;
+        assert!(
+            attempts.is_empty(),
+            "the sole peer_attempts entry owns task and progress"
+        );
+        assert_eq!(
+            path.punch_socket.claim_authorized_peer(source),
+            None,
+            "awaiting the aborted outer task must synchronously retire its PUNCH authorization"
+        );
+
+        let mut new_receiver = path
+            .punch_socket
+            .register_peer_probe(&new_token, remote.node_id(), 2)
+            .unwrap();
+        sender
+            .send_to(&crate::nat::punch::probe_packet(&child_token), destination)
+            .await
+            .unwrap();
+        assert!(
+            time::timeout(Duration::from_millis(100), new_receiver.recv())
+                .await
+                .is_err(),
+            "the aborted task must drop child PUNCH receivers before supersession returns"
+        );
+        assert_eq!(path.punch_socket.claim_authorized_peer(source), None);
+        sender
+            .send_to(&crate::nat::punch::probe_packet(&new_token), destination)
+            .await
+            .unwrap();
+        let source = time::timeout(Duration::from_secs(2), new_receiver.recv())
+            .await
+            .expect("the latest token must take over without ambiguity")
+            .unwrap();
+        assert_eq!(
+            path.punch_socket.claim_authorized_peer(source),
+            Some((remote.node_id(), 2))
+        );
+
+        let verified = AttemptProgress::default();
+        assert!(verified.begin_transport());
+        assert!(
+            !newer_offer_can_supersede(
+                Some(&PeerLifecycle::Authenticating),
+                old_token,
+                new_token,
+                &verified,
+            ),
+            "verified outbound QUIC must be preserved for both roles"
+        );
+        assert!(!newer_offer_can_supersede(
+            Some(&PeerLifecycle::Negotiating),
+            old_token,
+            new_token,
+            &AttemptProgress::default(),
+        ));
+        assert!(!newer_offer_can_supersede(
+            Some(&PeerLifecycle::Connected(RemoteAuthorization::default())),
+            old_token,
+            new_token,
+            &AttemptProgress::default(),
+        ));
+
+        drop(new_receiver);
+        network.close();
+        network.wait_idle().await;
+    }
+}
+
+#[tokio::test]
 async fn expired_pending_lookup_releases_its_private_socket() {
     let config = DesktopNetworkConfig {
         families: crate::net::NetworkFamilies::Ipv4Only,
