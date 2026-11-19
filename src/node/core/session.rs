@@ -65,9 +65,14 @@ const PEER_PUNCH_CONFIG: PunchConfig = PunchConfig {
     interval: Duration::from_millis(200),
     attempts: 30,
 };
+const RECOVERY_PUNCH_CONFIG: PunchConfig = PunchConfig {
+    interval: Duration::from_secs(1),
+    attempts: 10,
+};
 const ATTEMPT_PROBING: u8 = 0;
-const ATTEMPT_TRANSPORT_STARTED: u8 = 1;
-const ATTEMPT_SUPERSEDED: u8 = 2;
+const ATTEMPT_PUNCH_RECEIVED: u8 = 1;
+const ATTEMPT_TRANSPORT_STARTED: u8 = 2;
+const ATTEMPT_SUPERSEDED: u8 = 3;
 
 #[derive(Clone, Debug, Default)]
 struct AttemptProgress {
@@ -76,18 +81,35 @@ struct AttemptProgress {
 
 impl AttemptProgress {
     fn begin_transport(&self) -> bool {
+        self.state
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+                (state != ATTEMPT_SUPERSEDED).then_some(ATTEMPT_TRANSPORT_STARTED)
+            })
+            .is_ok()
+    }
+
+    fn receive_punch(&self) -> bool {
         match self.state.compare_exchange(
             ATTEMPT_PROBING,
-            ATTEMPT_TRANSPORT_STARTED,
+            ATTEMPT_PUNCH_RECEIVED,
             Ordering::AcqRel,
             Ordering::Acquire,
         ) {
-            Ok(_) | Err(ATTEMPT_TRANSPORT_STARTED) => true,
-            Err(_) => false,
+            Err(ATTEMPT_SUPERSEDED) => false,
+            _ => true,
         }
     }
 
     fn try_supersede(&self) -> bool {
+        self.state
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+                matches!(state, ATTEMPT_PROBING | ATTEMPT_PUNCH_RECEIVED)
+                    .then_some(ATTEMPT_SUPERSEDED)
+            })
+            .is_ok()
+    }
+
+    fn try_retire_stalled_path(&self) -> bool {
         self.state
             .compare_exchange(
                 ATTEMPT_PROBING,
@@ -998,7 +1020,7 @@ enum SessionInput {
     Incoming(NetworkRoute, AddressFamily, Box<quinn::Incoming>),
     RotationPrepared {
         peer: NodeId,
-        request: u64,
+        request: RotationRequest,
         result: std::result::Result<DesktopNetwork, Error>,
     },
     SignalConnected {
@@ -1034,7 +1056,29 @@ enum SessionInput {
         generation: u64,
         detail: String,
         network_interruption: bool,
+        recovery_started: Option<time::Instant>,
     },
+}
+
+#[derive(Clone, Copy, Debug)]
+enum RotationRequest {
+    Maintenance(u64),
+    PathLoss(u64),
+}
+
+fn recovery_socket_config(
+    network: &DesktopNetworkConfig,
+    relay: Option<String>,
+) -> Option<DesktopNetworkConfig> {
+    let mut preparation = network.clone();
+    preparation.relay_server = relay;
+    if preparation.local_port != 0 {
+        if preparation.advertise_only || !preparation.advertise.is_empty() {
+            return None;
+        }
+        preparation.local_port = 0;
+    }
+    Some(preparation)
 }
 
 fn recovery_preparation_invalidated(command: &SessionCommand, peer: NodeId) -> bool {
@@ -1377,6 +1421,9 @@ async fn run_session(
     let mut recovery_networks: HashMap<NodeId, RecoveryNetwork> = HashMap::new();
     let mut rotation_preparing: Option<(NodeId, u64)> = None;
     let mut rotation_request = 0u64;
+    let recovery_preparations = Arc::new(Semaphore::new(MAX_PENDING_PEERS));
+    let mut fast_recoveries = HashMap::<NodeId, (u64, time::Instant)>::new();
+    let mut recovery_timings = HashMap::<NodeId, time::Instant>::new();
     let _ = events
         .send(SessionEvent::NetworkPaths(network.diagnostics.join("; ")))
         .await;
@@ -1597,7 +1644,11 @@ async fn run_session(
             let action = if signal_server.trim().is_empty() && !config.direct.enabled {
                 None
             } else {
-                events.recovery.lock().unwrap().poll(healthy)
+                events
+                    .recovery
+                    .lock()
+                    .unwrap()
+                    .poll(healthy || !fast_recoveries.is_empty())
             };
             action.map_or(wake, |action| match action {
                 recovery::RecoveryAction::Refresh(reason) => {
@@ -1624,6 +1675,10 @@ async fn run_session(
             if recovery_preparation_invalidated(command, peer) {
                 rotation_preparing = None;
             }
+        }
+        if let Wake::Command(Some(command)) = &wake {
+            fast_recoveries.retain(|peer, _| !recovery_preparation_invalidated(command, *peer));
+            recovery_timings.retain(|peer, _| !recovery_preparation_invalidated(command, *peer));
         }
         if let Wake::Command(Some(command)) = &wake
             && let Some(peer) = command.business_peer()
@@ -2880,27 +2935,22 @@ async fn run_session(
                 if manually_disconnected.contains(&peer)
                     || resource_policy.borrow().for_peer(peer).disabled
                     || peers.state(peer).is_some_and(PeerLifecycle::is_connected)
+                    || fast_recoveries.contains_key(&peer)
                     || signal_server.trim().is_empty()
                 {
                     continue;
                 }
-                let mut preparation = config.network.clone();
-                preparation.relay_server = active_relay_server.clone();
-                if preparation.local_port != 0 {
-                    if preparation.advertise_only || !preparation.advertise.is_empty() {
-                        let _ = events
-                            .send(SessionEvent::Diagnostic(format!(
-                                "设备 {} 需要刷新候选，但固定本地端口与手工广告地址无法安全并行轮换",
-                                peer.short()
-                            )))
-                            .await;
-                        continue;
-                    }
-                    // The active primary socket still owns the fixed port. A dynamic
-                    // alternate socket avoids dual-binding while still producing fresh
-                    // STUN and Host candidates.
-                    preparation.local_port = 0;
-                }
+                let Some(preparation) =
+                    recovery_socket_config(&config.network, active_relay_server.clone())
+                else {
+                    let _ = events
+                        .send(SessionEvent::Diagnostic(format!(
+                            "设备 {} 需要刷新候选，但固定本地端口与手工广告地址无法安全并行轮换",
+                            peer.short()
+                        )))
+                        .await;
+                    continue;
+                };
                 rotation_request = rotation_request.wrapping_add(1);
                 let request = rotation_request;
                 rotation_preparing = Some((peer, request));
@@ -2917,7 +2967,7 @@ async fn run_session(
                     let _ = rotation_inputs
                         .send(SessionInput::RotationPrepared {
                             peer,
-                            request,
+                            request: RotationRequest::Maintenance(request),
                             result,
                         })
                         .await;
@@ -2935,14 +2985,37 @@ async fn run_session(
                 request,
                 result,
             })) => {
-                if rotation_preparing != Some((peer, request)) {
+                let (valid_request, started) = match request {
+                    RotationRequest::Maintenance(request) => {
+                        let valid = rotation_preparing == Some((peer, request));
+                        if valid {
+                            rotation_preparing = None;
+                        }
+                        (valid && !fast_recoveries.contains_key(&peer), None)
+                    }
+                    RotationRequest::PathLoss(generation) => {
+                        let started = fast_recoveries
+                            .get(&peer)
+                            .filter(|(owner, _)| *owner == generation)
+                            .map(|(_, start)| *start);
+                        if started.is_some() {
+                            fast_recoveries.remove(&peer);
+                        }
+                        (started.is_some(), started)
+                    }
+                };
+                if !valid_request {
                     if let Ok(network) = result {
                         network.close();
                     }
                     continue;
                 }
-                rotation_preparing = None;
                 let prepared = match result {
+                    Ok(prepared) if started.is_some() && prepared.local_candidates.is_empty() => {
+                        prepared.close();
+                        warn!(peer = %peer.short(), "恢复 UDP socket 没有可公布的候选");
+                        continue;
+                    }
                     Ok(prepared) => prepared,
                     Err(error) => {
                         warn!(peer = %peer.short(), %error, "peer transport recovery network preparation failed");
@@ -2972,11 +3045,22 @@ async fn run_session(
                     warn!(peer = %peer.short(), "peer recovery deferred at network resource limit");
                     continue;
                 }
+                if started.is_some()
+                    && let Some(attempt) = peer_attempts.get(&peer)
+                    && !attempt.progress.try_retire_stalled_path()
+                {
+                    prepared.close();
+                    continue;
+                }
                 // Cancel only this failed peer's producers before replacing its socket.
                 // The primary registration and every other peer retain their candidates,
                 // endpoints, authorization publishers and business streams.
                 if let Some(task) = peer_attempts.remove(&peer) {
-                    task.abort();
+                    if started.is_some() {
+                        task.cancel_and_wait().await;
+                    } else {
+                        task.abort();
+                    }
                 }
                 pending_inbound.retain(|(id, _), _| *id != peer);
                 attempt_routes.retain(|(id, _), _| *id != peer);
@@ -3022,6 +3106,17 @@ async fn run_session(
                 };
                 fresh_lookup_peers.insert(peer);
                 emit_peer_state(&events, peer, generation, PeerLifecycle::PeerPending).await;
+                if let Some(started) = started {
+                    recovery_timings.insert(peer, started);
+                    let elapsed_ms = started.elapsed().as_millis();
+                    warn!(peer = %peer.short(), generation, elapsed_ms, "对端路径未恢复，转入新候选配对");
+                    let _ = events
+                        .send(SessionEvent::Diagnostic(format!(
+                            "设备 {} 从检测到路径异常起 {elapsed_ms}ms，转入新候选配对",
+                            peer.short()
+                        )))
+                        .await;
+                }
                 if let Some(client) = signal.as_ref() {
                     if request_peer_lookup(client, peer, &recovery_networks)
                         .await
@@ -3040,7 +3135,12 @@ async fn run_session(
                 } else {
                     queued_lookups.push_back((peer, generation));
                 }
-                warn!(peer = %peer.short(), route, "peer recovery prepared fresh socket and requested peer-scoped matching");
+                if let Some(started) = started {
+                    let elapsed_ms = started.elapsed().as_millis();
+                    let queued_for_registration = signal.is_none();
+                    warn!(peer = %peer.short(), generation, route, elapsed_ms, queued_for_registration,
+                        "设备恢复候选查询已入队");
+                }
                 let _ = events
                     .send(SessionEvent::Diagnostic(format!(
                         "设备 {} 已准备独立恢复路径，正在重新匹配；其他设备连接保持",
@@ -3762,6 +3862,11 @@ async fn run_session(
                         &semaphore,
                         &mut peers,
                         &mut pending_inbound,
+                        if fast_recoveries.contains_key(&node_id) {
+                            RECOVERY_PUNCH_CONFIG
+                        } else {
+                            PEER_PUNCH_CONFIG
+                        },
                         auth_context.clone(),
                         remote_verifier.clone(),
                         AttemptOptions {
@@ -3911,6 +4016,13 @@ async fn run_session(
                                 )
                                 .await;
                                 break;
+                            }
+                            if fresh_lookup_peers.contains(&peer)
+                                && let Some(started) = recovery_timings.get(&peer)
+                            {
+                                tracing::info!(peer = %peer.short(), generation,
+                                    elapsed_ms = started.elapsed().as_millis(),
+                                    "信令重新注册后已提交设备恢复候选查询");
                             }
                         }
                     }
@@ -4228,6 +4340,17 @@ async fn run_session(
                 }
                 reconnect_probes.remove(&peer);
                 fresh_lookup_peers.remove(&peer);
+                fast_recoveries.remove(&peer);
+                if let Some(start) = recovery_timings.remove(&peer) {
+                    let elapsed_ms = start.elapsed().as_millis();
+                    warn!(peer = %peer.short(), generation, elapsed_ms, "对端路径恢复并完成认证");
+                    let _ = events
+                        .send(SessionEvent::Diagnostic(format!(
+                            "设备 {} 从检测到路径异常起 {elapsed_ms}ms，恢复连接并完成认证",
+                            peer.short()
+                        )))
+                        .await;
+                }
                 connections.insert(peer, (generation, connection.clone()));
                 connection_routes.insert(peer, network_id);
                 peer_capabilities.insert(peer, capabilities);
@@ -4375,16 +4498,46 @@ async fn run_session(
                 });
                 let closed_inputs = input_tx.clone();
                 let can_probe = !signal_server.trim().is_empty()
+                    && !relay
                     && !connection_network.local_candidates.is_empty();
+                let preparation = can_probe
+                    .then(|| recovery_socket_config(&config.network, active_relay_server.clone()))
+                    .flatten();
+                let preparation_slots = recovery_preparations.clone();
+                #[cfg(test)]
+                let test_networks = config.test_prepared_networks.clone();
                 peer_tasks.spawn(async move {
                     let mut suspected_at = None;
+                    let mut preparing = JoinSet::new();
+                    let prepare = |tasks: &mut JoinSet<Result<DesktopNetwork>>| {
+                        let Some(config) = preparation.clone() else {
+                            return;
+                        };
+                        let Ok(permit) = preparation_slots.clone().try_acquire_owned() else {
+                            return;
+                        };
+                        #[cfg(test)]
+                        let test_network = test_networks.take();
+                        tasks.spawn(async move {
+                            let _permit = permit;
+                            #[cfg(test)]
+                            if let Some(network) = test_network {
+                                return Ok(network);
+                            }
+                            prepare_desktop_network(&config).await
+                        });
+                    };
+                    // Fixed advertisements can still probe and use their socket with
+                    // a new offer from the other peer, even when they cannot rotate.
                     let reason = if can_probe {
                         recovery::monitor_path(&connection, |observation| match observation {
                             recovery::PathObservation::Suspect(started) => {
                                 suspected_at = Some(started);
-                                tracing::info!(peer = %peer.short(), generation, "对端路径疑似失效，开始短周期探测");
+                                prepare(&mut preparing);
+                                warn!(peer = %peer.short(), generation, "对端路径疑似失效，开始短周期探测");
                             }
                             recovery::PathObservation::Cleared { acknowledged } => {
+                                preparing = JoinSet::new();
                                 if let Some(started) = suspected_at.take() {
                                     tracing::info!(peer = %peer.short(), generation, acknowledged,
                                         elapsed_ms = started.elapsed().as_millis(), "结束对端路径探测");
@@ -4405,14 +4558,42 @@ async fn run_session(
                             (detail.into(), true)
                         }
                     };
-                    let _ = closed_inputs
+                    let recovery_started = if network_interruption {
+                        let started = suspected_at.unwrap_or_else(time::Instant::now);
+                        // A confirmed close can arrive before the idle-path probe.
+                        if suspected_at.is_none() {
+                            prepare(&mut preparing);
+                            warn!(peer = %peer.short(), generation, "对端传输已断开，开始准备恢复候选");
+                        }
+                        (!preparing.is_empty()).then_some(started)
+                    } else {
+                        None
+                    };
+                    if closed_inputs
                         .send(SessionInput::PeerClosed {
                             peer,
                             generation,
                             detail,
                             network_interruption,
+                            recovery_started,
                         })
-                        .await;
+                        .await.is_err() {
+                        return;
+                    }
+                    if let Some(started) = recovery_started {
+                        time::sleep_until(started + recovery::PATH_RECOVERY_WINDOW).await;
+                        // An ACK clears the previous JoinSet, so the current window owns one task.
+                        let result = preparing.join_next().await
+                            .expect("recovery_started requires a preparation task")
+                            .unwrap_or_else(|error| {
+                                Err(Error::Transport(format!("恢复 socket 准备任务失败：{error}")))
+                            });
+                        let _ = closed_inputs.send(SessionInput::RotationPrepared {
+                            peer,
+                            request: RotationRequest::PathLoss(generation),
+                            result,
+                        }).await;
+                    }
                 });
             }
             Wake::Input(Some(SessionInput::PeerFailed {
@@ -4453,6 +4634,8 @@ async fn run_session(
                         }
                         if auth_failed {
                             fresh_lookup_peers.remove(&peer);
+                            fast_recoveries.remove(&peer);
+                            recovery_timings.remove(&peer);
                             debug!(peer = %peer.short(), "peer authentication failure keeps transport recovery paused");
                         }
                         fail_peer_tunnels(
@@ -4468,6 +4651,7 @@ async fn run_session(
                     &connection_routes,
                     &attempt_routes,
                     &fresh_lookup_peers,
+                    &fast_recoveries,
                 )
                 .await;
             }
@@ -4476,6 +4660,7 @@ async fn run_session(
                 generation,
                 detail,
                 network_interruption,
+                recovery_started,
             })) => {
                 #[cfg(test)]
                 let network_interruption =
@@ -4485,6 +4670,10 @@ async fn run_session(
                         .get(&peer)
                         .is_some_and(|(current, _)| *current == generation)
                 {
+                    if let Some(start) = recovery_started {
+                        fast_recoveries.insert(peer, (generation, start));
+                        recovery_timings.insert(peer, start);
+                    }
                     let closed_network = connection_routes
                         .remove(&peer)
                         .unwrap_or(current_network_id);
@@ -4533,10 +4722,13 @@ async fn run_session(
                             })
                             .await;
                     }
-                    if !affected_rules.is_empty() {
-                        let _ = command_tx.try_send(SessionCommand::ConnectPeer(peer));
-                    }
                     peer_candidates.remove(&peer);
+                    let latest_probe = reconnect_probes.remove(&peer).and_then(|watches| {
+                        watches.into_iter().rev().find_map(|watch| {
+                            (watch.generation == generation && !watch.deadline.is_elapsed())
+                                .then_some((watch.candidates, watch.token))
+                        })
+                    });
                     let relay_retry = if network_for_route(
                         closed_network,
                         current_network_id,
@@ -4545,7 +4737,6 @@ async fn run_session(
                     )
                     .is_some_and(|network| network.relay.is_some())
                     {
-                        reconnect_probes.remove(&peer); // retire old token/source routes first
                         deferred_candidates.remove(&peer)
                     } else {
                         None
@@ -4562,12 +4753,21 @@ async fn run_session(
                         )
                         .await;
                     }
-                    if let Some((candidates, token)) = relay_retry {
+                    // An offer may have arrived just before the loss callback. Once
+                    // the old transport is gone, actively probe that same token.
+                    if let Some((candidates, token)) = relay_retry
+                        .or_else(|| network_interruption.then_some(latest_probe).flatten())
+                    {
                         let _ = command_tx.try_send(SessionCommand::RetryCandidates {
                             peer,
                             candidates,
                             token,
                         });
+                    } else if recovery_started
+                        .is_some_and(|start| start.elapsed() < recovery::PATH_RECOVERY_WINDOW)
+                        || (recovery_started.is_none() && !affected_rules.is_empty())
+                    {
+                        let _ = command_tx.try_send(SessionCommand::ConnectPeer(peer));
                     }
                 }
                 release_unused_recovery_networks(
@@ -4575,6 +4775,7 @@ async fn run_session(
                     &connection_routes,
                     &attempt_routes,
                     &fresh_lookup_peers,
+                    &fast_recoveries,
                 )
                 .await;
             }
@@ -4653,6 +4854,11 @@ async fn run_session(
                     &semaphore,
                     &mut peers,
                     &mut pending_inbound,
+                    if fast_recoveries.contains_key(&peer) {
+                        RECOVERY_PUNCH_CONFIG
+                    } else {
+                        PEER_PUNCH_CONFIG
+                    },
                     auth_context.clone(),
                     remote_verifier.clone(),
                     AttemptOptions {
@@ -4679,6 +4885,7 @@ async fn run_session(
             }
             Wake::QueueChanged => {}
             Wake::Maintenance => {
+                recovery_timings.retain(|peer, _| peers.generation(*peer).is_some());
                 // Subscriptions are the actual active Agent-owned mappings, including
                 // manually started rules. Stopped/deleted rules drop their receivers.
                 let mut wanted = peer_connection_updates
@@ -4696,6 +4903,7 @@ async fn run_session(
                     if manually_disconnected.contains(&peer)
                         || resource_policy.borrow().for_peer(peer).disabled
                         || peers.state(peer).is_some_and(PeerLifecycle::is_active)
+                        || fast_recoveries.contains_key(&peer)
                         || (!credentials.contains_key(&peer)
                             && !trusted_devices.iter().any(|d| d.node_id == peer.to_hex())
                             && !credential_fallback)
@@ -4818,6 +5026,7 @@ async fn run_session(
                     &connection_routes,
                     &attempt_routes,
                     &fresh_lookup_peers,
+                    &fast_recoveries,
                 )
                 .await;
             }
@@ -5001,11 +5210,13 @@ async fn release_unused_recovery_networks(
     connections: &HashMap<NodeId, NetworkRoute>,
     attempts: &HashMap<(NodeId, u64), NetworkRoute>,
     pending: &HashSet<NodeId>,
+    probing: &HashMap<NodeId, (u64, time::Instant)>,
 ) {
     let unused = recovery
         .iter()
         .filter(|(peer, entry)| {
             !pending.contains(peer)
+                && !probing.contains_key(peer)
                 && !connections.values().any(|route| *route == entry.route)
                 && !attempts.values().any(|route| *route == entry.route)
         })
@@ -5506,6 +5717,7 @@ async fn start_peer_attempt(
     semaphore: &Arc<Semaphore>,
     peers: &mut PeerRegistry,
     pending_inbound: &mut HashMap<(NodeId, u64), mpsc::Sender<(NetworkRoute, quinn::Incoming)>>,
+    punch: PunchConfig,
     auth: AuthContext,
     verifier: Option<RemoteVerifier>,
     options: AttemptOptions,
@@ -5626,6 +5838,7 @@ async fn start_peer_attempt(
     let task_progress = progress.clone();
     let (cancel, cancelled) = watch::channel(false);
     let join = tokio::spawn(async move {
+        let mut reporting_cancel = cancelled.clone();
         let result = run_peer_attempt(
             peer,
             generation,
@@ -5635,6 +5848,7 @@ async fn start_peer_attempt(
             paths,
             relay,
             token,
+            punch,
             inbound_rx,
             permit,
             input_sender.clone(),
@@ -5647,13 +5861,11 @@ async fn start_peer_attempt(
         )
         .await;
         if let Err(detail) = result {
-            let _ = input_sender
-                .send(SessionInput::PeerFailed {
-                    peer,
-                    generation,
-                    detail,
-                })
-                .await;
+            tokio::select! {
+                biased;
+                _ = wait_for_attempt_cancel(Some(&mut reporting_cancel)) => {}
+                _ = input_sender.send(SessionInput::PeerFailed { peer, generation, detail }) => {}
+            }
         }
     });
     let abort = join.abort_handle();
@@ -5677,6 +5889,7 @@ async fn run_peer_attempt(
     paths: Vec<AttemptPath>,
     relay: Option<crate::relay::client::Fallback>,
     token: PunchToken,
+    punch: PunchConfig,
     inbound: mpsc::Receiver<(NetworkRoute, quinn::Incoming)>,
     _pending_permit: tokio::sync::OwnedSemaphorePermit,
     inputs: mpsc::Sender<SessionInput>,
@@ -5685,15 +5898,17 @@ async fn run_peer_attempt(
     options: AttemptOptions,
     password: Option<SecretPassword>,
     progress: AttemptProgress,
-    cancel: watch::Receiver<bool>,
+    mut cancel: watch::Receiver<bool>,
 ) -> std::result::Result<(), String> {
-    let _ = inputs
-        .send(SessionInput::PeerProgress {
+    tokio::select! {
+        biased;
+        _ = wait_for_attempt_cancel(Some(&mut cancel)) => return Ok(()),
+        _ = inputs.send(SessionInput::PeerProgress {
             peer,
             generation,
             state: PeerLifecycle::Authenticating,
-        })
-        .await;
+        }) => {}
+    }
     let (selected_route, guard) = race_peer_paths_observed(
         route,
         paths,
@@ -5704,11 +5919,15 @@ async fn run_peer_attempt(
         identity,
         inbound,
         relay.clone(),
-        Some(progress),
+        punch,
+        Some(progress.clone()),
         Some(cancel),
     )
     .await
     .map_err(|error| error.to_string())?;
+    if !progress.begin_transport() {
+        return Ok(());
+    }
     finish_peer_transport(
         peer,
         generation,
@@ -5837,7 +6056,18 @@ async fn race_peer_paths(
     relay: Option<crate::relay::client::Fallback>,
 ) -> Result<(NetworkRoute, ConnectionGuard)> {
     race_peer_paths_observed(
-        route, paths, token, peer, generation, local, identity, inbound, relay, None, None,
+        route,
+        paths,
+        token,
+        peer,
+        generation,
+        local,
+        identity,
+        inbound,
+        relay,
+        PEER_PUNCH_CONFIG,
+        None,
+        None,
     )
     .await
 }
@@ -5853,6 +6083,7 @@ async fn race_peer_paths_observed(
     identity: Identity,
     mut inbound: mpsc::Receiver<(NetworkRoute, quinn::Incoming)>,
     relay: Option<crate::relay::client::Fallback>,
+    punch: PunchConfig,
     progress: Option<AttemptProgress>,
     cancel: Option<watch::Receiver<bool>>,
 ) -> Result<(NetworkRoute, ConnectionGuard)> {
@@ -5890,7 +6121,14 @@ async fn race_peer_paths_observed(
                 let remote = if path.family == AddressFamily::Ipv6 {
                     match time::timeout(
                         crate::net::race::FAMILY_STAGGER,
-                        punch_candidates(&path.punch_socket, &mut receiver, &candidates, &token),
+                        punch_candidates(
+                            &path.punch_socket,
+                            &mut receiver,
+                            &candidates,
+                            &token,
+                            punch,
+                            path_progress.as_ref(),
+                        ),
                     )
                     .await
                     {
@@ -5898,7 +6136,15 @@ async fn race_peer_paths_observed(
                         _ => candidates[0], // IPv6 QUIC still verifies NodeId/TLS; a probe is optional.
                     }
                 } else {
-                    punch_candidates(&path.punch_socket, &mut receiver, &candidates, &token).await?
+                    punch_candidates(
+                        &path.punch_socket,
+                        &mut receiver,
+                        &candidates,
+                        &token,
+                        punch,
+                        path_progress.as_ref(),
+                    )
+                    .await?
                 };
                 let mut ordered = vec![remote];
                 for candidate in candidates {
@@ -5988,8 +6234,17 @@ async fn race_peer_paths_observed(
     }
     let mut probes = JoinSet::new();
     for (_, path, candidates, mut receiver) in routes {
+        let progress = progress.clone();
         probes.spawn(async move {
-            let _ = punch_candidates(&path.punch_socket, &mut receiver, &candidates, &token).await;
+            let _ = punch_candidates(
+                &path.punch_socket,
+                &mut receiver,
+                &candidates,
+                &token,
+                punch,
+                progress.as_ref(),
+            )
+            .await;
             // Retain the token/source route even after a successful probe; Quinn's
             // incoming event is routed later by the generation-fenced actor.
             std::future::pending::<()>().await;
@@ -6128,18 +6383,25 @@ async fn punch_candidates(
     events: &mut crate::transport::quic::PunchProbeReceiver,
     candidates: &[SocketAddr],
     token: &PunchToken,
+    config: PunchConfig,
+    progress: Option<&AttemptProgress>,
 ) -> Result<SocketAddr> {
     if candidates.len() > MAX_CANDIDATES {
         return Err(Error::Transport("对端候选地址超过桌面连接上限".into()));
     }
-    for attempt in 0..PEER_PUNCH_CONFIG.attempts {
+    for attempt in 0..config.attempts {
         for candidate in candidates {
             if let Err(error) = socket.send_probe_to(token, *candidate).await {
                 debug!(%candidate, %error, attempt, "发送桌面打洞探测包失败");
             }
         }
-        match time::timeout(PEER_PUNCH_CONFIG.interval, events.recv()).await {
+        match time::timeout(config.interval, events.recv()).await {
             Ok(Some(source)) => {
+                if progress.is_some_and(|progress| !progress.receive_punch()) {
+                    return Err(Error::Transport(
+                        "peer attempt superseded during punching".into(),
+                    ));
+                }
                 // The first outbound probe may predate the remote token registration.
                 // Reply to the validated actual source before stopping our probe loop.
                 socket.send_probe_to(token, source).await?;

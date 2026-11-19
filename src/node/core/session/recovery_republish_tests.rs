@@ -11,10 +11,10 @@ async fn port_restricted_stale_primary_recovers_with_republished_socket_and_keep
             c = Identity::generate();
         }
 
-        // A's original mapping works for B, but packets between it and C always
-        // drop. The recovery mapping is subject to reciprocal port filtering.
-        let (networks, public, allowed, stats, _proxies) =
-            restricted_nat_harness_blocking(&[(0, 2), (2, 0)]).await;
+        // Keep normal reciprocal port filtering, then blackhole only A↔C
+        // after their original authenticated connection has carried traffic.
+        let ((networks, public, allowed, stats, _proxies), blocked) =
+            restricted_nat_harness_with_filter().await;
         let [mut primary, mut healthy, mut remote, mut recovery]: [DesktopNetwork; 4] =
             networks.try_into().ok().unwrap();
         let primary_private = loopback_address(primary.paths[0].local_addr);
@@ -50,6 +50,7 @@ async fn port_restricted_stale_primary_recovers_with_republished_socket_and_keep
         rule.auto_start = true;
         let mut ca = local_config(signal);
         ca.test_prepared_networks = TestPreparedNetworks::new([primary, recovery]);
+        let prepared_networks = ca.test_prepared_networks.clone();
         ca.tunnel_rules.push(rule.clone());
         let mut cb = local_config(signal);
         cb.test_prepared_networks = TestPreparedNetworks::new([healthy]);
@@ -107,21 +108,47 @@ async fn port_restricted_stale_primary_recovers_with_republished_socket_and_keep
             .unwrap();
 
         ha.connect_peer(c.node_id()).unwrap();
+        wait_connected(&mut ea, &[c.node_id()]).await;
+        wait_connected(&mut ec, &[a.node_id()]).await;
+        let (old_generation, old_path) = inspect(&ha).await[&c.node_id()].clone();
+        assert_eq!(
+            inspect(&hc).await[&a.node_id()].1.remote_address(),
+            primary_public
+        );
+        blocked.lock().unwrap().extend([
+            (primary_private, remote_private),
+            (remote_private, primary_private),
+        ]);
+        let lost_at = time::Instant::now();
+        time::timeout(Duration::from_secs(8), async {
+            while !prepared_networks.0.lock().unwrap().is_empty() {
+                time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the alternate socket must be prepared while the old path is being probed");
+        assert!(old_path.close_reason().is_none());
+        let preparing_observed = lost_at.elapsed();
         let mut states = Vec::new();
-        let recovered = time::timeout(Duration::from_secs(150), async {
+        let mut advertised_after = None;
+        let recovered = time::timeout(Duration::from_secs(18), async {
             while let Some(event) = ea.recv().await {
-                if let SessionEvent::PeerState {
-                    peer,
-                    generation,
-                    state,
-                } = event
-                    && peer == c.node_id()
-                {
-                    let connected = state.is_connected();
-                    states.push((generation, state));
-                    if connected {
-                        return true;
+                match event {
+                    SessionEvent::Diagnostic(detail) if detail.contains("转入新候选配对") => {
+                        advertised_after = Some(lost_at.elapsed());
                     }
+                    SessionEvent::PeerState {
+                        peer,
+                        generation,
+                        state,
+                    } if peer == c.node_id() => {
+                        let connected = state.is_connected() && generation != old_generation;
+                        states.push((generation, state));
+                        if connected {
+                            return true;
+                        }
+                    }
+                    _ => {}
                 }
             }
             false
@@ -131,11 +158,16 @@ async fn port_restricted_stale_primary_recovers_with_republished_socket_and_keep
             matches!(recovered, Ok(true)),
             "automatic recovery must publish a reachable UDP candidate, initiator={local_initiates}, states={states:?}"
         );
+        let advertised_after = advertised_after.expect("the new endpoint must be published");
+        let probing_elapsed = advertised_after.saturating_sub(preparing_observed);
         assert!(
-            states
-                .iter()
-                .any(|(_, state)| matches!(state, PeerLifecycle::Failed(_))),
-            "the old advertised mapping must fail first"
+            (Duration::from_secs(9)..=Duration::from_secs(12)).contains(&probing_elapsed),
+            "re-pairing must happen after one 10-second probe window: {probing_elapsed:?}"
+        );
+        assert!(old_path.close_reason().is_some());
+        eprintln!(
+            "local_initiates={local_initiates}: suspect at {preparing_observed:?}, new pairing at {advertised_after:?}, authenticated at {:?}",
+            lost_at.elapsed()
         );
 
         // The address seen by each Quinn peer matches the simulated NAT mapping,
@@ -146,11 +178,17 @@ async fn port_restricted_stale_primary_recovers_with_republished_socket_and_keep
         );
         let deadline = time::Instant::now() + Duration::from_secs(5);
         loop {
-            if let Some((_, connection)) = inspect(&hc).await.get(&a.node_id()) {
-                assert_eq!(connection.remote_address(), recovery_public);
+            if inspect(&hc)
+                .await
+                .get(&a.node_id())
+                .is_some_and(|(_, connection)| connection.remote_address() == recovery_public)
+            {
                 break;
             }
-            assert!(time::Instant::now() < deadline, "C must authenticate A");
+            assert!(
+                time::Instant::now() < deadline,
+                "C must authenticate A on the new public endpoint"
+            );
             time::sleep(Duration::from_millis(25)).await;
         }
         assert!(allowed.lock().unwrap()[&remote_private].contains(&recovery_public));

@@ -2621,7 +2621,14 @@ async fn late_probe_registration_receives_reply_at_validated_actual_source() {
     time::timeout(Duration::from_secs(2), async {
         let candidates = [remote_addr];
         let (source, ()) = tokio::join!(
-            punch_candidates(&socket, &mut probes, &candidates, &token),
+            punch_candidates(
+                &socket,
+                &mut probes,
+                &candidates,
+                &token,
+                PEER_PUNCH_CONFIG,
+                None
+            ),
             exchange
         );
         assert_eq!(source.unwrap(), remote_addr);

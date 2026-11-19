@@ -33,7 +33,7 @@ async fn run_restricted_proxy(
     proxies_by_private: Arc<HashMap<SocketAddr, Arc<tokio::net::UdpSocket>>>,
     allowed: Arc<Mutex<HashMap<SocketAddr, HashSet<SocketAddr>>>>,
     stats: Arc<Mutex<HashMap<SocketAddr, ProxyStats>>>,
-    blocked: Arc<HashSet<(SocketAddr, SocketAddr)>>,
+    blocked: BlockedLinks,
 ) {
     let own_public = proxy.local_addr().unwrap();
     let mut buffer = vec![0; 65_535];
@@ -51,7 +51,7 @@ async fn run_restricted_proxy(
         };
         let sender_public = sender_proxy.local_addr().unwrap();
 
-        let forward = if blocked.contains(&(source, private_target)) {
+        let forward = if blocked.lock().unwrap().contains(&(source, private_target)) {
             false
         } else {
             let mut current = allowed.lock().unwrap();
@@ -88,12 +88,13 @@ type RestrictedNatHarness = (
     Arc<Mutex<HashMap<SocketAddr, ProxyStats>>>,
     JoinSet<()>,
 );
+type BlockedLinks = Arc<Mutex<HashSet<(SocketAddr, SocketAddr)>>>;
 
 async fn restricted_nat_harness() -> RestrictedNatHarness {
-    restricted_nat_harness_blocking(&[]).await
+    restricted_nat_harness_with_filter().await.0
 }
 
-async fn restricted_nat_harness_blocking(blocked_links: &[(usize, usize)]) -> RestrictedNatHarness {
+async fn restricted_nat_harness_with_filter() -> (RestrictedNatHarness, BlockedLinks) {
     let config = DesktopNetworkConfig {
         families: crate::net::NetworkFamilies::Ipv4Only,
         stun_servers: Vec::new(),
@@ -128,12 +129,7 @@ async fn restricted_nat_harness_blocking(blocked_links: &[(usize, usize)]) -> Re
             .map(|public| (public, ProxyStats::default()))
             .collect::<HashMap<_, _>>(),
     ));
-    let blocked = Arc::new(
-        blocked_links
-            .iter()
-            .map(|&(from, to)| (proxies[from].0, proxies[to].0))
-            .collect::<HashSet<_>>(),
-    );
+    let blocked = Arc::new(Mutex::new(HashSet::new()));
     let mut tasks = JoinSet::new();
     for (private, proxy) in proxies {
         tasks.spawn(run_restricted_proxy(
@@ -145,7 +141,10 @@ async fn restricted_nat_harness_blocking(blocked_links: &[(usize, usize)]) -> Re
             blocked.clone(),
         ));
     }
-    (networks, public_by_private, allowed, stats, tasks)
+    (
+        (networks, public_by_private, allowed, stats, tasks),
+        blocked,
+    )
 }
 
 #[tokio::test]
@@ -604,6 +603,85 @@ async fn clearing_reconnect_probe_releases_old_token_for_same_source() {
 }
 
 #[tokio::test]
+async fn recovery_punch_is_immediate_and_reuses_the_token_each_second() {
+    let config = DesktopNetworkConfig {
+        families: crate::net::NetworkFamilies::Ipv4Only,
+        stun_servers: Vec::new(),
+        include_loopback: true,
+        ..Default::default()
+    };
+    let network = prepare_desktop_network(&config).await.unwrap();
+    let path = &network.paths[0];
+    let remote = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let address = remote.local_addr().unwrap();
+    let token = PunchToken::random();
+    let mut receiver = path.punch_socket.register_probe(&token).unwrap();
+    let progress = AttemptProgress::default();
+    let started = time::Instant::now();
+    let observe = async {
+        let mut buf = [0; 128];
+        let mut previous = None;
+        for attempt in 0..3 {
+            let (length, source) =
+                time::timeout(Duration::from_millis(1500), remote.recv_from(&mut buf))
+                    .await
+                    .expect("a probe must arrive on each tick")
+                    .unwrap();
+            assert!(crate::nat::punch::is_probe_with_token(
+                &buf[..length],
+                &token
+            ));
+            let received = time::Instant::now();
+            if let Some(previous) = previous {
+                assert!(received - previous >= Duration::from_millis(900));
+            } else {
+                assert!(received - started < Duration::from_millis(500));
+            }
+            previous = Some(received);
+            if attempt == 2 {
+                remote
+                    .send_to(&crate::nat::punch::probe_packet(&token), source)
+                    .await
+                    .unwrap();
+            }
+        }
+    };
+    let candidates = [address];
+    let (_, result) = tokio::join!(
+        observe,
+        punch_candidates(
+            &path.punch_socket,
+            &mut receiver,
+            &candidates,
+            &token,
+            RECOVERY_PUNCH_CONFIG,
+            Some(&progress)
+        )
+    );
+    assert_eq!(result.unwrap(), address);
+    assert!(
+        !progress.try_retire_stalled_path(),
+        "a validated reply keeps the attempt at the deadline"
+    );
+    assert!(
+        progress.try_supersede(),
+        "a fresh signal offer can still replace an unverified attempt"
+    );
+    assert!(
+        !progress.receive_punch(),
+        "ignore a reply after supersession"
+    );
+
+    let stalled = AttemptProgress::default();
+    assert!(stalled.try_retire_stalled_path());
+    assert!(
+        !stalled.receive_punch(),
+        "ignore a reply after the deadline wins"
+    );
+    assert!(!stalled.begin_transport());
+}
+
+#[tokio::test]
 async fn newer_offer_sends_punch_before_the_previous_round_times_out() {
     let (signal, server) = start_local_server().await;
     for local_initiates in [true, false] {
@@ -849,7 +927,9 @@ async fn expired_pending_lookup_releases_its_private_socket() {
     let healthy_peer = Identity::generate().node_id();
     let mut connections = HashMap::from([(healthy_peer, 1)]);
     let mut attempts = HashMap::new();
-    release_unused_recovery_networks(&mut networks, &connections, &attempts, &pending).await;
+    let mut probing = HashMap::new();
+    release_unused_recovery_networks(&mut networks, &connections, &attempts, &pending, &probing)
+        .await;
     assert_eq!(
         networks.len(),
         1,
@@ -857,7 +937,8 @@ async fn expired_pending_lookup_releases_its_private_socket() {
     );
     pending.remove(&peer);
     connections.insert(peer, 2);
-    release_unused_recovery_networks(&mut networks, &connections, &attempts, &pending).await;
+    release_unused_recovery_networks(&mut networks, &connections, &attempts, &pending, &probing)
+        .await;
     assert_eq!(
         networks.len(),
         1,
@@ -865,14 +946,25 @@ async fn expired_pending_lookup_releases_its_private_socket() {
     );
     connections.insert(peer, 1);
     attempts.insert((peer, 1), 2);
-    release_unused_recovery_networks(&mut networks, &connections, &attempts, &pending).await;
+    release_unused_recovery_networks(&mut networks, &connections, &attempts, &pending, &probing)
+        .await;
     assert_eq!(
         networks.len(),
         1,
         "an active recovery attempt must retain its socket"
     );
     attempts.insert((peer, 1), 1);
-    release_unused_recovery_networks(&mut networks, &connections, &attempts, &pending).await;
+    probing.insert(peer, (1, time::Instant::now()));
+    release_unused_recovery_networks(&mut networks, &connections, &attempts, &pending, &probing)
+        .await;
+    assert_eq!(
+        networks.len(),
+        1,
+        "the old socket remains available for probing"
+    );
+    probing.remove(&peer);
+    release_unused_recovery_networks(&mut networks, &connections, &attempts, &pending, &probing)
+        .await;
     assert!(networks.is_empty());
     assert_eq!(connections.get(&peer), Some(&1));
     assert_eq!(connections.get(&healthy_peer), Some(&1));
