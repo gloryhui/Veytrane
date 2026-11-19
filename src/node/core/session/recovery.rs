@@ -4,6 +4,152 @@ use std::{collections::BTreeSet, time::SystemTime};
 
 pub(super) const SAMPLE: Duration = Duration::from_secs(5);
 const REFRESH_COOLDOWN: Duration = Duration::from_secs(60);
+const PATH_PROBE_INTERVAL: Duration = Duration::from_secs(1);
+const PATH_IDLE_CHECK: Duration = Duration::from_secs(5);
+pub(super) const PATH_RECOVERY_WINDOW: Duration = Duration::from_secs(10);
+
+#[derive(Debug, PartialEq, Eq)]
+enum PathCheck {
+    Wait,
+    Probe,
+    Suspect,
+    Responsive,
+    Paused,
+    Expired,
+}
+
+struct PathProbe {
+    acknowledgments: u64,
+    last_ack: time::Instant,
+    last_check: time::Instant,
+    probing: bool,
+    suspected_at: Option<time::Instant>,
+}
+
+impl PathProbe {
+    fn new(now: time::Instant, acknowledgments: u64) -> Self {
+        Self {
+            acknowledgments,
+            last_ack: now,
+            last_check: now,
+            probing: false,
+            suspected_at: None,
+        }
+    }
+
+    fn check(&mut self, now: time::Instant, acknowledgments: u64) -> PathCheck {
+        let gap = now.duration_since(self.last_check);
+        self.last_check = now;
+        let acknowledged = acknowledgments != self.acknowledgments;
+        if acknowledged || gap >= PATH_RECOVERY_WINDOW {
+            // A process that was suspended did not send probes during that time.
+            self.acknowledgments = acknowledgments;
+            self.last_ack = now;
+            self.probing = false;
+            return match (self.suspected_at.take(), acknowledged) {
+                (Some(_), true) => PathCheck::Responsive,
+                (Some(_), false) => PathCheck::Paused,
+                (None, _) => PathCheck::Wait,
+            };
+        }
+        if let Some(started) = self.suspected_at {
+            if now.duration_since(started) >= PATH_RECOVERY_WINDOW {
+                return PathCheck::Expired;
+            }
+            return PathCheck::Probe;
+        }
+        if self.probing {
+            self.suspected_at = Some(now);
+            return PathCheck::Suspect;
+        }
+        if now.duration_since(self.last_ack) >= PATH_IDLE_CHECK {
+            self.probing = true;
+            return PathCheck::Probe;
+        }
+        PathCheck::Wait
+    }
+}
+
+pub(super) async fn monitor_path(
+    connection: &quinn::Connection,
+    mut update: impl FnMut(PathObservation),
+) -> Option<quinn::ConnectionError> {
+    // QUIC DATAGRAM frames elicit transport ACKs without opening a business stream.
+    // The peer does not need an application-level heartbeat handler.
+    if connection.max_datagram_size().is_none() {
+        return Some(connection.closed().await);
+    }
+    let now = time::Instant::now();
+    let mut probe = PathProbe::new(now, connection.stats().frame_rx.acks);
+    let mut tick = time::interval_at(now + PATH_PROBE_INTERVAL, PATH_PROBE_INTERVAL);
+    tick.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+    loop {
+        let cutoff = probe.suspected_at.map(|start| start + PATH_RECOVERY_WINDOW);
+        tokio::select! {
+            biased;
+            reason = connection.closed() => return Some(reason),
+            _ = async {
+                match cutoff {
+                    Some(at) => time::sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
+            } => {}
+            _ = tick.tick() => {}
+        }
+        let now = time::Instant::now();
+        let check = probe.check(now, connection.stats().frame_rx.acks);
+        match check {
+            PathCheck::Wait => continue,
+            PathCheck::Responsive | PathCheck::Paused => {
+                update(PathObservation::Cleared {
+                    acknowledged: check == PathCheck::Responsive,
+                });
+                continue;
+            }
+            PathCheck::Expired => return None,
+            PathCheck::Probe | PathCheck::Suspect => {}
+        }
+        if connection.send_datagram((&b"\x00"[..]).into()).is_err() {
+            return Some(connection.closed().await);
+        }
+        if check == PathCheck::Suspect {
+            update(PathObservation::Suspect(now));
+        }
+    }
+}
+
+pub(super) enum PathObservation {
+    Suspect(time::Instant),
+    Cleared { acknowledged: bool },
+}
+
+#[test]
+fn probes_each_second_and_expires_after_ten_seconds_without_ack() {
+    let start = time::Instant::now();
+    let mut probe = PathProbe::new(start, 7);
+    let check_at = |seconds| start + Duration::from_secs(seconds);
+    assert_eq!(probe.check(check_at(4), 7), PathCheck::Wait);
+    assert_eq!(probe.check(check_at(5), 7), PathCheck::Probe);
+    assert_eq!(probe.check(check_at(6), 7), PathCheck::Suspect);
+    for second in 7..16 {
+        assert_eq!(probe.check(check_at(second), 7), PathCheck::Probe);
+    }
+    assert_eq!(probe.check(check_at(16), 7), PathCheck::Expired);
+}
+
+#[test]
+fn ack_or_sleep_clears_the_pending_path_deadline() {
+    let start = time::Instant::now();
+    let check_at = |seconds| start + Duration::from_secs(seconds);
+    let mut probe = PathProbe::new(start, 0);
+    assert_eq!(probe.check(check_at(5), 0), PathCheck::Probe);
+    assert_eq!(probe.check(check_at(6), 0), PathCheck::Suspect);
+    assert_eq!(probe.check(check_at(7), 1), PathCheck::Responsive);
+    assert_eq!(probe.check(check_at(12), 1), PathCheck::Probe);
+    assert_eq!(probe.check(check_at(13), 1), PathCheck::Suspect);
+    assert_eq!(probe.check(check_at(30), 1), PathCheck::Paused);
+    assert_eq!(probe.check(check_at(31), 1), PathCheck::Wait);
+}
 
 #[derive(Default)]
 struct Attempt {

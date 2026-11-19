@@ -4374,10 +4374,37 @@ async fn run_session(
                     }
                 });
                 let closed_inputs = input_tx.clone();
+                let can_probe = !signal_server.trim().is_empty()
+                    && !connection_network.local_candidates.is_empty();
                 peer_tasks.spawn(async move {
-                    let reason = connection.closed().await;
-                    let network_interruption = recoverable_transport_close(&reason);
-                    let detail = reason.to_string();
+                    let mut suspected_at = None;
+                    let reason = if can_probe {
+                        recovery::monitor_path(&connection, |observation| match observation {
+                            recovery::PathObservation::Suspect(started) => {
+                                suspected_at = Some(started);
+                                tracing::info!(peer = %peer.short(), generation, "对端路径疑似失效，开始短周期探测");
+                            }
+                            recovery::PathObservation::Cleared { acknowledged } => {
+                                if let Some(started) = suspected_at.take() {
+                                    tracing::info!(peer = %peer.short(), generation, acknowledged,
+                                        elapsed_ms = started.elapsed().as_millis(), "结束对端路径探测");
+                                }
+                            }
+                        }).await
+                    } else {
+                        Some(connection.closed().await)
+                    };
+                    let (detail, network_interruption) = match reason {
+                        Some(reason) => (reason.to_string(), recoverable_transport_close(&reason)),
+                        None => {
+                            let detail = "对端 UDP 路径探测超时";
+                            warn!(peer = %peer.short(), generation,
+                                elapsed_ms = suspected_at.map(|start| start.elapsed().as_millis()),
+                                "对端路径探测超时");
+                            connection.close(NETWORK_REFRESH_CLOSE_CODE.into(), detail.as_bytes());
+                            (detail.into(), true)
+                        }
+                    };
                     let _ = closed_inputs
                         .send(SessionInput::PeerClosed {
                             peer,
