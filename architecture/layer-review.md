@@ -1,6 +1,6 @@
 # Veytrane 分层审查
 
-2026-11-20，基于 `main` 的 `0b0d77b` 和当前工作树。检查对象包括 Cargo 构建目标、生产调用路径、条件编译、核心状态归属及仓库分层检查脚本。图中框线表示进程边界；同一份核心模块可以在不同产品进程中各自实例化。[交互架构图](layer-review.html) · [PNG](layer-review.png)
+2026-11-20，基于 `main` 的 `0b0d77b` 与当时的工作树。此文记录施工前的审查。检查对象包括 Cargo 构建目标、生产调用路径、条件编译、核心状态归属及分层检查脚本。[现行交互图](layer-review.html) · [施工前 PNG](layer-review.png) · [现行目录说明](../docs/REPOSITORY_LAYOUT.md)
 
 ## 从基础设施到应用
 
@@ -13,7 +13,7 @@
 | 管理应用 | `desktop` 处理窗口、托盘、文件选择和视图状态。管理 CLI 和 `p2p-node web` 调用同一个 Agent。浏览器导航由 Agent 的 `adapters/navigation` 提供。 | 改桌面交互从 `desktop` 入手。改业务规则从 `core` 入手。两个 Web 入口由不同进程提供。 |
 | 专用产品与独立 CLI | `products/sub2api` 与 `products/live` 直接创建核心实例，复用宿主转发、恢复等能力。独立 `p2p_file` 有自己的文件收发、隧道、管理入口与信令服务端。 | 不能假定所有可执行程序都经过 `p2p-agent`。直播产品另有对 Sub2API 授权设备枚举、事件日志和停止函数的横向依赖。 |
 
-主要入口可从 [Agent 启动](../src/bin/p2p-agent.rs)、[IPC 客户端](../src/node/api/client.rs)、[桌面工作台](../src/desktop/agent_shell/workbench.rs)、[专用网关](../src/node/products/sub2api.rs)、[直播产品](../src/node/products/live.rs) 和 [独立 CLI](../src/main.rs) 追踪。
+主要入口可从 [Agent 启动](../src/bin/p2p-agent.rs)、[IPC 客户端](../crates/veytrane-management/src/client.rs)、[桌面工作台](../src/desktop/agent_shell/workbench.rs)、[专用网关](../src/node/products/sub2api.rs)、[直播产品](../src/node/products/live.rs) 和 [独立 CLI](../src/main.rs) 追踪。
 
 ## 应优先处理的边界
 
@@ -40,4 +40,4 @@
 
 打开同目录的 `layer-review.html`。在图表工具栏通过「主题样式」选择暗夜终端、晒图蓝图、牛皮纸制图、白板手绘、粗野撞色、荧光终端、柔光卡片或等距沙盘。使用「亮色」「暗色」独立调整配色，再点「导出 PNG」保存当前样式和配色的完整图。
 
-`layer-review.png` 是已导出的暗夜终端暗色版。修改 `layer-review.spec.json` 后，在安装了 arch-diagram、Node.js 和 Chrome 的开发机上，从仓库根目录运行 `node architecture/build-layer-review.mjs` 可重新生成交互页和 PNG。
+`layer-review.png` 是施工前的暗夜终端暗色版。修改 `layer-review.spec.json` 后，在装有 arch-diagram 和 Node.js 的开发机运行 `node architecture/build-layer-review.mjs` 可重建现行交互页。页面使用技能自带的 PNG 渲染器在浏览器本地生成当前样式的图片。

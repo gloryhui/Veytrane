@@ -2,57 +2,55 @@
   "lang": "zh-CN",
   "theme": "terminal",
   "width": 1240,
-  "pageTitle": "Veytrane · 软件分层与功能边界",
-  "title": "{b:Veytrane}　软件分层与功能边界",
-  "subtitle": "2026-11-20 工作树审查　·　从下往上读职责，沿箭头读调用　·　共享模块可由多个进程分别实例化",
+  "pageTitle": "Veytrane · 节点框架与业务装配",
+  "title": "{b:Veytrane}　节点框架与业务装配",
+  "subtitle": "2026-11-20　·　沿箭头读调用方向，虚线标出本机管理请求和进程边界",
   "layers": [
-    {"id":"app","label":"应用入口","color":"blue"},
-    {"id":"host","label":"进程宿主与适配","color":"cyan"},
-    {"id":"core","label":"节点业务核心","color":"green"},
-    {"id":"base","label":"共享基础能力","color":"purple"},
-    {"id":"review","label":"审查发现","color":"amber"}
+    {"id":"app","label":"入口与客户端","color":"blue"},
+    {"id":"management","label":"管理面与宿主","color":"cyan"},
+    {"id":"core","label":"节点会话与传输","color":"green"},
+    {"id":"capability","label":"业务能力","color":"purple"},
+    {"id":"standalone","label":"独立 CLI 与服务端","color":"amber"}
   ],
   "flows": [
-    {"id":"ipc","label":"本机管理请求","color":"cyan","dash":true},
+    {"id":"ipc","label":"本机 IPC","color":"cyan","dash":true},
     {"id":"http","label":"回环 HTTP","color":"blue"},
-    {"id":"call","label":"进程内调用或复用","color":"green"},
-    {"id":"reverse","label":"宿主直接引用导航","color":"amber","dash":true}
+    {"id":"call","label":"调用或装配","color":"green"},
+    {"id":"server","label":"独立命令入口","color":"amber"}
   ],
-  "groups":[
-    {"id":"agent","x":24,"y":300,"w":770,"h":323,"color":"cyan","label":"p2p-agent 进程"}
+  "groups": [
+    {"id":"agent","x":24,"y":298,"w":780,"h":309,"color":"cyan","label":"p2p-agent 进程 · 导航按需同进程运行"}
   ],
-  "nodes":[
-    {"id":"management","layer":"app","x":45,"y":155,"w":325,"h":99,"title":"桌面与节点管理客户端","sub":"p2p-desktop / p2p-node","lines":["GPUI 工作台、管理 CLI、web 子命令","Web 管理网关也使用 AgentClient"]},
-    {"id":"browser","layer":"app","x":447,"y":155,"w":325,"h":99,"title":"浏览器 · 本机服务导航","sub":"service-navigation.html","lines":["服务目录、映射编辑、设备重连","默认访问回环端口 3001"]},
-    {"id":"products","layer":"app","x":838,"y":155,"w":360,"h":99,"title":"专用产品进程","sub":"node/products/{sub2api,live}","lines":["客户端和网关自行启动节点核心","按产品配置授权、转发及恢复策略"]},
-    {"id":"ipc","layer":"host","x":45,"y":336,"w":325,"h":101,"title":"本地 IPC 服务端","sub":"node/api · node/local · node/host","lines":["socket / 命名管道接入管理命令","读取 Request 并提交到当前 Agent"]},
-    {"id":"navigation","layer":"host","x":447,"y":336,"w":325,"h":101,"title":"内置服务导航","sub":"node/adapters/navigation","lines":["提供页面与 /api/navigation 路由","本机节点命令经 Bridge 返回 IPC"]},
-    {"id":"host","layer":"host","x":45,"y":510,"w":727,"h":90,"title":"Agent 宿主　·　node/host","sub":"agent / configuration / forwarding / recovery","lines":["持有节点实例、配置版本和转发监听，分派请求并管理核心生命周期"]},
-    {"id":"legacy","layer":"app","x":838,"y":685,"w":360,"h":105,"title":"独立命令行 p2p_file","sub":"src/main.rs · admin · transfer · tunnel","lines":["独立的收发、服务与转发执行路径","signal-server 从这里启动信令服务"]},
-    {"id":"core","layer":"core","x":45,"y":685,"w":727,"h":105,"title":"节点业务核心　·　node/core","sub":"control / session / authorization / services / transfer","lines":["管理会话、权限、队列、断点恢复、任务持久化与测速","Agent 与专用产品各自持有运行实例"]},
-    {"id":"network","layer":"base","x":45,"y":871,"w":325,"h":96,"title":"身份、发现与连通","sub":"identity · discovery · nat · net · relay","lines":["设备身份、候选地址、打洞与路径选择"]},
-    {"id":"io","layer":"base","x":447,"y":871,"w":325,"h":96,"title":"传输与存储","sub":"transport / protocol / storage","lines":["QUIC、帧与文件清单、安全落盘"]},
-    {"id":"tunnel","layer":"base","x":838,"y":871,"w":360,"h":96,"title":"TCP 转发　·　tunnel","sub":"bridge_tcp / forward_with_owner","lines":["共享转发能力与独立 CLI 服务编排同目录"]},
-    {"id":"audit","layer":"review","x":838,"y":332,"w":360,"h":271,"title":"已核实的边界问题","rows":[
-      {"name":"产品 → 核心","desc":"网关 feature 改变共享设备上限"},
-      {"name":"界面 → 核心","desc":"文件服务保存详情选中项"},
-      {"name":"呈现 → 核心","desc":"列表展开、中文文案位于核心"},
-      {"name":"宿主组装","desc":"宿主直接启动具体导航实现"},
-      {"name":"存储 ↔ 传输","desc":"下载存储依赖传输层位图"},
-      {"name":"产品间引用","desc":"直播复用 Sub2API 辅助函数"}
-    ],"footer":"详见同目录《分层审查》layer-review.md"}
+  "nodes": [
+    {"id":"clients","layer":"app","x":45,"y":158,"w":344,"h":100,"title":"桌面与管理 CLI","sub":"p2p-desktop · p2p-node","lines":["GPUI 工作台、托盘与管理命令","客户端使用同一 IPC 契约"]},
+    {"id":"browser","layer":"app","x":455,"y":158,"w":330,"h":100,"title":"浏览器","sub":"服务导航 · 节点管理","lines":["内置导航默认走回环 3001","p2p-node web 可单独启动管理页"]},
+    {"id":"products","layer":"app","x":878,"y":158,"w":318,"h":100,"title":"Live / Sub2API","sub":"专用客户端和网关","lines":["各自装配节点与 TCP 转发","各自选择准入、容量和恢复策略"]},
+    {"id":"ipc","layer":"management","x":45,"y":326,"w":344,"h":100,"title":"本机管理 IPC","sub":"crates/veytrane-management","lines":["IPC v1 DTO · AgentClient","Unix socket / Windows pipe"]},
+    {"id":"nav","layer":"management","x":455,"y":326,"w":330,"h":100,"title":"内置服务导航","sub":"apps/web-management","lines":["导航和管理页经 IPC 使用节点","入口负责启动、重建通知与退出"]},
+    {"id":"host","layer":"management","x":45,"y":488,"w":740,"h":100,"title":"Agent 宿主与配置装配","sub":"src/node/host · src/node/composition","lines":["进程所有权、请求去重、配置 revision、事件聚合","同一会话提交点先持久化，再发布策略"]},
+    {"id":"standalone","layer":"standalone","x":878,"y":326,"w":318,"h":100,"title":"独立命令行","sub":"p2p_file","lines":["独立收发、服务、隧道与测速","沿用独立协议和身份锁"]},
+    {"id":"signal","layer":"standalone","x":878,"y":488,"w":318,"h":100,"title":"信令与可选 Relay 服务端","sub":"apps/signaling · signaling-server","lines":["维护登记、短 ID SQLite 和中继租约","由 p2p_file signal-server 启动"]},
+    {"id":"core","layer":"core","x":45,"y":665,"w":1151,"h":100,"title":"节点会话编排","sub":"src/node/core","lines":["建立已认证会话、维护连接代际与重连、协调强撤销","根包会话仍装配各能力。文件任务由文件包持有"]},
+    {"id":"files","layer":"capability","x":45,"y":840,"w":344,"h":100,"title":"文件传输","sub":"crates/veytrane-files","lines":["文件队列、任务库、落盘回执与续传","Agent 可按构建选装"]},
+    {"id":"speed","layer":"capability","x":455,"y":840,"w":330,"h":100,"title":"测速","sub":"crates/veytrane-speed","lines":["控制协议、数据流、租约与统计","与文件服务共用每 peer 活动许可"]},
+    {"id":"tcp","layer":"capability","x":878,"y":840,"w":318,"h":100,"title":"TCP 服务与转发","sub":"crates/veytrane-tcp","lines":["服务 ID、目录、ACL、监听与桥接","Agent、Live、Sub2API 复用"]},
+    {"id":"node","layer":"core","x":45,"y":1015,"w":520,"h":100,"title":"节点基础机制","sub":"crates/veytrane-node","lines":["P2PN 协商、双向流分发、peer 容量与活动许可","按认证状态和当前代际撤销资源"]},
+    {"id":"transport","layer":"core","x":675,"y":1015,"w":521,"h":100,"title":"传输基础与网络客户端","sub":"veytrane-transport · src/{net,discovery,nat,relay}","lines":["设备身份、QUIC、有界帧、打洞与路径选择","Agent-only 构建可排除注册数据库"]}
   ],
-  "edges":[
-    {"from":"management.b","to":"ipc.t","flow":"ipc","label":"AgentClient","labelPos":[265,279]},
-    {"from":"browser.b","to":"navigation.t","flow":"http","label":"页面 / API","labelPos":[659,279]},
-    {"from":"navigation.l","to":"ipc.r","flow":"ipc","label":"本机","labelPos":[408,373]},
-    {"from":"ipc.b","to":"host.t@0.224","flow":"call","label":"submit","labelPos":[253,474]},
-    {"from":"host.t@0.777","to":"navigation.b","flow":"reverse","label":"启动导航","labelPos":[655,475]},
-    {"from":"host.b","to":"core.t","flow":"call","label":"NodeControl","labelPos":[478,651]},
-    {"from":"products.l","to":"core.r","flow":"call","via":[[810,204],[810,735]],"label":"实例化","labelPos":[844,650]},
-    {"from":"core.b@0.224","to":"network.t","flow":"call","label":"建连 / 认证","labelPos":[271,830]},
-    {"from":"core.b@0.777","to":"io.t","flow":"call","label":"收发 / 落盘","labelPos":[638,820]},
-    {"from":"legacy.b","to":"tunnel.t","flow":"call","label":"serve / forward","labelPos":[1081,830]},
-    {"from":"core.b@0.948","to":"tunnel.t@0.2","flow":"call","mid":845,"label":"监听与字节转送","labelPos":[812,831]}
+  "edges": [
+    {"from":"clients.b","to":"ipc.t","flow":"ipc","label":"AgentClient","labelPos":[278,282]},
+    {"from":"browser.b","to":"nav.t","flow":"http","label":"导航页面 / API","labelPos":[710,282]},
+    {"from":"nav.l","to":"ipc.r","flow":"ipc","label":"IPC","labelPos":[422,359]},
+    {"from":"ipc.b","to":"host.t@0.232","flow":"call","label":"管理命令","labelPos":[272,458]},
+    {"from":"host.b","to":"core.t@0.3215","flow":"call","label":"NodeControl","labelPos":[472,629]},
+    {"from":"products.l","to":"core.t@0.697","flow":"call","via":[[847,208],[847,637]],"label":"产品装配","labelPos":[910,630]},
+    {"from":"standalone.b","to":"signal.t","flow":"server","label":"signal-server","labelPos":[1110,458]},
+    {"from":"core.b@0.149","to":"files.t","flow":"call","label":"文件流"},
+    {"from":"core.b","to":"speed.t","flow":"call","label":"测速流"},
+    {"from":"core.b@0.862","to":"tcp.t","flow":"call","label":"服务流"},
+    {"from":"files.b","to":"node.t@0.33","flow":"call","label":"共享许可"},
+    {"from":"speed.b","to":"node.t@0.8","flow":"call","label":"独占许可"},
+    {"from":"tcp.b","to":"transport.t@0.695","flow":"call","label":"QUIC 流"},
+    {"from":"node.r","to":"transport.l","flow":"call","label":"握手 / 帧","labelPos":[620,1043]}
   ]
 }

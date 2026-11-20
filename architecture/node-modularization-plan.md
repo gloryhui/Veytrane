@@ -155,6 +155,19 @@ Veytrane 的核心是可信节点之间建立、维持和恢复连接的机制�
 - 已实际构建 `cargo build --locked --offline --no-default-features --features agent-base --bin p2p-agent`。同组合正常依赖树无 `veytrane-files`、GPUI 或 Axum。用 `VEYTRANE_TEST_MINIMAL_AGENT` 指向该二进制运行 `file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage`，两个进程分别初始化并通过 TCP、30 秒测速和重连，拒绝启用缺失能力且配置字节未变，停止后无接收目录和任务库。`agent-base,agent-web` 的入口也通过编译检查。
 - 完整 `node` 构建的真实 Agent 文件、TCP 与撤销回归通过。显式 `standalone` 构建的 IPv4、IPv6 独立收发通过。混合构建组合、Windows/Linux 实机及完整交付矩阵仍需最终验收。
 
+### S4–S5 施工记录（2026-11-20）
+
+- `b891c3a`、`8045c1e` 将服务目录、按 ID 开流和转发监听事务归入 `veytrane-tcp`。Agent、Live、Sub2API 共享实现。配置事务、三进程四路转发及撤销、Live/Sub2API 产品和恢复测试通过。隔离 Live 测试通过 viewer 权限限制、直连播放和发布端重启后的恢复。既有已部署产品授权未在此次隔离验证中读取。S4 已同步 `origin/main`。
+- `879e613` 将 IPC v1 DTO、客户端、当前用户路径及 socket/pipe 纳入 `veytrane-management`。IPC JSON 样本、实际 Agent 配置事务与重建、Windows GNU 管理包交叉编译通过。Windows pipe 的实际 ACL 仍需在 Windows 验证。
+- `b09eb5d`、`1c3dd72` 分离 Web 鉴权和 `apps/web-management`。Web 包 24 项测试通过。macOS 原生导航 smoke 验证核心重建期间 HTTP 存活、身份与配置字节保留，另验导航配置默认发现、`--no-navigation`、端口占用和独立 Web 带 token 操作同一 Agent。
+- `f0a5fa8` 让配置记录及转发适配归 `node/composition`。宿主把已验证的配置投影为运行策略，并提供一次性持久化操作。会话 actor 在同一序列位置验证授权代际、落盘后发布。真实进程测试覆盖模拟写入失败、revision 冲突、去重、重建和事件重同步。S5 已同步 `origin/main`。
+
+### S6 施工记录（2026-11-20）
+
+- `9878798`、`2dc4686` 拆开短设备 ID 与 SQLite 注册，独立 `signaling-server` feature 持有服务端注册、TLS 监听和 Relay，沿用 `p2p_file signal-server`。发现、信令以及 TLS 共 76 项，Relay 24 项，独立 CLI TLS 进程测试通过。
+- `b1a3c68`、`ee14ab2` 保留 `node` 与 `gui` 的原组合，新增 `agent-full` 和 `desktop-client`。Live、Sub2API 可单独构建。桌面依赖 IPC 客户端与纯校验，独立桌面编译通过。Linux、macOS、Windows 原包装脚本分别构建 Agent/CLI 和桌面，macOS 本机通过包装脚本语法与 8 项归档检查。实机打包与跨平台窗口仍待验证。
+- `scripts/check-architecture.py` 检查源码和生产 Cargo 依赖。`agent-base` 内置 TCP 与测速，排除文件运行包、Web、GPUI 和 SQLite；`agent-full` 包含 Web 和文件，排除 GPUI 和信令服务端 SQLite。独立桌面、Live 和 Sub2API 均排除文件执行。实际依赖验证以脚本中的展开组合为准。
+
 ## 7. 新增或移除业务时的操作示例
 
 **新增一个使用既有 TCP 的产品**：在 `apps/<产品>` 内确定对端、服务 ID、目标与可见目录；使用 node 和 TCP 的公开接口组装；在产品自己的 UI 或 CLI 接入管理命令；测试未授权访问、撤销、重连和关闭。Live 是这种模式的现有实例。

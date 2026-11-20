@@ -5,17 +5,15 @@
 ## 入口与依赖方向
 
 ```text
-src/bin/p2p-desktop.rs → desktop/agent_shell → node/api + node/local
-src/bin/p2p-node.rs   → node/adapters（CLI、HTTP）
-src/bin/p2p-agent.rs  → node/host + 可选的 node/adapters/navigation
-src/bin/sub2api-*.rs / p2p-sub2api-gateway.rs → node/products
-src/main.rs          → 既有独立 CLI（admin、tunnel、transfer 等）
-
-node/core → 节点/传输、TCP、测速及选装的文件能力
-node/api  → core 的数据类型 + local 的 IPC 连接
-node/local → OS 路径、实例锁、通用私有目录权限
-node/host → core、api、local
-node/adapters / node/products → 以上服务与契约
+src/bin/p2p-desktop.rs → desktop/agent_shell → veytrane-management
+src/bin/p2p-node.rs → 管理 CLI → veytrane-management
+                       ├─ 离线命令 → Agent 宿主
+                       └─ web → apps/web-management → veytrane-management
+src/bin/p2p-agent.rs → Agent 宿主与可选 Web 导航
+                   └─ node/composition → node/core → 节点、传输及能力包
+Live / Sub2API → 各自的产品组装 → node/composition、TCP
+src/main.rs → 独立 CLI
+           └─ signal-server → apps/signaling → 信令、短 ID 注册库和可选 Relay
 ```
 
 默认构建保留现有二进制入口、`node.json`、IPC JSON 和线上协议。Agent 可选装文件和导航。根包的部分重导出仍供现有调用方使用。
@@ -24,27 +22,29 @@ node/adapters / node/products → 以上服务与契约
 
 | 位置 | 职责与边界 |
 | --- | --- |
-| `src/node/core/` | 节点会话、配置与运行装配。底层认证、流分发及业务执行由各能力包承接。 |
-| `src/node/core/settings.rs` | `NodeSettings`、持久配置记录及核心提交参数。`CommitOptions` 不再由宿主定义，核心可独立接收配置事务。 |
-| `src/node/host/` | Agent 进程所有权、管理命令执行、配置协调、转发监听和运行恢复。 |
-| `src/node/local/` | 当前 OS 用户的节点路径、IPC socket/pipe 连接与监听；权限实现由通用存储层提供。 |
-| `src/node/api/` | 管理请求/响应、版本信息与客户端。客户端不持有 Agent 实例、身份或网络会话。 |
-| `src/node/adapters/` | 管理 CLI、独立 HTTP 网关和私有导航。Web 经本机 IPC 调用 Agent，可由 Agent 入口在同进程装配。 |
-| `src/node/products/` | Sub2API 限定用途组合及其恢复策略；复用核心与监听机制。 |
+| `src/node/core/` | 会话、连接代际、网络恢复及已认证流生命周期。根会话仍负责文件、测速与 TCP 的运行装配。各能力的执行代码由对应包持有。 |
+| `src/node/composition/` | `NodeSettings`、持久配置记录、配置到会话策略的投影，以及 TCP 转发连接适配器。 |
+| `src/node/host/` | Agent 进程所有权、IPC 服务端命令、配置 revision、请求去重、事件聚合与关停。 |
+| `crates/veytrane-management` | IPC v1 请求和响应、AgentClient、当前用户路径、Unix socket 和 Windows pipe。`node/api` 给旧 Rust 调用方转出契约和客户端，并提供根二进制版本信息。 |
+| `src/node/adapters/` | `p2p-node` 的命令编排，正常请求走 IPC，离线操作调用宿主。 |
+| `apps/web-management` | `p2p-node web` 管理页和 Agent 默认 `3001` 导航。两个入口经同一 IPC 使用 Agent。内置导航与 Agent 同进程，核心重建时导航继续运行。 |
+| `crates/veytrane-http-auth` | 旧独立管理页与节点管理页共用的回环 Host、Origin、Bearer 和令牌文件逻辑。 |
+| `src/node/products/` | Live 和 Sub2API 的独立装配、授权、容量及恢复策略，共用节点与监听辅助。 |
 | `src/desktop/agent_shell/` | 唯一 IPC 桌面及其工作台、窗口、托盘宿主。 |
 | `src/desktop/ui/` | 工作台与二级窗口共用控件、文本输入、视觉主题、品牌。无业务运行时所有权。 |
 | `src/desktop/platform/` | 桌面共用托盘、窗口隐藏/显示、展示状态；不反向引用任一窗口所有者。 |
 | `src/storage/` | 基础存储和独立 CLI 文件存储的兼容入口。 |
-| `src/discovery/`、`nat/`、`net/`、`transport/`、`relay/` | 共用的发现、打洞、连接竞速、QUIC、Relay。 |
+| `src/discovery/`、`nat/`、`net/`、`transport/`、`relay/` | 共用发现客户端、打洞、连接竞速、QUIC 和 Relay 客户端。服务端模块只在 `signaling-server` 及测试构建启用。 |
+| `apps/signaling` | `p2p_file signal-server` 的启动、端口与 TLS/Relay 参数装配。登记状态和 SQLite 位于 `src/discovery` 的服务端模块。 |
 | `src/protocol/`、`transfer/`、`tunnel/`、`admin/` | 原独立 CLI 仍在使用的协议与执行路径；不能因与 node 同名就删除。 |
 | `crates/veytrane-transport` | 身份、绑定到 QUIC 会话的握手、端点、有界原始帧和 OS 存储原语。 |
 | `crates/veytrane-node` | P2PN 协商、双向流分发、会话授权、设备容量、连接代际及活动许可。 |
 | `crates/veytrane-files` | P2PF 文件协议、文件收发、调度、限速、落盘、回执、任务库及断点恢复。 |
-| `crates/veytrane-file-policy` | 保留配置中的限速值和接收余量校验，供裁剪 Agent 读写同一份 `node.json`。 |
+| `crates/veytrane-file-policy` | 限速值、接收余量及路径批次格式校验，供配置、文件服务和桌面共用。 |
 | `crates/veytrane-speed` | 测速控制、数据流、租约及结果。 |
 | `crates/veytrane-tcp` | TCP 规则校验、流配额、监听和 QUIC 字节桥接。 |
 
-`core/settings.rs` 定义当前 `node.json`。`core/config.rs` 仍有共享规则校验、测速类型和独立核心配置读写调用；已移除旧 schema 1–10 升级、历史目录发现、通知/后台偏好及无生产调用的偏好写入接口。旧桌面导入适配器与对应 CLI / UI 已删除。
+`composition/settings.rs` 定义当前 `node.json`。宿主验证并投影策略，提交一次性持久化操作。会话 actor 在同一事务点确认连接代际、写盘并发布有效授权。`core/config.rs` 还保留共享规则校验、测速类型和会话配置读写。
 
 `core/process_tests.rs` 保留原先位于旧桌面目录的真实进程业务回归，直接依赖核心，随 node 特性测试执行，全部使用 P2PN v2 协商及统一分发器。
 
@@ -54,12 +54,14 @@ node/adapters / node/products → 以上服务与契约
 
 ```sh
 cargo build --locked --no-default-features --features node --bin p2p-agent --bin p2p-node
+cargo build --locked --no-default-features --features agent-full --bin p2p-agent --bin p2p-node
+cargo build --locked --no-default-features --features desktop-client --bin p2p-desktop
 cargo build --locked --no-default-features --features agent-base --bin p2p-agent
 cargo tree --locked --no-default-features --features agent-base -e normal,features
 cargo build --locked --no-default-features --features standalone --bin p2p_file
 ```
 
-`node` 包含完整发行的文件、测速、TCP、导航与独立命令。`agent-base` 提供节点、测速、TCP 和 IPC，运行依赖树无需文件执行包、GPUI 或 HTTP 管理。`agent-files` 增加文件能力，`agent-web` 增加同进程导航。通过 `--no-default-features` 单独构建旧命令时，显式选择 `standalone`。已有安装版命令用法沿用。
+`node` 保留完整发行组合和独立命令。`agent-full` 构建完整 Agent 和管理 CLI，排除旧 CLI、信令服务端及其 SQLite。`agent-base` 内置测速与 TCP，排除文件执行、GPUI 和 HTTP 管理。`agent-files` 增加文件能力，`agent-web` 增加同进程导航。`desktop-client` 可单独构建桌面。`standalone` 提供旧 CLI，保留原信令启动命令。Live 和 Sub2API 可用各自 feature 构建。
 
 裁剪 Agent 初始化时把 `enable_files` 设为 `false`。读取或提交明确启用文件的配置时返回能力错误，保留当前配置文件。文件命令返回 `capability_disabled`，`Tasks` 仍返回空文件列表、空预览、可空队列与测速结果。
 
@@ -69,7 +71,7 @@ cargo build --locked --no-default-features --features standalone --bin p2p_file
 | --- | --- |
 | desktop 下 29 个三行文件只转发 node 模块；多处“未来任务将接入”的注释掩盖实际依赖 | 删除转发文件，旧桌面直接导入唯一 core 实现；移除已经失去意义的模块级死代码豁免。 |
 | 默认桌面从旧 6,493 行窗口文件通配导入控件、品牌和原生后台能力 | 默认入口与旧运行时分开，共用能力归入 UI/platform，内嵌旧入口随后按单用户当前版本策略移除。 |
-| 会话依赖宿主配置协调器的 `CommitOptions` | 参数下沉到核心配置模型，协调器依赖核心契约。 |
+| 会话依赖持久配置记录 | 宿主持有持久配置文件，会话只接收当前策略和一次性持久化操作。 |
 | 通用身份锁和存储反向调用 node 的权限/文件安全函数 | 通用权限与安全文件操作移入 storage，协议相对路径校验保持同一实现和原有拒绝规则。 |
 | `nat/portmap.rs` 没有生产调用，恒定返回不支持 | 删除占位模块及伪实现测试；UPnP/NAT-PMP/PCP 仍是未实现能力。该未实现模块的 Rust 导出不再保留。 |
 | 恢复查询 DTO/访问器只有旧回归使用 | 保留为 `cfg(test)` 的回归辅助；实际启动恢复仍正常编译运行。 |
@@ -89,7 +91,7 @@ cargo build --locked --no-default-features --features standalone --bin p2p_file
 - `target/`、`release/`：已被 Git 忽略的生成物；本次不删除缓存、已安装二进制或发布包。
 - `service-navigation.html`：用户的本机服务目录模板，按 `AGENTS.md` 单次同步；不是另一个后台服务。私有凭据副本不在仓库。
 
-[交互架构图](architecture-current.html) 根据当前分层提供四个视图，节点数据维护在 `docs/architecture/architecture-map.json`。编辑数据后运行 `python3 scripts/update-architecture-map.py` 将其嵌入单文件 HTML；图离线运行，无需额外服务。历史文档中的旧源码路径可通过 Git 历史追溯。
+[节点架构图](../architecture/layer-review.html) 提供八种主题、亮暗配色和当前图的 PNG 导出。[源码索引](architecture-current.html) 提供四个可钻取视图。节点数据维护在 `docs/architecture/architecture-map.json`，编辑后用 `python3 scripts/update-architecture-map.py` 更新离线 HTML。历史文档中的旧源码路径可通过 Git 历史追溯。
 
 ## 检查与后续维护
 

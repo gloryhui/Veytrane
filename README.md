@@ -89,7 +89,7 @@ Veytrane 的常驻形态由**一个 Agent 持有节点状态，多个入口管�
 | 共享基础设施 | `discovery`、`nat`、`net`、`transport`、`relay`、`storage` | 设备发现、候选收集、连接竞速、QUIC、可选中继及安全持久化。 |
 | 专用产品组合 | `node/products` | 复用核心能力，构建权限和功能受限的 Sub2API 客户端与网关。 |
 
-**架构资料：** [可点击架构图](docs/architecture-current.html)提供系统全景、节点分层、核心内部和桌面边界四个视图，可搜索模块、查看职责并跳转源码。GitHub 不直接运行仓库中的 HTML；下载仓库后用浏览器打开该文件即可离线查看。源码边界见[仓库分层说明](docs/REPOSITORY_LAYOUT.md)，管理契约见[Agent API](docs/specs/NODE_AGENT_API.md)，设备间协议见[P2PN v2](docs/specs/NODE_WIRE.md)。
+**架构资料**　[节点架构图](architecture/layer-review.html)可切换八种主题与亮暗配色，并将当前图导出为 PNG。[可点击源码索引](docs/architecture-current.html)提供系统全景、节点分层、核心内部和桌面边界四个视图。下载仓库后可在浏览器离线查看两份 HTML。源码边界见[仓库分层说明](docs/REPOSITORY_LAYOUT.md)，管理契约见[Agent API](docs/specs/NODE_AGENT_API.md)，设备间协议见[P2PN v2](docs/specs/NODE_WIRE.md)。
 
 ### 进程与入口
 

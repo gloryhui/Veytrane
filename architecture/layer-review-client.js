@@ -10,6 +10,8 @@
   var download = document.getElementById('download');
   var status = document.getElementById('status');
   var state = { theme: 'terminal', appearance: 'dark' };
+  var exportButton;
+  var exportObserver;
 
   function isAppearance(value) {
     return value === 'light' || value === 'dark';
@@ -57,9 +59,6 @@
     darkButton.setAttribute('aria-pressed', String(state.appearance === 'dark'));
     status.textContent = label;
     iframe.title = label + ' 架构图';
-    var png = data.png[state.theme] && data.png[state.theme][state.appearance];
-    download.href = png || '#';
-    download.download = 'layer-review-' + state.theme + '-' + state.appearance + '.png';
     download.title = '导出 ' + label + ' 的 2× PNG';
     try {
       localStorage.setItem('layer-review-theme', state.theme);
@@ -69,6 +68,9 @@
 
   function render() {
     sync();
+    download.disabled = true;
+    exportButton = null;
+    if (exportObserver) exportObserver.disconnect();
     iframe.srcdoc = docFor(state.theme, state.appearance);
   }
 
@@ -81,8 +83,37 @@
   function setAppearance(appearance) {
     if (!isAppearance(appearance)) return;
     state.appearance = appearance;
-    render();
+    sync();
+    applyAppearance();
   }
+
+  function applyAppearance() {
+    var doc = iframe.contentDocument;
+    if (doc && doc.documentElement.dataset.theme === state.theme) {
+      doc.querySelector('[data-appearance-set="' + state.appearance + '"]')?.click();
+    }
+  }
+
+  iframe.addEventListener('load', function () {
+    var doc = iframe.contentDocument;
+    if (!doc || doc.documentElement.dataset.theme !== state.theme) return;
+    applyAppearance();
+    exportButton = doc.querySelector('.ctl-png');
+    var exportStatus = doc.querySelector('.ctl-status');
+    if (!exportButton || !exportStatus) return;
+    download.disabled = false;
+    exportObserver = new MutationObserver(function () {
+      if (exportStatus.textContent) status.textContent = exportStatus.textContent;
+      download.disabled = exportButton.disabled;
+    });
+    exportObserver.observe(exportButton, { attributeFilter: ['disabled'] });
+    exportObserver.observe(exportStatus, { childList: true, subtree: true, characterData: true });
+  });
+  download.addEventListener('click', function () {
+    if (!exportButton) return;
+    exportButton.click();
+    download.disabled = exportButton.disabled;
+  });
 
   select.addEventListener('change', function () {
     setTheme(select.value);

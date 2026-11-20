@@ -55,8 +55,8 @@
       "id": "web",
       "title": "Web 管理网关",
       "tag": "HTTP ADAPTER",
-      "path": "src/node/adapters/web.rs",
-      "summary": "浏览器发来的管理请求经 AgentClient 转为本地 IPC。",
+      "path": "apps/web-management/src/web.rs",
+      "summary": "apps/web-management 持有 HTTP 管理网关和导航页；请求经 AgentClient 转为本地 IPC。",
       "rules": [
         "仅监听 loopback，API 需要管理令牌。",
         "文件字节和 TCP 负载不经过管理 HTTP。"
@@ -64,37 +64,53 @@
       "parts": [
         {
           "name": "HTTP 桥接",
-          "path": "src/node/adapters/web.rs",
+          "path": "apps/web-management/src/web.rs",
           "detail": "校验请求并转发到 Agent。"
         },
         {
           "name": "内嵌管理页",
-          "path": "src/node/adapters/web.html",
+          "path": "apps/web-management/src/web.html",
           "detail": "草稿、配置提交与节点身份展示。"
+        },
+        {
+          "name": "导航管理",
+          "path": "apps/web-management/src/navigation/mod.rs",
+          "detail": "本机导航页、修订管理接口和受限远端管理通道。"
         }
       ],
       "section": "topology"
     },
     {
       "id": "products",
-      "title": "Sub2API 专用版",
+      "title": "专用产品组合",
       "tag": "PRODUCT COMPOSITION",
       "path": "src/node/products/sub2api.rs",
-      "summary": "固定客户端和隔离网关直接装配核心，使用独立身份目录。",
+      "summary": "Live 与 Sub2API 产品入口继续位于 src/node/products，直接组合节点与 TCP，不经过通用 Agent 管理 IPC。",
       "rules": [
         "不经过通用 Agent 管理 IPC。",
-        "固定服务目标，连接授权与应用账号分开。"
+        "固定服务目标，连接授权与应用账号分开。",
+        "产品路径本阶段保留在根包，不随库包迁移。"
       ],
       "parts": [
         {
-          "name": "专用组合",
+          "name": "Sub2API 组合",
           "path": "src/node/products/sub2api.rs",
           "detail": "客户端监听、网关内存 ACL 和服务就绪探测。"
         },
         {
-          "name": "恢复策略",
+          "name": "Live 组合",
+          "path": "src/node/products/live.rs",
+          "detail": "只读 WHEP 代理和固定媒体转发。"
+        },
+        {
+          "name": "业务恢复策略",
           "path": "src/node/products/recovery.rs",
           "detail": "有界重试、通道健康与重建决策。"
+        },
+        {
+          "name": "平台恢复",
+          "path": "src/node/products/platform_recovery.rs",
+          "detail": "固定产品在休眠唤醒、接口变化或核心退出后的受控重启。"
         },
         {
           "name": "专用入口",
@@ -108,8 +124,8 @@
       "id": "api",
       "title": "管理 API / 客户端",
       "tag": "CONTRACT + CLIENT",
-      "path": "src/node/api/mod.rs",
-      "summary": "所有在线管理入口共用请求、响应、超时与认证客户端。",
+      "path": "crates/veytrane-management/src/lib.rs",
+      "summary": "veytrane-management 提供 IPC v1 契约、客户端、路径和传输；根 node::api 仅保留兼容导出。",
       "rules": [
         "API 不依赖 Agent 的运行实现。",
         "命令 accepted 不等于文件已完成。"
@@ -117,13 +133,18 @@
       "parts": [
         {
           "name": "协议 DTO",
-          "path": "src/node/api/protocol.rs",
+          "path": "crates/veytrane-management/src/protocol.rs",
           "detail": "Command、Request、Response 与帧限制。"
         },
         {
           "name": "AgentClient",
-          "path": "src/node/api/client.rs",
+          "path": "crates/veytrane-management/src/client.rs",
           "detail": "经 local transport 执行请求。"
+        },
+        {
+          "name": "路径解析",
+          "path": "crates/veytrane-management/src/paths.rs",
+          "detail": "当前用户数据目录和本机管理入口。"
         },
         {
           "name": "构建信息",
@@ -138,7 +159,7 @@
       "title": "本地 IPC 与路径",
       "tag": "OS BOUNDARY",
       "path": "src/node/local/mod.rs",
-      "summary": "定位当前用户的数据目录并建立受本机身份保护的 socket / named pipe。",
+      "summary": "根 node::local 保留兼容层；路径和 socket / named pipe 实现由 veytrane-management 持有。",
       "rules": [
         "本地管理令牌与远端访问密码不同。",
         "不包含核心业务或前端窗口。"
@@ -146,17 +167,17 @@
       "parts": [
         {
           "name": "节点路径",
-          "path": "src/node/local/paths.rs",
+          "path": "crates/veytrane-management/src/paths.rs",
           "detail": "配置、令牌与 IPC 地址。"
         },
         {
           "name": "本地传输",
-          "path": "src/node/local/transport.rs",
+          "path": "crates/veytrane-management/src/transport.rs",
           "detail": "Unix socket / Windows named pipe。"
         },
         {
           "name": "私有目录权限",
-          "path": "src/storage/permissions.rs",
+          "path": "crates/veytrane-transport/src/permissions.rs",
           "detail": "当前 OS 用户权限与 Windows DACL。"
         }
       ],
@@ -185,13 +206,8 @@
         },
         {
           "name": "转发监听",
-          "path": "src/node/host/forwarding.rs",
-          "detail": "准备、切换与回收 TCP listener。"
-        },
-        {
-          "name": "托管恢复",
-          "path": "src/node/host/recovery.rs",
-          "detail": "Mac managed 模式恢复信号。"
+          "path": "src/node/composition/forwarding.rs",
+          "detail": "把 NodeControl 与会话连接注入 veytrane-tcp ForwardManager。"
         }
       ],
       "section": "operations"
@@ -201,10 +217,11 @@
       "title": "共享节点核心",
       "tag": "HEADLESS CORE",
       "path": "src/node/core/mod.rs",
-      "summary": "唯一业务运行时：会话、授权、文件、服务、测速和持久任务模型。",
+      "summary": "核心保留会话、授权、分发与投影；配置/转发装配在 composition，文件、测速和 TCP 由独立库执行。",
       "rules": [
         "不反向依赖 host、api、local、adapters、products 或 desktop。",
-        "通用 Agent 与专用版共享实现，各自持有运行时。"
+        "通用 Agent 与专用版共享实现，各自持有运行时。",
+        "文件、测速和 TCP 库不得反向引用根包或产品目录。"
       ],
       "parts": [
         {
@@ -214,8 +231,8 @@
         },
         {
           "name": "当前配置",
-          "path": "src/node/core/settings.rs",
-          "detail": "NodeSettings、ConfigRecord 和 CommitOptions。"
+          "path": "src/node/composition/settings.rs",
+          "detail": "NodeSettings、ConfigRecord 与能力装配设置。"
         },
         {
           "name": "会话编排",
@@ -269,7 +286,7 @@
       "id": "peer",
       "title": "远端对等节点",
       "tag": "REMOTE NODE",
-      "path": "src/node/core/services.rs",
+      "path": "crates/veytrane-tcp/src/services.rs",
       "summary": "远端运行同一业务核心，在接收业务流时独立检查当前授权。",
       "rules": [
         "连接通过认证不等于获得所有服务。",
@@ -278,12 +295,12 @@
       "parts": [
         {
           "name": "资源授权",
-          "path": "src/node/core/authorization.rs",
+          "path": "crates/veytrane-node/src/authorization.rs",
           "detail": "按 peer 区分文件、测速与服务权限。"
         },
         {
           "name": "服务目录",
-          "path": "src/node/core/services.rs",
+          "path": "crates/veytrane-tcp/src/services.rs",
           "detail": "用 service ID 查询并申请 TCP 流。"
         }
       ],
@@ -294,21 +311,32 @@
       "title": "信令 / 短 ID",
       "tag": "DISCOVERY",
       "path": "src/discovery/signal.rs",
-      "summary": "可选的跨网发现与打洞协调；九位短ID依赖该服务，局域网发现及已知IP直连无需使用。",
+      "summary": "客户端与共享线格式常驻 discovery；服务端 Registry/监听在 signaling-server feature 下编译，旧 p2p_file signal-server 命令继续保留。",
       "rules": [
         "直连成功时不承载文件或 TCP 业务字节。",
-        "短 ID 是寻址工具，不是访问凭据。"
+        "短 ID 是寻址工具，不是访问凭据。",
+        "正常 Agent 不链接服务端 SQLite；服务端测试仍可穿透访问模块内部。"
       ],
       "parts": [
         {
-          "name": "信令",
+          "name": "共享与客户端",
           "path": "src/discovery/signal.rs",
-          "detail": "登记、心跳、查找与交换候选。"
+          "detail": "SignalMessage、客户端登记、心跳、查找与候选交换。"
+        },
+        {
+          "name": "信令服务端",
+          "path": "src/discovery/signal/server.rs",
+          "detail": "ServerConfig、Registry、监听、TLS/Relay 装配与注册处理。"
         },
         {
           "name": "短 ID",
           "path": "src/discovery/short_id.rs",
-          "detail": "短 ID 分配和查找。"
+          "detail": "客户端可用的九位设备地址类型。"
+        },
+        {
+          "name": "短 ID 存储",
+          "path": "src/discovery/short_id_store.rs",
+          "detail": "服务端 SQLite 分配与查找。"
         }
       ],
       "section": "protocol"
@@ -342,7 +370,7 @@
       "title": "安全存储与身份",
       "tag": "FOUNDATION",
       "path": "src/storage/mod.rs",
-      "summary": "持久化、目录权限和安全路径规则下沉到通用基础设施。",
+      "summary": "身份、原子替换、目录权限与文件安全路径分属 transport 和 files 基础包。",
       "rules": [
         "不反向依赖 node 或 desktop。",
         "身份与任务所有权在上层通过锁保护。"
@@ -350,17 +378,17 @@
       "parts": [
         {
           "name": "原子替换",
-          "path": "src/storage/atomic.rs",
+          "path": "crates/veytrane-transport/src/atomic.rs",
           "detail": "区分提交前失败与提交后持久化警告。"
         },
         {
           "name": "句柄相对访问",
-          "path": "src/storage/secure_fs.rs",
+          "path": "crates/veytrane-files/src/secure_fs.rs",
           "detail": "阻止路径逃逸和链接替换。"
         },
         {
           "name": "路径约束",
-          "path": "src/storage/relative_path.rs",
+          "path": "crates/veytrane-files/src/relative_path.rs",
           "detail": "统一跨平台相对路径拒绝规则。"
         },
         {
@@ -389,8 +417,8 @@
         },
         {
           "name": "Web",
-          "path": "src/node/adapters/web.rs",
-          "detail": "HTTP 管理桥。"
+          "path": "apps/web-management/src/web.rs",
+          "detail": "HTTP 管理桥由独立 web-management 应用提供。"
         }
       ],
       "section": "topology"
@@ -463,8 +491,8 @@
       "id": "files",
       "title": "文件与目录任务",
       "tag": "CORE / FILES",
-      "path": "src/node/core/transfer.rs",
-      "summary": "持久任务、并发调度、增量预览、暂停续传与安全发布。",
+      "path": "crates/veytrane-files/src/transfer.rs",
+      "summary": "veytrane-files 持有持久任务、并发调度、增量预览、暂停续传与安全发布；根 node::core 只保留兼容导出。",
       "rules": [
         "完成以接收端持久回执为准。",
         "预览结果和 accepted 均不是完成证明。",
@@ -473,27 +501,27 @@
       "parts": [
         {
           "name": "传输执行",
-          "path": "src/node/core/transfer.rs",
+          "path": "crates/veytrane-files/src/transfer.rs",
           "detail": "文件流与任务状态机。"
         },
         {
           "name": "增量预览",
-          "path": "src/node/core/incremental.rs",
+          "path": "crates/veytrane-files/src/incremental.rs",
           "detail": "比较目录并在执行时再次校验。"
         },
         {
           "name": "任务队列",
-          "path": "src/node/core/queue.rs",
+          "path": "crates/veytrane-files/src/queue.rs",
           "detail": "并发、公平性与限流。"
         },
         {
           "name": "安全发布",
-          "path": "src/node/core/publish.rs",
+          "path": "crates/veytrane-files/src/publish.rs",
           "detail": "目录事务、碰撞备份和回执。"
         },
         {
           "name": "文件帧编码",
-          "path": "src/node/core/protocol.rs",
+          "path": "crates/veytrane-files/src/protocol.rs",
           "detail": "P2PF 有界消息、任务绑定与相对路径；节点协商由 wire.rs 独占。"
         }
       ],
@@ -503,8 +531,8 @@
       "id": "services",
       "title": "TCP 服务与转发",
       "tag": "CORE / SERVICES",
-      "path": "src/node/core/services.rs",
-      "summary": "根据 service ID 和当前 peer 权限，将 QUIC 业务流接入固定 TCP 目标。",
+      "path": "crates/veytrane-tcp/src/services.rs",
+      "summary": "veytrane-tcp 按 service ID 和当前 peer 权限接入固定目标；composition 只负责注入会话与 NodeControl。",
       "rules": [
         "长连接不持续占用服务协商配额。",
         "TCP 断开后需要新连接，不透明续接字节流。",
@@ -513,13 +541,23 @@
       "parts": [
         {
           "name": "服务控制",
-          "path": "src/node/core/services.rs",
+          "path": "crates/veytrane-tcp/src/services.rs",
           "detail": "目录与开流授权。"
         },
         {
-          "name": "TCP 搬运",
+          "name": "规则校验",
+          "path": "crates/veytrane-tcp/src/rules.rs",
+          "detail": "服务目标、允许设备与本机转发规则。"
+        },
+        {
+          "name": "转发与搬运",
+          "path": "crates/veytrane-tcp/src/forwarding.rs",
+          "detail": "ForwardManager、监听生命周期与连接配额。"
+        },
+        {
+          "name": "旧 CLI 隧道",
           "path": "src/tunnel/mod.rs",
-          "detail": "共享 TCP 字节搬运；节点开流仅由 services.rs 按服务 ID 授权。"
+          "detail": "独立 CLI 旧协议入口保留，不归通用节点产品。"
         }
       ],
       "section": "flows"
@@ -528,8 +566,8 @@
       "id": "speed",
       "title": "测速业务",
       "tag": "CORE / SPEED",
-      "path": "src/node/core/speed.rs",
-      "summary": "在授权后的独立流测量传输率、RTT 和双向结果。",
+      "path": "crates/veytrane-speed/src/runtime.rs",
+      "summary": "veytrane-speed 在授权后的独立流测量传输率、RTT 和双向结果；根 speed 仅装配。",
       "rules": [
         "测速与文件限速分别管理。",
         "业务通道可用不代表全部公网场景验收完成。"
@@ -537,8 +575,13 @@
       "parts": [
         {
           "name": "测速运行",
-          "path": "src/node/core/speed.rs",
+          "path": "crates/veytrane-speed/src/runtime.rs",
           "detail": "所有权、取消和结果快照。"
+        },
+        {
+          "name": "控制与线格式",
+          "path": "crates/veytrane-speed/src/wire.rs",
+          "detail": "固定测速消息编码和租约边界。"
         }
       ],
       "section": "flows"
@@ -547,16 +590,16 @@
       "id": "state",
       "title": "配置与任务模型",
       "tag": "CORE / STATE",
-      "path": "src/node/core/settings.rs",
-      "summary": "配置、任务模型和恢复状态属于核心契约，不依赖宿主协调器。",
+      "path": "src/node/composition/settings.rs",
+      "summary": "composition 持有 NodeSettings/ConfigRecord；任务模型、存储与恢复事实在 veytrane-files。",
       "rules": [
-        "CommitOptions 已下沉到核心。",
+        "能力库不持全局配置，宿主保持单一提交点。",
         "当前 Agent 使用 node.json；共享设置校验不再升级 schema 1–10。"
       ],
       "parts": [
         {
           "name": "节点设置",
-          "path": "src/node/core/settings.rs",
+          "path": "src/node/composition/settings.rs",
           "detail": "node.json 的 schema 和提交记录。"
         },
         {
@@ -566,8 +609,13 @@
         },
         {
           "name": "任务存储",
-          "path": "src/node/core/task_store.rs",
+          "path": "crates/veytrane-files/src/task_store.rs",
           "detail": "任务、检查点和回执。"
+        },
+        {
+          "name": "任务模型",
+          "path": "crates/veytrane-files/src/task_model.rs",
+          "detail": "持久任务事实、路径和分片位图绑定。"
         },
         {
           "name": "投影",

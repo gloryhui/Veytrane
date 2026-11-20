@@ -71,9 +71,10 @@ body {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 6px 11px; border: 1px solid var(--ui-faint); border-radius: 8px;
   background: var(--ui-panel); color: var(--ui-head);
-  text-decoration: none; white-space: nowrap;
+  font: inherit; white-space: nowrap; cursor: pointer;
 }
-.download:hover { border-color: var(--ui-accent); }
+.download:hover:not(:disabled) { border-color: var(--ui-accent); }
+.download:disabled { cursor: wait; opacity: .66; }
 .download span[aria-hidden] { color: var(--ui-accent); font-weight: 700; }
 button:focus-visible, select:focus-visible, a:focus-visible {
   outline: 2px solid var(--ui-accent);
