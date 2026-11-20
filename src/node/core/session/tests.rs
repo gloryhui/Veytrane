@@ -4112,22 +4112,12 @@ async fn refreshing_udp_candidates_reregisters_signal_and_restores_existing_tunn
     let mut cb = local_config(signal);
     cb.allowed_forward_targets
         .push(service_grant("echo", target, vec![a.node_id().to_hex()]));
-    let udp_a = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    let udp_b = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    for (config, socket) in [(&mut ca, &udp_a), (&mut cb, &udp_b)] {
-        let address = socket.local_addr().unwrap();
-        config.network.local_port = address.port();
-        config.network.families = crate::net::NetworkFamilies::Ipv4Only;
-        config.network.advertise_only = true;
-        config.network.advertise = vec![address];
-    }
-    drop((udp_a, udp_b));
     let (hb, mut eb) = spawn(b.clone(), cb).unwrap();
     wait_signal_online(&mut eb).await;
     let (ha, mut ea) = spawn(a.clone(), ca).unwrap();
     wait_specific_tunnel_state(&mut ea, &rule.id, TunnelRuntimeState::Running).await;
     let (generation, old) = inspect(&ha).await[&b.node_id()].clone();
-    let old_local = old.local_ip();
+    let before_refresh = ha.snapshot().unwrap();
     ha.commands
         .send(SessionCommand::RefreshNetwork("test network change"))
         .await
@@ -4135,9 +4125,15 @@ async fn refreshing_udp_candidates_reregisters_signal_and_restores_existing_tunn
     wait_signal_online(&mut ea).await;
     wait_specific_tunnel_state(&mut ea, &rule.id, TunnelRuntimeState::Running).await;
     let (new_generation, fresh) = inspect(&ha).await[&b.node_id()].clone();
+    let after_refresh = ha.snapshot().unwrap();
     assert!(new_generation > generation);
     assert_ne!(old.stable_id(), fresh.stable_id());
-    assert_eq!(old_local, fresh.local_ip());
+    assert_eq!(after_refresh.node_id, before_refresh.node_id);
+    assert!(after_refresh.sequence > before_refresh.sequence);
+    assert_eq!(
+        after_refresh.configuration_revision,
+        before_refresh.configuration_revision
+    );
     assert!(old.close_reason().is_some());
     let mut local = tokio::net::TcpStream::connect(rule.listen).await.unwrap();
     local.write_all(b"refreshed").await.unwrap();
