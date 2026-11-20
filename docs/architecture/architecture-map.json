@@ -45,7 +45,7 @@
       "parts": [
         {
           "name": "CLI 适配",
-          "path": "src/node/adapters/cli.rs",
+          "path": "apps/node-cli/src/commands.rs",
           "detail": "解析命令并调用管理客户端。"
         }
       ],
@@ -412,7 +412,7 @@
       "parts": [
         {
           "name": "管理 CLI",
-          "path": "src/node/adapters/cli.rs",
+          "path": "apps/node-cli/src/commands.rs",
           "detail": "命令行适配。"
         },
         {

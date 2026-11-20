@@ -92,6 +92,9 @@ def violations(root):
         if parts[:2] == ("apps", "standalone-cli"):
             reject(r"\bp2p_file::(?:node|desktop)\b|\bp2p_file::\s*\{",
                    "standalone CLI must use the standalone protocols and transport")
+        if parts[:2] == ("apps", "node-cli"):
+            reject(r"\bcrate::node::(?!host::configuration\b)(?:\w+|\s*\{)|\bcrate::desktop\b",
+                   "management CLI must use IPC and the local configuration operations")
         if parts[1:3] == ("desktop", "agent_shell") or relative.as_posix() == "src/desktop/agent_shell.rs":
             reject(r"\blegacy\s*::|\bDesktopShell\b", "Agent desktop must not borrow the embedded legacy runtime")
             reject(r"crate::node::(?:core|host|products)::", "Agent desktop must use management contracts and shared validation")

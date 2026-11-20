@@ -1,3 +1,3 @@
-//! CLI and HTTP entry points over the node APIs.
+//! Compatibility path for the management CLI.
 
 pub mod cli;
