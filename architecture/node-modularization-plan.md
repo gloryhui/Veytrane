@@ -165,14 +165,18 @@ Veytrane 的核心是可信节点之间建立、维持和恢复连接的机制�
 ### S6 施工记录（2026-11-20）
 
 - `9878798`、`2dc4686` 拆开短设备 ID 与 SQLite 注册，独立 `signaling-server` feature 持有服务端注册、TLS 监听和 Relay，沿用 `p2p_file signal-server`。发现、信令以及 TLS 共 76 项，Relay 24 项，独立 CLI TLS 进程测试通过。
-- `b1a3c68`、`ee14ab2` 保留 `node` 与 `gui` 的原组合，新增 `agent-full` 和 `desktop-client`。Live、Sub2API 可单独构建。桌面依赖 IPC 客户端与纯校验，独立桌面编译通过。Linux、macOS、Windows 原包装脚本分别构建 Agent/CLI 和桌面，macOS 本机通过包装脚本语法与 8 项归档检查。实机打包与跨平台窗口仍待验证。
+- `b1a3c68`、`ee14ab2` 保留 `node` 与 `gui` 的原组合，新增 `agent-full` 和 `desktop-client`。Live、Sub2API 可单独构建。桌面依赖 IPC 客户端与纯校验，独立桌面编译通过。Linux、macOS、Windows 原包装脚本分别构建 Agent/CLI 和桌面，macOS 本机通过包装脚本语法与 8 项归档检查。
 - `scripts/check-architecture.py` 检查源码和生产 Cargo 依赖。`agent-base` 内置 TCP 与测速，排除文件运行包、Web、GPUI 和 SQLite；`agent-full` 包含 Web 和文件，排除 GPUI 和信令服务端 SQLite。独立桌面、Live 和 Sub2API 均排除文件执行。实际依赖验证以脚本中的展开组合为准。
 - `84f97e8` 将独立 CLI 进程测试改为动态回环端口。macOS 上 IPv4、IPv6 和强制 Relay 均通过，含 TCP 并发、测速、文件哈希和重新连接。`5cce30d` 将信令服务端、Live 和 Sub2API 的装配移入 `apps/` 各目录，并保留八个根发布入口。完整组合八个目标通过编译，三个管理相关二进制的实际 `--build-info` 均能读取。
 - `1f60754`、`07fc4ad` 验证双裁剪 Agent、TCP+测速裁剪端对完整版、仅 TCP 端对完整版、仅基础能力端对完整版。前两种完成 30 秒测速、并行 TCP 与重连。裸节点仍能认证和重连，保存的转发不会开监听，未协商的目录、测速和文件命令返回拒绝。`2fe610c` 验证两个 IPC 客户端并行请求不同任务，各自得到原接收位置和调整后的接收位置。
 - `a7f9e9c` 用 `0b0d77b` Agent 实际传输并生成旧任务。裁剪 Agent 在停用期间保留任务库原始字节及收到的文件。完整版重新启用后可按原 ID 查到已完成任务。运行 `file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage` 可用 `VEYTRANE_TEST_MINIMAL_AGENT` 指定独立裁剪版，`VEYTRANE_TEST_AGENT_MIX` 选择 `minimal-both`、`minimal-client-full-server`、`tcp-client-full-server` 或 `bare-client-full-server`。运行 `completed_file_task_survives_files_disabled_then_full_reenable` 可加 `VEYTRANE_TEST_BASELINE_AGENT` 指定施工前二进制。
 - macOS 上 `cargo test --locked --offline --test node_agent_process` 的 9 项测试通过。最终在 `5a2a4fe` 运行 `scripts/node-core-e2e.py`，14 个场景通过并采集 21 条进程证据。真实发布中断恢复覆盖 10 个步骤。`514527d` 的生产依赖检查在 Cargo 默认和离线两种模式分别通过。
 - [现行交互图](layer-review.html) 的八主题、亮暗状态与 PNG 按钮完成生成和静态核验。浏览器审批拒绝了打开本地架构图的操作，点击、视觉布局及实际下载尚待确认。
-- Intel macOS 的 Agent/管理 CLI 和 Windows GNU 的管理包通过交叉编译检查。Windows 命名管道 ACL、接收预算、Linux/Windows 实机打包与 GPUI 交互仍待验证。macOS 运行的两个 Windows 宿主管理路径模拟错误也在施工前 `0b0d77b` 复现。专用 Sub2API 隔离用例通过，部署用例按设计跳过。
+- 从干净的 `2aad410` 工作树在 Apple Silicon 执行真实发布包装。ZIP 包含桌面、Agent 和管理 CLI，三者源码提交一致，两个管理端报告 IPC v1。ZIP SHA-256 为 `2fc71cf3731d86831043240d7957faeda88f3a5f66f25b02d55e71fdf31bdb44`。候选包为 ad hoc 签名且未公证。包内 Agent 通过隔离导航测试，核心重建期间连续 11 次读取页面成功。包内 GPUI 实际打开工作台、设置、诊断并读到同一隔离节点，退出验证另行记录。
+- `dc14b5f` 将 GPUI 退出快捷键接到既有托盘退出逻辑。Apple Silicon 使用 `desktop-client` 原生构建，经隔离 `.app` 包装激活主窗，按 `⌘Q` 后桌面进程自行结束。IPC 复查 Agent 的代际与 revision 保持原值。随后通过 IPC 停止隔离 Agent 并核对进程所有权已释放。桌面自身退出码未采集。
+- `6a4a8d1` 的 3 条 BI 分发器回归通过，覆盖待分类流上限、慢头超时、业务队列独立上限和容量归还。`d465060` 增加真实 Windows 管道初始与后继实例的 ACL 验证、同用户往返与释放验证。管理包在 Windows GNU 目标通过测试编译。
+- `bbcc4f9`、`3baf0e9` 将完整发布包、原生导航、Linux Unix IPC 和 X11、Windows 命名管道与接收存储验收纳入 GPUI 工作流。首次运行 `44750655733` 在 Windows 遇到 Cargo 元数据解码失败，Apple Silicon runner 已退役。`f82f4f3` 明确使用 UTF-8，`e3ae2f7` 更新为 `macos-15` ARM64。复验为 `44751160046`。跨平台结论按各 job 实际完成的步骤记录。
+- Intel macOS 的 Agent/管理 CLI 已通过交叉编译检查。macOS 上两个 Windows 宿主管理路径的模拟用例在施工前 `0b0d77b` 同样失败。专用 Sub2API 隔离用例通过，部署用例按设计跳过。
 - 根包 `src/node/core/session.rs` 仍负责静态能力装配。对新协议能力需增加协商位、流编号与处理器注册。独立 Agent 的进一步编译裁剪目前针对文件、Web 和信令服务端，TCP 和测速使用各自的运行启停条件。
 
 ## 7. 新增或移除业务时的操作示例
