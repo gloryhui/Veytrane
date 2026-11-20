@@ -30,6 +30,46 @@ pub(super) struct Workbench {
     selected: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct AgentCapabilities {
+    pub(super) files: bool,
+    pub(super) speed: bool,
+}
+
+fn status_capabilities(state: &Value, task_page: &Value) -> AgentCapabilities {
+    if let Some(explicit) = state.get("capabilities").and_then(Value::as_object) {
+        return AgentCapabilities {
+            files: explicit.get("files").and_then(Value::as_bool) == Some(true),
+            speed: explicit.get("speed").and_then(Value::as_bool) == Some(true),
+        };
+    }
+    let tasks_loaded = task_page.is_object();
+    AgentCapabilities {
+        files: !(tasks_loaded && task_page["queue"].is_null()),
+        speed: true,
+    }
+}
+
+fn file_action_ready(
+    capabilities: AgentCapabilities,
+    peer_connected: bool,
+    speed_running: bool,
+) -> bool {
+    capabilities.files && peer_connected && !speed_running
+}
+
+fn speed_action_ready(capabilities: AgentCapabilities, peer_connected: bool) -> bool {
+    capabilities.speed && peer_connected
+}
+
+fn speed_start_ready(
+    capabilities: AgentCapabilities,
+    peer_connected: bool,
+    speed_running: bool,
+) -> bool {
+    speed_action_ready(capabilities, peer_connected) && !speed_running
+}
+
 fn set_text(input: &Entity<TextField>, text: String, cx: &mut Context<AgentShell>) {
     input.update(cx, |field, cx| {
         field.content = text.into();
@@ -193,7 +233,13 @@ impl AgentShell {
             })
             .unwrap_or(Page::Home);
         let fields = match page {
-            Page::Home => vec![&self.peer, &self.password, &self.ui.search],
+            Page::Home => {
+                let mut fields = vec![&self.peer, &self.password];
+                if self.capabilities().files {
+                    fields.push(&self.ui.search);
+                }
+                fields
+            }
             Page::Settings => vec![
                 &self.local_password,
                 &self.ui.upload,
@@ -250,6 +296,18 @@ impl AgentShell {
     }
 
     fn can_send_files(&self, cx: &Context<Self>) -> bool {
+        file_action_ready(
+            self.capabilities(),
+            self.peer_connected(cx),
+            self.speed_running(),
+        )
+    }
+
+    pub(super) fn capabilities(&self) -> AgentCapabilities {
+        status_capabilities(&self.state, &self.ui.task_page)
+    }
+
+    fn peer_connected(&self, cx: &Context<Self>) -> bool {
         self.available()
             && self.selected_agent_peer(cx).is_some_and(|peer| {
                 let state = &self.state["node"]["peers"][&peer];
@@ -257,11 +315,14 @@ impl AgentShell {
                     && (state["outbound_password"].as_bool() == Some(true)
                         || state["outbound_trusted"].as_bool() == Some(true))
             })
-            && !self.ui.task_page["speeds"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .any(|speed| speed["state"].as_str() == Some("Running"))
+    }
+
+    fn speed_running(&self) -> bool {
+        self.ui.task_page["speeds"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|speed| speed["state"].as_str() == Some("Running"))
     }
 
     fn connect_from_home(&mut self, cx: &mut Context<Self>) {
@@ -467,7 +528,8 @@ impl AgentShell {
             .map(|id| id.display())
             .unwrap_or_else(|| "等待信令分配设备 ID".into());
         let enabled = self.available();
-        let connected = self.can_send_files(cx);
+        let connected = self.peer_connected(cx);
+        let capabilities = self.capabilities();
         let mut card = ui_components::card()
             .h(px(224.))
             .p(px(12.))
@@ -530,17 +592,19 @@ impl AgentShell {
                         })),
                     ),
             )
-            .child(input_frame(&self.password))
-            .child(
+            .child(input_frame(&self.password));
+        if capabilities.speed {
+            card = card.child(
                 ui_components::compact_secondary_button("速度测试", connected).on_mouse_up(
                     MouseButton::Left,
                     cx.listener(move |s, _, _, cx| {
-                        if connected {
+                        if s.peer_connected(cx) {
                             s.open_panel(Page::Speed, cx);
                         }
                     }),
                 ),
             );
+        }
         if let Some(peer) = self.selected_agent_peer(cx) {
             let state = &self.state["node"]["peers"][&peer];
             let trusted = self.draft.as_ref().is_some_and(|d| {
@@ -1220,6 +1284,9 @@ impl AgentShell {
     }
 
     pub(super) fn home_speed(&self, cx: &Context<Self>) -> gpui::Div {
+        let capabilities = self.capabilities();
+        let connected = self.peer_connected(cx);
+        let any_speed_running = self.speed_running();
         let selected = self.selected_agent_peer(cx);
         let speed = self.ui.task_page["speeds"]
             .as_array()
@@ -1246,7 +1313,7 @@ impl AgentShell {
                                 AgentSpeedDirection::Upload => "仅上传",
                                 AgentSpeedDirection::Download => "仅下载",
                             },
-                            !running,
+                            capabilities.speed && !running,
                         )
                         .on_mouse_up(
                             MouseButton::Left,
@@ -1267,7 +1334,7 @@ impl AgentShell {
                     .child(
                         ui_components::secondary_button(
                             format!("{} 秒", self.ui.speed_seconds),
-                            !running,
+                            capabilities.speed && !running,
                         )
                         .on_mouse_up(
                             MouseButton::Left,
@@ -1292,7 +1359,13 @@ impl AgentShell {
                             } else {
                                 "开始测速"
                             },
-                            self.available() && (running || self.can_send_files(cx)),
+                            self.available()
+                                && (running
+                                    || speed_start_ready(
+                                        self.capabilities(),
+                                        connected,
+                                        any_speed_running,
+                                    )),
                         )
                         .on_click(cx.listener(move |s, _, _, cx| {
                             if let Some(speed) = &active {
@@ -1309,7 +1382,12 @@ impl AgentShell {
                                         cx,
                                     );
                                 }
-                            } else if let Some(peer) = s.selected_agent_peer(cx) {
+                            } else if speed_start_ready(
+                                s.capabilities(),
+                                s.peer_connected(cx),
+                                s.speed_running(),
+                            ) && let Some(peer) = s.selected_agent_peer(cx)
+                            {
                                 s.send(
                                     Command::StartSpeed {
                                         peer,
@@ -1341,9 +1419,10 @@ impl AgentShell {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
+        let files = self.capabilities().files;
         let drop_enabled = self.can_send_files(cx);
-        let tasks = self.home_tasks(cx);
-        div()
+        let tasks = files.then(|| self.home_tasks(cx));
+        let mut page = div()
             .size_full()
             .id("agent-workbench")
             .overflow_y_scroll()
@@ -1379,8 +1458,6 @@ impl AgentShell {
                 }
             }))
             .on_action(cx.listener(|s, _: &ConnectPeer, _, cx| s.connect_from_home(cx)))
-            .on_action(cx.listener(|s, _: &ChooseFiles, _, cx| s.home_pick(false, false, cx)))
-            .on_action(cx.listener(|s, _: &ChooseFolder, _, cx| s.home_pick(true, false, cx)))
             .on_action(cx.listener(|s, _: &ToggleSettings, _, cx| {
                 s.open_panel(Page::Settings, cx);
             }))
@@ -1391,34 +1468,42 @@ impl AgentShell {
                 s.focus_workbench_field(true, window, cx)
             }))
             .child(self.home_header(cx))
-            .when(!self.attached, |page| page.child(self.first_run_card(cx)))
-            .child(
-                div()
-                    .flex()
-                    .gap_3()
-                    .flex_shrink_0()
-                    .child(div().flex_1().min_w_0().child(self.home_connection(cx)))
-                    .child(div().flex_1().min_w_0().child(self.home_receive(cx))),
-            )
-            .child(tasks)
-            .when(!self.previews.is_empty(), |page| {
-                page.child(
-                    ui_components::secondary_button("查看待确认的目录预览", true).on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(|s, _, _, cx| s.open_panel(Page::DirectoryPreview, cx)),
-                    ),
-                )
-            })
-            .child(
-                div()
-                    .w_full()
-                    .p(px(10.))
-                    .rounded_md()
-                    .bg(rgb(ui_theme::PRIMARY_SOFT))
-                    .text_xs()
-                    .text_color(rgb(ui_theme::TEXT_SECONDARY))
-                    .child(self.message.clone()),
-            )
+            .when(!self.attached, |page| page.child(self.first_run_card(cx)));
+        if files {
+            page = page
+                .on_action(cx.listener(|s, _: &ChooseFiles, _, cx| s.home_pick(false, false, cx)))
+                .on_action(cx.listener(|s, _: &ChooseFolder, _, cx| s.home_pick(true, false, cx)));
+        }
+        let mut row = div()
+            .flex()
+            .gap_3()
+            .flex_shrink_0()
+            .child(div().flex_1().min_w_0().child(self.home_connection(cx)));
+        if files {
+            row = row.child(div().flex_1().min_w_0().child(self.home_receive(cx)));
+        }
+        page = page.child(row);
+        if let Some(tasks) = tasks {
+            page = page.child(tasks);
+        }
+        if files && !self.previews.is_empty() {
+            page = page.child(
+                ui_components::secondary_button("查看待确认的目录预览", true).on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(|s, _, _, cx| s.open_panel(Page::DirectoryPreview, cx)),
+                ),
+            );
+        }
+        page.child(
+            div()
+                .w_full()
+                .p(px(10.))
+                .rounded_md()
+                .bg(rgb(ui_theme::PRIMARY_SOFT))
+                .text_xs()
+                .text_color(rgb(ui_theme::TEXT_SECONDARY))
+                .child(self.message.clone()),
+        )
     }
 
     pub(super) fn home_diagnostics(&self, cx: &Context<Self>) -> gpui::Div {
@@ -1776,5 +1861,66 @@ mod tests {
         assert!(!matches_task(&task, "home", 1, 3, Some("abc"), &devices));
         assert!(!matches_task(&task, "home", 2, 1, Some("abc"), &devices));
         assert!(!matches_task(&task, "home", 2, 3, Some("other"), &devices));
+    }
+
+    #[test]
+    fn explicit_capabilities_split_files_and_speed_without_connection_coupling() {
+        let capabilities = status_capabilities(
+            &json!({"capabilities":{"files":false,"speed":true,"tcp":true}}),
+            &json!({"queue":{}}),
+        );
+        assert_eq!(
+            capabilities,
+            AgentCapabilities {
+                files: false,
+                speed: true
+            }
+        );
+        assert!(!file_action_ready(capabilities, true, false));
+        assert!(speed_action_ready(capabilities, true));
+
+        let capabilities = status_capabilities(
+            &json!({"capabilities":{"files":true,"speed":false,"tcp":true}}),
+            &json!({"queue":{}}),
+        );
+        assert!(file_action_ready(capabilities, true, false));
+        assert!(!file_action_ready(capabilities, true, true));
+        assert!(!speed_action_ready(capabilities, true));
+    }
+
+    #[test]
+    fn legacy_status_defaults_full_and_uses_loaded_tasks_queue_for_old_trimmed_agents() {
+        let full = status_capabilities(&json!({}), &json!({"queue":{"pending":0}}));
+        assert_eq!(
+            full,
+            AgentCapabilities {
+                files: true,
+                speed: true
+            }
+        );
+        let before_tasks = status_capabilities(&json!({}), &Value::Null);
+        assert!(before_tasks.files && before_tasks.speed);
+        let trimmed = status_capabilities(&json!({}), &json!({"queue":null}));
+        assert_eq!(
+            trimmed,
+            AgentCapabilities {
+                files: false,
+                speed: true
+            }
+        );
+        assert!(!file_action_ready(trimmed, true, false));
+        assert!(speed_action_ready(trimmed, true));
+    }
+
+    #[test]
+    fn any_running_speed_blocks_a_second_start_without_restoring_file_actions() {
+        let capabilities = AgentCapabilities {
+            files: false,
+            speed: true,
+        };
+        assert!(speed_start_ready(capabilities, true, false));
+        assert!(!speed_start_ready(capabilities, true, true));
+        assert!(!file_action_ready(capabilities, true, false));
+        assert!(!file_action_ready(capabilities, true, true));
     }
 }

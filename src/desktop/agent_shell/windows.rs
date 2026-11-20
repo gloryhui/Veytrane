@@ -209,6 +209,12 @@ fn open_panel_window(shell: Entity<AgentShell>, page: Page, cx: &mut App) {
 
 impl AgentShell {
     pub(super) fn open_panel(&mut self, page: Page, cx: &mut Context<Self>) {
+        let capabilities = self.capabilities();
+        if (page == Page::Speed && !capabilities.speed)
+            || (matches!(page, Page::TaskDetails | Page::DirectoryPreview) && !capabilities.files)
+        {
+            return;
+        }
         let shell = cx.entity();
         // open_window immediately renders its root. Defer the entire operation
         // until the current model and source window borrows have ended.
