@@ -30,6 +30,8 @@ pub mod task_model;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod task_recovery;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
+pub mod task_snapshot;
+#[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod task_store;
 
 use veytrane_transport::error;

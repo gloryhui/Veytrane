@@ -8,6 +8,14 @@ use crate::{
 };
 use std::fs;
 
+fn ui_snapshot(
+    service: &TransferService,
+) -> crate::error::Result<crate::node::core::snapshot::Snapshot> {
+    service
+        .file_snapshot()
+        .map(crate::node::core::snapshot::Snapshot::from_file)
+}
+
 async fn write_speed_frame<W>(writer: &mut W, request_id: u64, control: protocol::SpeedControl)
 where
     W: tokio::io::AsyncWrite + Unpin,
@@ -770,7 +778,7 @@ async fn cancelled_or_expired_receive_rpc_leaves_a_manually_recoverable_task() {
                 TaskState::Interrupted
             }
         );
-        assert!(pair.b.ui_snapshot().unwrap().tasks[0].can_continue());
+        assert!(ui_snapshot(&pair.b).unwrap().tasks[0].can_continue());
         assert!(!pair.root.join("b-receive/文件.bin").exists());
         pair.shutdown().await;
     }
@@ -3400,14 +3408,14 @@ async fn task_details_locator_rejects_replaced_source_parent_and_receive_leaf_li
 async fn ui_projection_tracks_real_pause_and_receipts_without_rebinding_or_false_completion() {
     let pair = Pair::new().await;
     let (id, bytes) = pair.select(4096).await;
-    let snapshot = pair.a.ui_snapshot().unwrap();
+    let snapshot = ui_snapshot(&pair.a).unwrap();
     let row = snapshot.tasks.iter().find(|r| r.id == id).unwrap();
     assert_eq!(row.peer, pair.ib);
     assert_eq!(row.state, TaskState::Queued);
     assert_eq!(row.confirmed, 0);
     assert!(row.can_pause());
     pair.a.pause_task(id.clone()).await.unwrap();
-    let snapshot = pair.a.ui_snapshot().unwrap();
+    let snapshot = ui_snapshot(&pair.a).unwrap();
     let row = snapshot.tasks.iter().find(|r| r.id == id).unwrap();
     assert_eq!(row.state, TaskState::Paused);
     assert_eq!(row.peer, pair.ib);
@@ -3428,7 +3436,7 @@ async fn ui_projection_tracks_real_pause_and_receipts_without_rebinding_or_false
         .await
         .unwrap();
     for service in [&pair.a, &pair.b] {
-        let snapshot = service.ui_snapshot().unwrap();
+        let snapshot = ui_snapshot(service).unwrap();
         let row = snapshot.tasks.iter().find(|r| r.id == id).unwrap();
         assert_eq!(row.state, TaskState::Completed);
         assert_eq!(row.confirmed, bytes.len() as u64);

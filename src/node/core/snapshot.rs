@@ -2,11 +2,12 @@
 use crate::identity::NodeId;
 use crate::node::core::queue::QueueMetrics;
 use crate::node::core::speed::{SpeedSnapshot, SpeedStatus};
-use crate::node::core::task_model::{TaskDirection, TaskId, TaskRecord, TaskState};
+use crate::node::core::task_model::{TaskDiagnostic, TaskDirection, TaskId, TaskRecord, TaskState};
 use std::{
     collections::{HashMap, HashSet},
     time::{Duration, Instant},
 };
+use veytrane_files::task_snapshot::{FileSnapshot, FileTaskSnapshot};
 /// Bounded UI diagnostics follow the same generation fence as peer lifecycle.
 pub fn project_peer_path(
     paths: &mut HashMap<NodeId, (u64, String)>,
@@ -54,42 +55,28 @@ pub struct TaskRow {
     pub can_delete_file: bool,
 }
 impl TaskRow {
-    pub fn from_record(r: &TaskRecord, rate: f64) -> Self {
-        let total = r.manifest_identity().total_bytes();
+    pub fn from_file(task: FileTaskSnapshot) -> Self {
+        let retryable = task.diagnostic.is_some_and(TaskDiagnostic::is_retryable);
+        let diagnostic = task.diagnostic.map(TaskDiagnostic::safe_message);
         Self {
-            id: r.task_id().clone(),
-            group: r.group_id().cloned(),
-            name: r.relative_path().map(str::to_owned).unwrap_or_else(|| {
-                r.local_path()
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned()
-            }),
-            peer: NodeId::from_hex(r.peer_id().as_str()).expect("validated persisted peer"),
-            direction: r.direction(),
-            state: r.state(),
-            total,
-            confirmed: if r.state() == TaskState::Completed {
-                total
-            } else {
-                r.progress_hint()
-                    .map_or(0, |p| p.verified_bytes())
-                    .min(total)
-            },
-            rate: if r.state() == TaskState::Transferring {
-                rate.max(0.)
-            } else {
-                0.
-            },
-            diagnostic: r.diagnostic().map(|d| d.safe_message()),
-            auto_waiting: false,
-            retryable: r.diagnostic().is_some_and(|d| d.is_retryable()),
-            can_delete_file: r.direction() == TaskDirection::Receive
-                && r.state() == TaskState::Completed
-                && r.file_details()
-                    .is_some_and(|details| details.receipt_committed),
+            id: task.id,
+            group: task.group,
+            name: task.name,
+            peer: task.peer,
+            direction: task.direction,
+            state: task.state,
+            total: task.total,
+            confirmed: task.confirmed,
+            rate: task.rate,
+            diagnostic,
+            retryable,
+            auto_waiting: task.auto_waiting,
+            can_delete_file: task.can_delete_file,
         }
+    }
+
+    pub fn from_record(record: &TaskRecord, rate: f64) -> Self {
+        Self::from_file(FileTaskSnapshot::from_record(record, rate, false))
     }
     pub fn percent(&self) -> f64 {
         if self.total == 0 {
@@ -190,6 +177,14 @@ pub struct Snapshot {
     pub queue: QueueMetrics,
 }
 impl Snapshot {
+    pub fn from_file(file: FileSnapshot) -> Self {
+        Self {
+            space: file.space,
+            tasks: file.tasks.into_iter().map(TaskRow::from_file).collect(),
+            queue: file.queue,
+        }
+    }
+
     pub fn list(&self, expanded: &HashSet<TaskId>) -> Vec<ListRow> {
         self.filtered_list(expanded, &TaskFilter::default(), &[])
     }

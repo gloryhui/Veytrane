@@ -26,6 +26,7 @@ use tokio::{
     sync::{Semaphore, mpsc, watch},
     task::{JoinHandle, JoinSet},
 };
+use veytrane_files::task_snapshot::{FileSnapshot, FileTaskSnapshot};
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const PAUSE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -1652,9 +1653,7 @@ impl TransferService {
             .map_err(|_| disk::failure("任务库锁不可用"))?;
         crate::node::core::task_details::reveal(store.list(), selection)
     }
-    /// Called only on GPUI's background executor. Copy small display fields,
-    /// never chunk manifests, while holding the store reader. No UI disk/locks.
-    pub(crate) fn ui_snapshot(&self) -> Result<crate::node::core::snapshot::Snapshot> {
+    pub(crate) fn file_snapshot(&self) -> Result<FileSnapshot> {
         let now = self.monotonic_ms();
         let mut tasks = {
             let store = self
@@ -1672,20 +1671,22 @@ impl TransferService {
                     let rate = rates.get(record.task_id()).map_or(0.0, |r| {
                         r.bytes_per_second(now, record.state() == TaskState::Transferring)
                     });
-                    (record.created_at_unix_ms(), {
-                        let mut row =
-                            crate::node::core::snapshot::TaskRow::from_record(record, rate);
-                        row.auto_waiting = recovery.pending(record.task_id());
-                        row
-                    })
+                    (
+                        record.created_at_unix_ms(),
+                        FileTaskSnapshot::from_record(
+                            record,
+                            rate,
+                            recovery.pending(record.task_id()),
+                        ),
+                    )
                 })
                 .collect::<Vec<_>>();
             tasks
         };
         tasks.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)));
-        Ok(crate::node::core::snapshot::Snapshot {
+        Ok(FileSnapshot {
             space: self.receive_space.summary(),
-            tasks: tasks.into_iter().map(|(_, row)| row).collect(),
+            tasks: tasks.into_iter().map(|(_, task)| task).collect(),
             queue: self.queue_metrics(),
         })
     }

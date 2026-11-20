@@ -252,7 +252,9 @@ fn actor(root: PathBuf) {
                 Ok(json!(true))
             }
             "snapshot" => {
-                let snap = service.ui_snapshot().map_err(|e| e.to_string())?;
+                let snap = super::snapshot::Snapshot::from_file(
+                    service.file_snapshot().map_err(|e| e.to_string())?,
+                );
                 let tasks=snap.tasks.iter().map(|t|json!({"id":t.id.as_str(),"name":t.name,"peer":t.peer.to_hex(),"state":format!("{:?}",t.state),"confirmed":t.confirmed,"total":t.total,"rate":t.rate,"diagnostic":t.diagnostic,"retryable":t.retryable})).collect::<Vec<_>>();
                 Ok(
                     json!({"node":identity.node_id().to_hex(),"configured":network.is_some(),"signal_online":online,"receive_root":draft.receive_directory,"peers":peers.iter().map(|(p,(_,s))|(p.to_hex(),s.clone())).collect::<HashMap<_,_>>(),"tasks":tasks,"limit":snap.queue.limit,"pending":snap.queue.pending,"active":snap.queue.active_files,"gated":gated,"diagnostics":diagnostics}),

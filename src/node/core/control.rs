@@ -473,7 +473,11 @@ impl NodeControl {
         self.control
             .transfer
             .as_ref()
-            .map(|service| service.ui_snapshot())
+            .map(|service| {
+                service
+                    .file_snapshot()
+                    .map(crate::node::core::snapshot::Snapshot::from_file)
+            })
             .transpose()
     }
     pub(crate) fn has_file_service(&self) -> bool {
