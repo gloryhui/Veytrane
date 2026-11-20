@@ -175,9 +175,11 @@ Veytrane 的核心是可信节点之间建立、维持和恢复连接的机制�
 - 从干净的 `2aad410` 工作树在 Apple Silicon 执行真实发布包装。ZIP 包含桌面、Agent 和管理 CLI，三者源码提交一致，两个管理端报告 IPC v1。ZIP SHA-256 为 `2fc71cf3731d86831043240d7957faeda88f3a5f66f25b02d55e71fdf31bdb44`。候选包为 ad hoc 签名且未公证。包内 Agent 通过隔离导航测试，核心重建期间连续 11 次读取页面成功。包内 GPUI 实际打开工作台、设置、诊断并读到同一隔离节点，退出验证另行记录。
 - `dc14b5f` 将 GPUI 退出快捷键接到既有托盘退出逻辑。Apple Silicon 使用 `desktop-client` 原生构建，经隔离 `.app` 包装激活主窗，按 `⌘Q` 后桌面进程自行结束。IPC 复查 Agent 的代际与 revision 保持原值。随后通过 IPC 停止隔离 Agent 并核对进程所有权已释放。桌面自身退出码未采集。
 - `6a4a8d1` 的 3 条 BI 分发器回归通过，覆盖待分类流上限、慢头超时、业务队列独立上限和容量归还。`d465060` 增加真实 Windows 管道初始与后继实例的 ACL 验证、同用户往返与释放验证。管理包在 Windows GNU 目标通过测试编译。
-- `bbcc4f9`、`3baf0e9` 将完整发布包、原生导航、Linux Unix IPC 和 X11、Windows 命名管道与接收存储验收纳入 GPUI 工作流。首次运行 `44750655733` 在 Windows 遇到 Cargo 元数据解码失败，Apple Silicon runner 已退役。`f82f4f3` 明确使用 UTF-8，`e3ae2f7` 更新为 `macos-15` ARM64。复验为 `44751160046`。跨平台结论按各 job 实际完成的步骤记录。
+- `bbcc4f9`、`3baf0e9` 将完整发布包、原生导航、Linux Unix IPC 和 X11、Windows 命名管道与接收存储验收纳入 GPUI 工作流。首次运行 `44750655733` 在 Windows 遇到 Cargo 元数据解码失败，Apple Silicon runner 已退役。`f82f4f3` 明确使用 UTF-8，`e3ae2f7` 更新为 `macos-15` ARM64。
+- 复验 `44751160046` 的 macOS Intel、Apple Silicon、Windows 和 Linux 均通过原生导航和隔离核心重建。Windows Server 2022 另通过命名管道及接收存储步骤。Linux 跨 UID 脚本的 `nobody` 无权穿越 runner 私有目录执行二进制。`ce1df5a` 改为在脚本原有隔离目录内执行，待原生复验。以上是工作流已完成步骤，打包结论单独记录。
 - Intel macOS 的 Agent/管理 CLI 已通过交叉编译检查。macOS 上两个 Windows 宿主管理路径的模拟用例在施工前 `0b0d77b` 同样失败。专用 Sub2API 隔离用例通过，部署用例按设计跳过。
-- 根包 `src/node/core/session.rs` 仍负责静态能力装配。对新协议能力需增加协商位、流编号与处理器注册。独立 Agent 的进一步编译裁剪目前针对文件、Web 和信令服务端，TCP 和测速使用各自的运行启停条件。
+- `383dc9a` 将生产服务构造移到 `node/composition/runtime.rs`。Agent、Live 与 Sub2API 通过该入口启动，传入既有的共享活动许可和帧预算。原内部 Rust 入口迁到组合层，现有二进制入口沿用。`9b654cc`、`c8f24e6` 让会话只为已协商且已安装能力注册有界队列，保留裸会话的拒绝及取消行为。七条分发器用例以及四组裁剪版/完整版实际互联与重连通过。
+- `47e542e` 将 `Tasks` 的 v1 JSON 投影移到 IPC 宿主直接使用文件包事实。原字段、分页及可用操作通过文件、两客户端定位及无文件测速组合回归。根会话仍协调固定的三类能力调用、生命周期及授权；TCP 和测速独立运行启停，Agent 编译裁剪针对文件、Web 和信令服务端。
 
 ## 7. 新增或移除业务时的操作示例
 
