@@ -101,7 +101,7 @@ def metadata(root, *arguments):
     output = subprocess.check_output(
         ["cargo", "metadata", "--locked", "--format-version", "1", *arguments],
         cwd=root,
-        text=True,
+        encoding="utf-8",
     )
     return json.loads(output)
 
@@ -130,7 +130,7 @@ def cargo_violations(root):
             "--no-default-features", "--features", features, "-e", "normal",
             "--prefix", "none", "--format", "{p}",
         ]
-        output = subprocess.check_output(command, cwd=root, text=True)
+        output = subprocess.check_output(command, cwd=root, encoding="utf-8")
         dependencies = {line.split()[0] for line in output.splitlines() if line.strip()}
         for dependency in sorted(dependencies & excluded):
             errors.append(f"{features} links forbidden production dependency {dependency}")
