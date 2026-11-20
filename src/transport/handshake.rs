@@ -30,8 +30,10 @@ use crate::error::{Error, Result};
 use crate::identity::{
     Identity, NodeId, public_key_from_bytes, signature_from_bytes, verify_signature,
 };
-use crate::protocol::frame::{read_frame, write_frame};
-use crate::protocol::message::{ControlMessage, PROTOCOL_VERSION, handshake_payload};
+use crate::transport::identity_wire::{
+    IDENTITY_PROTOCOL_VERSION, IdentityMessage, handshake_payload, read_identity_frame,
+    write_identity_frame,
+};
 use crate::transport::quic::{APPLICATION_HANDSHAKE_TIMEOUT, ChannelBinding};
 
 /// 握手成功后拿到的对端信息。
@@ -61,8 +63,8 @@ where
 
     write_handshake_frame(
         send,
-        &ControlMessage::Hello {
-            protocol_version: PROTOCOL_VERSION,
+        &IdentityMessage::Hello {
+            protocol_version: IDENTITY_PROTOCOL_VERSION,
             node_id: identity.node_id(),
             public_key: identity.public_key_bytes(),
             nonce,
@@ -74,7 +76,7 @@ where
     let reply = read_handshake_frame(recv, "等待 HelloAck").await?;
 
     let (peer_nonce, peer_public_key, peer_node_id, signature) = match reply {
-        ControlMessage::HelloAck {
+        IdentityMessage::HelloAck {
             protocol_version,
             node_id,
             public_key,
@@ -91,9 +93,6 @@ where
             let key = public_key_from_bytes(&public_key)?;
             check_node_id(&key, node_id)?;
             (peer_nonce, key, node_id, signature)
-        }
-        ControlMessage::Abort { reason } => {
-            return Err(Error::Protocol(format!("对端拒绝握手: {reason}")));
         }
         other => {
             return Err(Error::Protocol(format!(
@@ -139,7 +138,7 @@ impl PreparedHandshake {
     ) -> Result<HandshakeOutcome> {
         write_handshake_frame(
             send,
-            &ControlMessage::Auth {
+            &IdentityMessage::Auth {
                 signature: self.signature,
             },
             "发送 Auth",
@@ -179,7 +178,7 @@ where
     let hello = read_handshake_frame(recv, "等待 Hello").await?;
 
     let (peer_nonce, peer_public_key, peer_node_id) = match hello {
-        ControlMessage::Hello {
+        IdentityMessage::Hello {
             protocol_version,
             node_id,
             public_key,
@@ -211,8 +210,8 @@ where
     let our_signature = identity.sign(&payload);
     write_handshake_frame(
         send,
-        &ControlMessage::HelloAck {
-            protocol_version: PROTOCOL_VERSION,
+        &IdentityMessage::HelloAck {
+            protocol_version: IDENTITY_PROTOCOL_VERSION,
             node_id: identity.node_id(),
             public_key: identity.public_key_bytes(),
             nonce: our_nonce,
@@ -226,7 +225,7 @@ where
     let auth = read_handshake_frame(recv, "等待 Auth").await?;
 
     match auth {
-        ControlMessage::Auth { signature } => {
+        IdentityMessage::Auth { signature } => {
             verify_signature(
                 &peer_public_key,
                 &payload,
@@ -255,7 +254,7 @@ pub struct VerifiedResponder {
 }
 impl VerifiedResponder {
     pub async fn finish<S: AsyncWrite + Unpin>(self, send: &mut S) -> Result<HandshakeOutcome> {
-        write_handshake_frame(send, &ControlMessage::Ready, "发送 Ready").await?;
+        write_handshake_frame(send, &IdentityMessage::Ready, "发送 Ready").await?;
         Ok(self.outcome)
     }
 }
@@ -272,9 +271,9 @@ pub async fn handshake_responder<S: AsyncWrite + Unpin, R: AsyncRead + Unpin>(
 }
 
 fn check_version(version: u32) -> Result<()> {
-    if version != PROTOCOL_VERSION {
+    if version != IDENTITY_PROTOCOL_VERSION {
         return Err(Error::Protocol(format!(
-            "协议版本不兼容：本机 {PROTOCOL_VERSION}，对端 {version}"
+            "协议版本不兼容：本机 {IDENTITY_PROTOCOL_VERSION}，对端 {version}"
         )));
     }
     Ok(())
@@ -299,8 +298,7 @@ where
     let message = read_handshake_frame(recv, "等待 Ready").await?;
 
     match message {
-        ControlMessage::Ready => Ok(()),
-        ControlMessage::Abort { reason } => Err(Error::Protocol(format!("对端中止: {reason}"))),
+        IdentityMessage::Ready => Ok(()),
         other => Err(Error::Protocol(format!(
             "期待 Ready，收到 {}",
             other.kind()
@@ -308,29 +306,39 @@ where
     }
 }
 
-async fn read_handshake_frame<R>(recv: &mut R, phase: &str) -> Result<ControlMessage>
+async fn read_handshake_frame<R>(recv: &mut R, phase: &str) -> Result<IdentityMessage>
 where
     R: AsyncRead + Unpin,
 {
-    tokio::time::timeout(APPLICATION_HANDSHAKE_TIMEOUT, read_frame(recv))
+    tokio::time::timeout(APPLICATION_HANDSHAKE_TIMEOUT, read_identity_frame(recv))
         .await
         .map_err(|_| Error::Protocol(format!("{phase}超时")))??
         .ok_or_else(|| Error::Protocol(format!("{phase}时连接被关闭")))
 }
 
-async fn write_handshake_frame<S>(send: &mut S, message: &ControlMessage, phase: &str) -> Result<()>
+async fn write_handshake_frame<S>(
+    send: &mut S,
+    message: &IdentityMessage,
+    phase: &str,
+) -> Result<()>
 where
     S: AsyncWrite + Unpin,
 {
-    tokio::time::timeout(APPLICATION_HANDSHAKE_TIMEOUT, write_frame(send, message))
-        .await
-        .map_err(|_| Error::Protocol(format!("{phase}超时")))??;
+    tokio::time::timeout(
+        APPLICATION_HANDSHAKE_TIMEOUT,
+        write_identity_frame(send, message),
+    )
+    .await
+    .map_err(|_| Error::Protocol(format!("{phase}超时")))??;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::frame::{read_frame, write_frame};
+    use crate::protocol::message::{ControlMessage, PROTOCOL_VERSION};
+    use crate::transport::identity_wire::handshake_payload;
 
     /// 一条双向通道的一半：读端 + 写端。
     type Half = (
@@ -673,6 +681,31 @@ mod tests {
             .await
             .unwrap();
         assert!(responder.await.unwrap().is_err());
+    }
+
+    #[tokio::test]
+    async fn 身份握手阶段收到_abort_会被拒绝() {
+        let binding = test_binding();
+        let ((_m_recv, mut m_send), (mut b_recv, mut b_send)) = split_pair();
+
+        let responder = tokio::spawn(async move {
+            let bob = Identity::generate();
+            handshake_responder(&mut b_send, &mut b_recv, &bob, &binding).await
+        });
+
+        write_frame(
+            &mut m_send,
+            &ControlMessage::Abort {
+                reason: "unsupported identity message".into(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let _error = responder
+            .await
+            .unwrap()
+            .expect_err("Abort 不能被身份握手接受");
     }
 
     #[tokio::test]
