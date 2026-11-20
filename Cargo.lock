@@ -7141,8 +7141,11 @@ name = "veytrane-speed"
 version = "0.1.0"
 dependencies = [
  "postcard",
+ "quinn",
  "rand 0.10.3",
  "serde",
+ "tokio",
+ "tracing",
  "veytrane-node",
  "veytrane-transport",
 ]

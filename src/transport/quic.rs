@@ -64,8 +64,7 @@ pub const ACCEPT_FIRST_BI_STREAM_TIMEOUT: Duration = Duration::from_secs(10);
 /// 等待业务流首帧的最大时间。
 pub const STREAM_FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// 文件控制流两帧之间允许的最大静默时间；不是整个文件的总时限。
-pub const TRANSFER_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+pub use veytrane_transport::TRANSFER_IDLE_TIMEOUT;
 
 /// 导出会话绑定值时使用的 TLS exporter 标签（RFC 5705）。
 ///
