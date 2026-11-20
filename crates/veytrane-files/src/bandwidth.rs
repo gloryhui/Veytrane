@@ -1,41 +1,12 @@
 //! One FIFO byte budget per direction, shared by every file task and peer.
 //! Idle credit is bounded and dropping a waiter releases its turn.
-use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tokio::{
     sync::{Mutex as AsyncMutex, watch},
     time::{Duration, Instant},
 };
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct FileLimits {
-    pub upload_kib: u32,
-    pub download_kib: u32,
-}
-impl FileLimits {
-    pub fn validate(self) -> Result<(), &'static str> {
-        if self.upload_kib > 1_048_576 || self.download_kib > 1_048_576 {
-            Err("文件限速须为 0～1048576 KiB/s；0 表示不限速")
-        } else {
-            Ok(())
-        }
-    }
-    pub fn parse(upload: &str, download: &str) -> Result<Self, &'static str> {
-        let limits = Self {
-            upload_kib: upload
-                .trim()
-                .parse()
-                .map_err(|_| "上传限速须为非负整数 KiB/s")?,
-            download_kib: download
-                .trim()
-                .parse()
-                .map_err(|_| "下载限速须为非负整数 KiB/s")?,
-        };
-        limits.validate()?;
-        Ok(limits)
-    }
-}
+pub use veytrane_file_policy::bandwidth::FileLimits;
 #[derive(Clone)]
 pub struct ByteLimit {
     inner: Arc<Mutex<Bucket>>,
@@ -192,12 +163,5 @@ mod tests {
         let (tx, mut rx) = watch::channel(false);
         tx.send_replace(true);
         assert_eq!(limit.acquire(1024 * 1024, &mut rx).await, 1024 * 1024);
-    }
-    #[test]
-    fn input_validation_has_explicit_units_and_zero_is_unlimited() {
-        assert_eq!(FileLimits::parse("0", " 1024 ").unwrap().download_kib, 1024);
-        for bad in ["-1", "", "1.5", "1048577", "4294967296"] {
-            assert!(FileLimits::parse(bad, "0").is_err());
-        }
     }
 }

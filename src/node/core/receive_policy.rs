@@ -1,3 +1,3 @@
-pub use veytrane_files::receive_policy::{
+pub use veytrane_file_policy::receive_policy::{
     DEFAULT_SAFETY_MIB, default_safety_mib, validate_safety_mib,
 };
