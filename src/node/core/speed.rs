@@ -1,6 +1,6 @@
 //! Lease-bound memory speed business on an existing authenticated connection.
 //! The session's sole BI reader routes control here; one UNI owner routes data.
-use crate::node::core::activity::{Activity, SpeedPermit};
+use crate::node::core::activity::{Activity, ExclusivePermit};
 use crate::node::core::protocol::{
     self, Frame, Message, SpeedArbiter, SpeedControl, SpeedDirection, SpeedLease,
 };
@@ -87,7 +87,7 @@ struct Active {
     lease: SpeedLease,
     cancel: watch::Sender<bool>,
     uni: Option<oneshot::Sender<RecvStream>>,
-    _permit: SpeedPermit,
+    _permit: ExclusivePermit,
     finishing: bool,
 }
 struct RunGuard {
@@ -245,7 +245,11 @@ impl SpeedPeer {
         Option<oneshot::Receiver<RecvStream>>,
     )> {
         let mut state = self.0.state.lock().unwrap();
-        let permit = self.0.activity.speed(self.0.remote, id.clone())?;
+        let permit = self
+            .0
+            .activity
+            .exclusive(self.0.remote)
+            .map_err(|_| failure("文件或测速正在进行，请先暂停文件或取消测速"))?;
         let lease = match granted {
             Some(lease) => {
                 state
@@ -346,7 +350,7 @@ impl SpeedPeer {
         }
         let _request = RequestGuard(self.clone());
         self.wait_finishing().await?;
-        if !self.0.activity.lock().can_speed(self.0.remote) {
+        if !self.0.activity.lock().can_exclusive(self.0.remote) {
             return Err(failure("文件或测速正在进行，请先暂停文件或取消测速"));
         }
         // Validate even if the other peer never answers.

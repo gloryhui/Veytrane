@@ -1,8 +1,9 @@
-//! One atomic admission boundary for selected/scanning files, reserved streams
-//! and speed leases. Permits cover cleanup as well as the visible operation.
-use crate::node::core::task_model::TaskId;
-use crate::node::core::transfer_files::failure;
-use crate::{error::Result, identity::NodeId};
+//! Per-peer shared/exclusive activity admission.
+//!
+//! Shared permits may coexist for one peer. An exclusive permit is admitted
+//! only when that peer has no shared or exclusive permit. Permits cover cleanup
+//! as well as the visible operation, and every release notifies the owner.
+use crate::identity::NodeId;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, MutexGuard},
@@ -17,21 +18,33 @@ pub(crate) struct Activity {
 #[derive(Default)]
 pub(crate) struct State {
     peers: HashMap<NodeId, Entry>,
+    next_token: u64,
 }
 #[derive(Default)]
 struct Entry {
-    files: usize,
-    speed: Option<TaskId>,
+    shared: usize,
+    exclusive: Option<u64>,
 }
-pub(crate) struct FilePermit {
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ActivityError {
+    SharedInUse,
+    ExclusiveInUse,
+    SharedLimit,
+    TokenExhausted,
+}
+
+pub(crate) struct SharedPermit {
     activity: Activity,
     peer: NodeId,
 }
-pub(crate) struct SpeedPermit {
+
+pub(crate) struct ExclusivePermit {
     activity: Activity,
     peer: NodeId,
-    id: TaskId,
+    token: u64,
 }
+
 impl Activity {
     pub fn new(changed: watch::Sender<u64>) -> Self {
         Self {
@@ -39,115 +52,186 @@ impl Activity {
             changed,
         }
     }
+
     pub fn lock(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap()
+        self.state.lock().expect("activity state lock poisoned")
     }
-    pub fn file(&self, peer: NodeId) -> Result<FilePermit> {
-        self.lock().add_file(peer)?;
-        Ok(self.file_permit(peer))
+
+    pub fn shared(&self, peer: NodeId) -> Result<SharedPermit, ActivityError> {
+        self.lock().add_shared(peer)?;
+        Ok(self.shared_permit(peer))
     }
+
     // Caller already incremented under the shared admission lock.
-    pub fn file_permit(&self, peer: NodeId) -> FilePermit {
-        FilePermit {
+    pub fn shared_permit(&self, peer: NodeId) -> SharedPermit {
+        SharedPermit {
             activity: self.clone(),
             peer,
         }
     }
-    pub fn speed(&self, peer: NodeId, id: TaskId) -> Result<SpeedPermit> {
-        let mut state = self.lock();
-        let entry = state.peers.entry(peer).or_default();
-        if entry.files != 0 || entry.speed.is_some() {
-            return Err(failure("文件或测速正在进行，请先暂停文件或取消测速"));
-        }
-        entry.speed = Some(id.clone());
-        Ok(SpeedPermit {
+
+    pub fn exclusive(&self, peer: NodeId) -> Result<ExclusivePermit, ActivityError> {
+        let token = self.lock().add_exclusive(peer)?;
+        Ok(ExclusivePermit {
             activity: self.clone(),
             peer,
-            id,
+            token,
         })
     }
+
+    fn notify(&self) {
+        self.changed.send_modify(|v| *v = v.wrapping_add(1));
+    }
 }
+
 impl State {
-    pub fn can_speed(&self, peer: NodeId) -> bool {
+    pub fn can_exclusive(&self, peer: NodeId) -> bool {
         self.peers
             .get(&peer)
-            .is_none_or(|e| e.files == 0 && e.speed.is_none())
+            .is_none_or(|entry| entry.shared == 0 && entry.exclusive.is_none())
     }
-    pub fn speed_active(&self, peer: NodeId) -> bool {
-        self.peers.get(&peer).is_some_and(|e| e.speed.is_some())
+
+    pub fn exclusive_active(&self, peer: NodeId) -> bool {
+        self.peers
+            .get(&peer)
+            .is_some_and(|entry| entry.exclusive.is_some())
     }
-    pub fn add_file(&mut self, peer: NodeId) -> Result<()> {
+
+    pub fn add_shared(&mut self, peer: NodeId) -> Result<(), ActivityError> {
         let entry = self.peers.entry(peer).or_default();
-        if entry.speed.is_some() {
-            return Err(failure("测速正在进行，不能启动文件任务"));
+        if entry.exclusive.is_some() {
+            return Err(ActivityError::ExclusiveInUse);
         }
-        entry.files = entry
-            .files
+        entry.shared = entry
+            .shared
             .checked_add(1)
-            .ok_or_else(|| failure("文件资源计数超限"))?;
+            .ok_or(ActivityError::SharedLimit)?;
         Ok(())
     }
+
+    fn add_exclusive(&mut self, peer: NodeId) -> Result<u64, ActivityError> {
+        let token = self
+            .next_token
+            .checked_add(1)
+            .ok_or(ActivityError::TokenExhausted)?;
+        let entry = self.peers.entry(peer).or_default();
+        if entry.shared != 0 {
+            return Err(ActivityError::SharedInUse);
+        }
+        if entry.exclusive.is_some() {
+            return Err(ActivityError::ExclusiveInUse);
+        }
+        self.next_token = token;
+        entry.exclusive = Some(token);
+        Ok(token)
+    }
+
     fn prune(&mut self, peer: NodeId) {
         if self
             .peers
             .get(&peer)
-            .is_some_and(|e| e.files == 0 && e.speed.is_none())
+            .is_some_and(|entry| entry.shared == 0 && entry.exclusive.is_none())
         {
             self.peers.remove(&peer);
         }
     }
 }
-impl Drop for FilePermit {
+
+impl Drop for SharedPermit {
     fn drop(&mut self) {
         {
             let mut state = self.activity.lock();
-            let entry = state.peers.get_mut(&self.peer).unwrap();
-            entry.files -= 1;
+            let entry = state
+                .peers
+                .get_mut(&self.peer)
+                .expect("shared activity entry missing");
+            debug_assert!(entry.shared > 0, "shared activity count underflow");
+            entry.shared -= 1;
             state.prune(self.peer);
         }
-        self.activity
-            .changed
-            .send_modify(|v| *v = v.wrapping_add(1));
+        self.activity.notify();
     }
 }
-impl Drop for SpeedPermit {
+
+impl Drop for ExclusivePermit {
     fn drop(&mut self) {
         {
             let mut state = self.activity.lock();
             if let Some(entry) = state.peers.get_mut(&self.peer)
-                && entry.speed.as_ref() == Some(&self.id)
+                && entry.exclusive == Some(self.token)
             {
-                entry.speed = None;
+                entry.exclusive = None;
             }
             state.prune(self.peer);
         }
-        self.activity
-            .changed
-            .send_modify(|v| *v = v.wrapping_add(1));
+        self.activity.notify();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::identity::Identity;
+
+    fn peer(hex: &str) -> NodeId {
+        NodeId::from_hex(hex).expect("test node id")
+    }
+
     #[test]
-    fn file_and_speed_admission_is_atomic_per_peer_and_cleanup_releases_it() {
+    fn shared_and_exclusive_admission_is_atomic_per_peer_and_cleanup_notifies() {
+        let (changed, mut changed_rx) = watch::channel(0);
+        let activity = Activity::new(changed);
+        let a = peer("00000000000000000000000000000001");
+        let b = peer("00000000000000000000000000000002");
+
+        let shared = activity.shared(a).expect("shared permit");
+        assert_eq!(
+            activity.exclusive(a).err(),
+            Some(ActivityError::SharedInUse)
+        );
+        let exclusive = activity.exclusive(b).expect("exclusive permit");
+        assert_eq!(
+            activity.shared(b).err(),
+            Some(ActivityError::ExclusiveInUse)
+        );
+        assert_eq!(
+            activity.exclusive(b).err(),
+            Some(ActivityError::ExclusiveInUse)
+        );
+
+        drop(shared);
+        drop(exclusive);
+        assert_eq!(*changed_rx.borrow_and_update(), 2);
+
+        let exclusive = activity.exclusive(a).expect("exclusive permit");
+        let shared = activity.shared(b).expect("shared permit");
+        drop(exclusive);
+        drop(shared);
+        assert_eq!(*changed_rx.borrow_and_update(), 4);
+        assert!(activity.lock().peers.is_empty());
+    }
+
+    #[test]
+    fn stale_exclusive_release_does_not_clear_new_generation() {
         let (changed, _) = watch::channel(0);
         let activity = Activity::new(changed);
-        let a = Identity::generate().node_id();
-        let b = Identity::generate().node_id();
-        let file = activity.file(a).unwrap();
-        assert!(activity.speed(a, TaskId::generate()).is_err());
-        let speed = activity.speed(b, TaskId::generate()).unwrap();
-        assert!(activity.file(b).is_err());
-        assert!(activity.speed(b, TaskId::generate()).is_err());
-        drop(file);
-        drop(speed);
-        let speed = activity.speed(a, TaskId::generate()).unwrap();
-        let file = activity.file(b).unwrap();
-        drop(speed);
-        drop(file);
+        let peer = peer("00000000000000000000000000000003");
+
+        let stale = activity.exclusive(peer).expect("old exclusive permit");
+        let stale_token = stale.token;
+        // Simulate the old generation leaving the active slot before its
+        // permit's Drop runs.
+        activity
+            .lock()
+            .peers
+            .get_mut(&peer)
+            .expect("exclusive entry")
+            .exclusive = None;
+        let current = activity.exclusive(peer).expect("new exclusive permit");
+        assert_ne!(stale_token, current.token);
+
+        drop(stale);
+        assert!(activity.lock().exclusive_active(peer));
+        drop(current);
         assert!(activity.lock().peers.is_empty());
     }
 }

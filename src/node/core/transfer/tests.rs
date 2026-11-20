@@ -2840,12 +2840,13 @@ async fn speed_and_file_activity_exclude_each_other_without_silent_pause() {
     let (id, _) = pair.select(1024).await;
     let connections = HashMap::from([(pair.ib, pair.ca.clone())]);
     let scheduled = pair.a.dispatch_ready(&connections).pop().unwrap();
-    assert!(
-        pair.a
-            .start_speed(pair.ib, SpeedDirection::Upload, 30)
-            .await
-            .is_err()
-    );
+    let error = pair
+        .a
+        .start_speed(pair.ib, SpeedDirection::Upload, 30)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("文件或测速正在进行"), "{error}");
     assert_eq!(
         pair.a.task(id.clone()).await.unwrap().state(),
         TaskState::Queued
@@ -2861,8 +2862,8 @@ async fn speed_and_file_activity_exclude_each_other_without_silent_pause() {
     let mut changes = pair.a.subscribe();
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if pair.a.activity.lock().speed_active(pair.ib)
-                && pair.b.activity.lock().speed_active(pair.ia)
+            if pair.a.activity.lock().exclusive_active(pair.ib)
+                && pair.b.activity.lock().exclusive_active(pair.ia)
             {
                 break;
             }
@@ -2874,7 +2875,13 @@ async fn speed_and_file_activity_exclude_each_other_without_silent_pause() {
     let count = pair.a.snapshot().await.unwrap().len();
     let source = pair.root.join("reject.bin");
     fs::write(&source, b"reject").unwrap();
-    assert!(pair.a.select_file(pair.ib, source).await.is_err());
+    let error = pair
+        .a
+        .select_file(pair.ib, source)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("测速正在进行"), "{error}");
     assert_eq!(pair.a.snapshot().await.unwrap().len(), count);
     assert!(pair.a.dispatch_ready(&connections).is_empty());
     assert_eq!(pair.a.task(id).await.unwrap().state(), TaskState::Paused);
@@ -2882,7 +2889,7 @@ async fn speed_and_file_activity_exclude_each_other_without_silent_pause() {
     pair.a.cancel_speed(pair.ib, &test).unwrap();
     assert!(job.await.unwrap().is_err());
     tokio::time::timeout(Duration::from_secs(5), async {
-        while pair.b.activity.lock().speed_active(pair.ia) {
+        while pair.b.activity.lock().exclusive_active(pair.ia) {
             tokio::task::yield_now().await;
         }
     })
@@ -2938,8 +2945,8 @@ async fn speed_cancel_and_stale_uni_token_do_not_pollute_next_test_or_file_trans
         );
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                if !pair.a.activity.lock().speed_active(pair.ib)
-                    && !pair.b.activity.lock().speed_active(pair.ia)
+                if !pair.a.activity.lock().exclusive_active(pair.ib)
+                    && !pair.b.activity.lock().exclusive_active(pair.ia)
                 {
                     break;
                 }
@@ -2994,7 +3001,7 @@ async fn speed_cancel_and_stale_uni_token_do_not_pollute_next_test_or_file_trans
         assert!(pair.ca.close_reason().is_none());
         assert!(pair.cb.close_reason().is_none());
         tokio::time::timeout(Duration::from_secs(5), async {
-            while pair.b.activity.lock().speed_active(pair.ia) {
+            while pair.b.activity.lock().exclusive_active(pair.ia) {
                 tokio::task::yield_now().await;
             }
         })
@@ -3018,7 +3025,7 @@ async fn speed_cancel_and_stale_uni_token_do_not_pollute_next_test_or_file_trans
 async fn speed_remote_busy_and_invalid_uni_headers_preserve_connection_and_next_lease() {
     use crate::node::core::protocol::{SpeedControl, SpeedDirection};
     let pair = Pair::new_inner(true).await;
-    let peer_file = pair.b.activity.file(pair.ia).unwrap();
+    let peer_file = pair.b.activity.shared(pair.ia).unwrap();
     let error = pair
         .a
         .start_speed(pair.ib, SpeedDirection::Upload, 30)
@@ -3028,7 +3035,7 @@ async fn speed_remote_busy_and_invalid_uni_headers_preserve_connection_and_next_
     assert!(error.contains("进行"), "{error}");
     drop(peer_file);
     tokio::time::timeout(Duration::from_secs(5), async {
-        while pair.a.activity.lock().speed_active(pair.ib) {
+        while pair.a.activity.lock().exclusive_active(pair.ib) {
             tokio::task::yield_now().await;
         }
     })
@@ -3089,7 +3096,7 @@ async fn speed_remote_busy_and_invalid_uni_headers_preserve_connection_and_next_
     job.await.unwrap().unwrap();
     assert!(pair.ca.close_reason().is_none());
     tokio::time::timeout(Duration::from_secs(5), async {
-        while pair.b.activity.lock().speed_active(pair.ia) {
+        while pair.b.activity.lock().exclusive_active(pair.ia) {
             tokio::task::yield_now().await;
         }
     })
@@ -3118,7 +3125,7 @@ async fn next_speed_request_waits_for_completed_peer_lease_cleanup() {
         .await
         .unwrap()
         .unwrap();
-    assert!(pair.b.activity.lock().speed_active(pair.ia));
+    assert!(pair.b.activity.lock().exclusive_active(pair.ia));
     let waiting = pair.b.speed_peers.lock().unwrap()[&pair.ia].gate_wait();
     let service = pair.a.clone();
     let peer = pair.ib;

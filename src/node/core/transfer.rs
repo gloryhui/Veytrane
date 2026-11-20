@@ -115,7 +115,7 @@ pub(crate) struct ScheduledSend {
     _slot: SendSlot,
 }
 struct SendSlot {
-    _activity: crate::node::core::activity::FilePermit,
+    _activity: crate::node::core::activity::SharedPermit,
     service: TransferService,
     id: TaskId,
     generation: u64,
@@ -131,7 +131,7 @@ impl Drop for SendSlot {
     }
 }
 struct ActiveGuard {
-    _activity: Option<crate::node::core::activity::FilePermit>,
+    _activity: Option<crate::node::core::activity::SharedPermit>,
     service: TransferService,
     id: TaskId,
 }
@@ -173,6 +173,18 @@ async fn blocking<T: Send + 'static>(
     tokio::task::spawn_blocking(work)
         .await
         .map_err(|_| disk::failure("文件后台任务中断"))?
+}
+
+fn file_activity_error(error: crate::node::core::activity::ActivityError) -> Error {
+    use crate::node::core::activity::ActivityError;
+    match error {
+        ActivityError::SharedLimit | ActivityError::TokenExhausted => {
+            disk::failure("文件资源计数超限")
+        }
+        ActivityError::SharedInUse | ActivityError::ExclusiveInUse => {
+            disk::failure("测速正在进行，不能启动文件任务")
+        }
+    }
 }
 
 pub(crate) struct FileInlets {
@@ -223,6 +235,13 @@ async fn next_incoming(
 }
 
 impl TransferService {
+    fn acquire_file_activity(
+        &self,
+        peer: NodeId,
+    ) -> Result<crate::node::core::activity::SharedPermit> {
+        self.activity.shared(peer).map_err(file_activity_error)
+    }
+
     async fn open_file_stream(&self, connection: &Connection) -> Result<(SendStream, RecvStream)> {
         let stream = crate::node::core::dispatch::open_bi(
             connection,
@@ -593,7 +612,7 @@ impl TransferService {
         source: PathBuf,
         request: TaskId,
     ) -> Result<crate::node::core::incremental::Preview> {
-        let _activity = self.activity.file(peer)?;
+        let _activity = self.acquire_file_activity(peer)?;
         let _permit = self
             .comparisons
             .clone()
@@ -762,7 +781,7 @@ impl TransferService {
         peer: NodeId,
         id: TaskId,
     ) -> Result<Vec<TaskId>> {
-        let _activity = self.activity.file(peer)?;
+        let _activity = self.acquire_file_activity(peer)?;
         self.preview_requests
             .lock()
             .unwrap()
@@ -830,17 +849,17 @@ impl TransferService {
         let mut queue = self.sender_queue.lock().unwrap();
         let mut selected = Vec::new();
         while let Some(entry) = queue.dispatch(|peer| {
-            !activity.speed_active(peer)
+            !activity.exclusive_active(peer)
                 && connections
                     .get(&peer)
                     .is_some_and(|c| c.close_reason().is_none())
         }) {
             let generation = queue.slot_generation(&entry.id).unwrap();
             activity
-                .add_file(entry.peer)
+                .add_shared(entry.peer)
                 .expect("dispatch admission lock");
             let slot = SendSlot {
-                _activity: self.activity.file_permit(entry.peer),
+                _activity: self.activity.shared_permit(entry.peer),
                 service: self.clone(),
                 id: entry.id.clone(),
                 generation,
@@ -984,7 +1003,7 @@ impl TransferService {
         if record.direction() != TaskDirection::Send {
             return Err(disk::failure("只能发送本机已选择任务"));
         }
-        let _activity = self.activity.file(peer)?;
+        let _activity = self.acquire_file_activity(peer)?;
         let generation = self
             .sender_queue
             .lock()
@@ -1228,7 +1247,7 @@ impl TransferService {
         Ok(ids)
     }
     pub async fn select_file(&self, peer: NodeId, source: PathBuf) -> Result<TaskId> {
-        let _selection_activity = self.activity.file(peer)?;
+        let _selection_activity = self.acquire_file_activity(peer)?;
         struct CancelScan(crate::node::core::files::ScanCancellation);
         impl Drop for CancelScan {
             fn drop(&mut self) {
@@ -1262,7 +1281,7 @@ impl TransferService {
         Ok(id)
     }
     pub async fn select_directory(&self, peer: NodeId, source: PathBuf) -> Result<Vec<TaskId>> {
-        let _selection_activity = self.activity.file(peer)?;
+        let _selection_activity = self.acquire_file_activity(peer)?;
         struct CancelScan(crate::node::core::files::ScanCancellation);
         impl Drop for CancelScan {
             fn drop(&mut self) {
@@ -1428,8 +1447,8 @@ impl TransferService {
             }
         }
         let file_permit = if direction == TaskDirection::Receive {
-            activity.add_file(peer)?;
-            Some(self.activity.file_permit(peer))
+            activity.add_shared(peer).map_err(file_activity_error)?;
+            Some(self.activity.shared_permit(peer))
         } else {
             None
         };
@@ -2151,7 +2170,7 @@ impl TransferService {
     }
     #[cfg(test)]
     pub(crate) fn test_speed_idle(&self, peer: NodeId) -> bool {
-        self.activity.lock().can_speed(peer)
+        self.activity.lock().can_exclusive(peer)
     }
     #[cfg(test)]
     pub(crate) fn gate_test_send_cleanup(
@@ -2337,7 +2356,7 @@ impl TransferService {
                                     Ok(permit) => permit,
                                     Err(_) => { protocol::write(&mut send, &Frame { request_id: 1, message: Message::Error { task_id: task_id.clone(), code: ErrorCode::Busy } }).await?; send.finish().map_err(disk::local_error)?; return Ok(()); }
                                 };
-                                let owner = service.activity.file(peer)?;
+                                let owner = service.acquire_file_activity(peer)?;
                                 let root = service.receive_root.lock().unwrap().clone();
                                 let relative = relative_path.clone(); let manifest = *manifest.clone(); let root_hash = manifest.root_hash; let task_id = task_id.clone();
                                 let compared = blocking(move || { let _permit = permit; let _owner = owner; crate::node::core::incremental::compare(root, relative, manifest) }).await;
