@@ -635,7 +635,7 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
       "title": "文件与目录任务",
       "tag": "CORE / FILES",
       "path": "crates/veytrane-files/src/transfer.rs",
-      "summary": "veytrane-files 持有持久任务、并发调度、增量预览、暂停续传与安全发布；根 node::core 只保留兼容导出。",
+      "summary": "veytrane-files 持有文件命令执行、持久任务、并发调度、增量预览、暂停续传与安全发布。",
       "rules": [
         "完成以接收端持久回执为准。",
         "预览结果和 accepted 均不是完成证明。",
@@ -761,9 +761,9 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
           "detail": "持久任务事实、路径和分片位图绑定。"
         },
         {
-          "name": "投影",
-          "path": "src/node/core/snapshot.rs",
-          "detail": "权威状态的轻量展示模型。"
+          "name": "文件任务事实",
+          "path": "crates/veytrane-files/src/task_snapshot.rs",
+          "detail": "有界文件状态和允许操作，IPC 宿主负责原协议输出。"
         }
       ],
       "section": "storage"

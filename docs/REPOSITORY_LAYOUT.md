@@ -65,6 +65,8 @@ cargo build --locked --no-default-features --features standalone --bin p2p_file
 
 裁剪 Agent 初始化时把 `enable_files` 设为 `false`。读取或提交明确启用文件的配置时返回能力错误，保留当前配置文件。文件命令返回 `capability_disabled`，`Tasks` 仍返回空文件列表、空预览、可空队列与测速结果。
 
+`Status.capabilities` 表示当前 Agent 本机已装配的业务。GPUI 根据它控制文件与测速入口，设备连接状态独立读取 peer 快照。`Tasks` 的文件事实来自 `veytrane-files`，IPC 宿主维持现有分页、脱敏和诊断投影。
+
 ## 本次审阅后的处置
 
 | 发现 | 处理 |

@@ -22,7 +22,7 @@
     {"id":"agent","x":24,"y":298,"w":780,"h":309,"color":"cyan","label":"p2p-agent 进程 · 导航按需同进程运行"}
   ],
   "nodes": [
-    {"id":"clients","layer":"app","x":45,"y":158,"w":344,"h":100,"title":"桌面与管理 CLI","sub":"p2p-desktop · p2p-node","lines":["GPUI 工作台、托盘与管理命令","客户端使用同一 IPC 契约"]},
+    {"id":"clients","layer":"app","x":45,"y":158,"w":344,"h":100,"title":"桌面与管理 CLI","sub":"p2p-desktop · p2p-node","lines":["工作台、托盘与同一 IPC 契约","GPUI 按 Agent 的能力状态显示入口"]},
     {"id":"browser","layer":"app","x":455,"y":158,"w":330,"h":100,"title":"浏览器","sub":"服务导航 · 节点管理","lines":["内置导航默认走回环 3001","p2p-node web 可单独启动管理页"]},
     {"id":"products","layer":"app","x":878,"y":158,"w":318,"h":100,"title":"Live / Sub2API","sub":"专用客户端和网关","lines":["各自装配节点与 TCP 转发","各自选择准入、容量和恢复策略"]},
     {"id":"ipc","layer":"management","x":45,"y":326,"w":344,"h":100,"title":"本机管理 IPC","sub":"crates/veytrane-management","lines":["IPC v1 DTO · AgentClient","Unix socket / Windows pipe"]},
