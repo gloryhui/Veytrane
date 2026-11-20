@@ -18,7 +18,7 @@ fn serve_connection(
             grants,
             policy,
             incoming.services,
-            Arc::new(crate::tunnel::ForwardStreamOwner::new(16)),
+            Arc::new(veytrane_tcp::ForwardStreamOwner::new(16)),
         )
         .await
     })
@@ -72,7 +72,7 @@ async fn exercise_forwarding(allowed: bool, peer_allowed: bool) {
     let (peer_updates, peer_connection) = watch::channel(Some(client_connection.clone()));
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let (errors_tx, mut errors_rx) = tokio::sync::mpsc::unbounded_channel();
-    let forwarder = tokio::spawn(crate::tunnel::forward_on_authenticated_session(
+    let forwarder = tokio::spawn(veytrane_tcp::forward_on_authenticated_session(
         local_listener,
         target,
         peer_connection,
@@ -80,7 +80,7 @@ async fn exercise_forwarding(allowed: bool, peer_allowed: bool) {
         errors_tx,
         |tcp, connection, _target| async move {
             let stream = open_tcp(&connection, "echo").await?;
-            crate::tunnel::bridge_tcp(tcp, stream.send, stream.recv).await
+            veytrane_tcp::bridge_tcp(tcp, stream.send, stream.recv).await
         },
     ));
 

@@ -11,6 +11,17 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+
+#[cfg(feature = "agent-files")]
+mod files;
+
+#[derive(Default)]
+struct FilePage {
+    tasks: Vec<Value>,
+    queue: Option<Value>,
+    total: usize,
+    previews: Vec<Value>,
+}
 use tokio::{
     sync::{Mutex, Semaphore, watch},
     task::JoinSet,
@@ -35,6 +46,7 @@ pub struct Agent {
     pub(crate) mutations: Mutex<()>,
     workers: Mutex<JoinSet<()>>,
     mutation_slots: Arc<Semaphore>,
+    #[cfg(feature = "agent-files")]
     previews: Mutex<VecDeque<(Instant, crate::node::core::incremental::Preview)>>,
     diagnostics: Mutex<VecDeque<String>>,
     pub(crate) restart_pending: std::sync::atomic::AtomicBool,
@@ -50,22 +62,6 @@ impl Agent {
             && !matches!(command, Command::Stop)
         {
             return Err("restart_required: 节点已提交重启配置，请停止后重新启动".into());
-        }
-        if matches!(
-            &command,
-            Command::Send { .. }
-                | Command::PreviewDirectory { .. }
-                | Command::Pause { .. }
-                | Command::Resume { .. }
-                | Command::Cancel { .. }
-                | Command::RemoveHistory { .. }
-                | Command::DeleteReceivedFile { .. }
-                | Command::TaskLocation { .. }
-                | Command::ConfirmDirectory { .. }
-                | Command::CancelDirectory { .. }
-        ) && !self.control.has_file_service()
-        {
-            return Err("capability_disabled: 文件服务未启用".into());
         }
         match command {
             Command::Status => {
@@ -112,16 +108,22 @@ impl Agent {
                 )
             }
             Command::Tasks { offset } => {
-                let snapshot = self.control.task_snapshot().map_err(|e| e.to_string())?;
-                let tasks=snapshot.as_ref().map(|s| s.tasks.iter().skip(offset).take(128).map(|t|json!({"id":t.id,"group":t.group,"peer":t.peer.to_hex(),"name":t.name.chars().take(256).collect::<String>(),"name_truncated":t.name.chars().count()>256,"state":t.state,"direction":t.direction,"total":t.total,"confirmed":t.confirmed,"rate":t.rate,"diagnostic":t.diagnostic,"retryable":t.retryable,"can_pause":t.can_pause(),"can_continue":t.can_continue(),"can_delete_file":t.can_delete_file()})).collect::<Vec<_>>()).unwrap_or_default();
-                let mut previews = self.previews.lock().await;
-                previews.retain(|(created, _)| created.elapsed() < Duration::from_secs(300));
-                let total = snapshot.as_ref().map_or(0, |s| s.tasks.len());
+                #[cfg(feature = "agent-files")]
+                let file_page = self.file_page(offset).await?;
+                #[cfg(not(feature = "agent-files"))]
+                let file_page = FilePage::default();
+                let total = file_page.total;
                 let speeds=self.control.speed_snapshots().iter().map(|(peer,s)|json!({"peer":peer.to_hex(),"id":s.test_id,"direction":s.direction,"state":format!("{:?}",s.status),"bytes":s.bytes,"bytes_per_second":s.bytes_per_second,"elapsed_ms":s.elapsed.as_millis(),"rtt_ms":s.rtt.as_millis()})).collect::<Vec<_>>();
-                let queue = snapshot.as_ref().map(|s| json!({"pending":s.queue.pending,"active_files":s.queue.active_files,"limit":s.queue.limit,"converging":s.queue.converging}));
-                Ok(
-                    json!({"tasks":tasks,"queue":queue,"offset":offset,"next_offset":if offset.saturating_add(128)<total{Some(offset.saturating_add(128))}else{None},"total":total,"truncated":offset.saturating_add(128)<total,"directory_previews":previews.iter().map(|(_,preview)|{let mut value=serde_json::to_value(preview).expect("preview DTO");value["peer"]=json!(preview.peer.to_hex());value.as_object_mut().unwrap().remove("source");value["name"]=json!(preview.source.file_name().unwrap_or_default().to_string_lossy().chars().take(128).collect::<String>());value}).collect::<Vec<_>>(),"speeds":speeds}),
-                )
+                Ok(json!({
+                    "tasks": file_page.tasks,
+                    "queue": file_page.queue,
+                    "offset": offset,
+                    "next_offset": if offset.saturating_add(128) < total { Some(offset.saturating_add(128)) } else { None },
+                    "total": total,
+                    "truncated": offset.saturating_add(128) < total,
+                    "directory_previews": file_page.previews,
+                    "speeds": speeds,
+                }))
             }
             Command::Events { epoch, after } => {
                 let configuration = self.config.lock().await;
@@ -182,73 +184,25 @@ impl Agent {
                     .await?;
                 Ok(json!({"disconnected":true}))
             }
-            Command::Send { peer, paths } => {
-                if paths.is_empty() || paths.len() > 128 || paths.iter().any(|p| !p.is_absolute()) {
-                    return Err("发送路径必须是1..128个本机绝对路径".into());
+            request @ (
+                Command::Send { .. }
+                    | Command::PreviewDirectory { .. }
+                    | Command::Pause { .. }
+                    | Command::Resume { .. }
+                    | Command::Cancel { .. }
+                    | Command::RemoveHistory { .. }
+                    | Command::DeleteReceivedFile { .. }
+                    | Command::TaskLocation { .. }
+                    | Command::ConfirmDirectory { .. }
+                    | Command::CancelDirectory { .. }
+            ) => {
+                #[cfg(feature = "agent-files")]
+                if self.control.has_file_service() {
+                    return self.execute_files(request).await;
                 }
-                self.control
-                    .send_paths(NodeId::from_hex(&peer).map_err(|e| e.to_string())?, paths)?;
-                Ok(json!({"accepted":true}))
-            }
-            Command::PreviewDirectory { peer, path } => {
-                crate::node::core::drop_send::validate_paths(std::slice::from_ref(&path))
-                    .map_err(|e| e.to_string())?;
-                let request = self
-                    .control
-                    .preview_directory(NodeId::from_hex(&peer).map_err(|e| e.to_string())?, path)?;
-                Ok(json!({"accepted":true,"request":request}))
-            }
-            Command::Pause { task } => {
-                self.control.pause_task(task)?;
-                Ok(json!({"accepted":true}))
-            }
-            Command::Resume { peer, task } => {
-                self.control
-                    .resume_task(NodeId::from_hex(&peer).map_err(|e| e.to_string())?, task)?;
-                Ok(json!({"accepted":true}))
-            }
-            Command::Cancel { task } => {
-                self.control
-                    .cancel_task(task)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                Ok(json!({"cancelled":true}))
-            }
-            Command::RemoveHistory { tasks } => {
-                if tasks.is_empty() || tasks.len() > 128 {
-                    return Err("每次只能清理1..128个已完成任务".into());
-                }
-                let removed = self
-                    .control
-                    .remove_completed_history(tasks.into_iter().collect())
-                    .map_err(|e| e.to_string())?;
-                Ok(json!({"removed":removed}))
-            }
-            Command::DeleteReceivedFile { task } => {
-                self.control
-                    .delete_completed_receive_file(&task)
-                    .map_err(|e| e.to_string())?;
-                Ok(json!({"deleted":true}))
-            }
-            Command::TaskLocation { task } => {
-                let path = self
-                    .control
-                    .reveal_task(&crate::node::core::task_details::Selection::Task(task))
-                    .map_err(|e| e.to_string())?;
-                Ok(json!({"path":path}))
-            }
-            Command::ConfirmDirectory { peer, request } => {
-                self.control.confirm_directory(
-                    NodeId::from_hex(&peer).map_err(|e| e.to_string())?,
-                    request.clone(),
-                )?;
-                self.previews.lock().await.retain(|(_, p)| p.id != request);
-                Ok(json!({"accepted":true}))
-            }
-            Command::CancelDirectory { request } => {
-                self.control.cancel_directory_preview(request.clone())?;
-                self.previews.lock().await.retain(|(_, p)| p.id != request);
-                Ok(json!({"accepted":true}))
+                #[cfg(not(feature = "agent-files"))]
+                drop(request);
+                Err("capability_disabled: 文件服务未启用".into())
             }
             Command::StartSpeed {
                 peer,
@@ -533,6 +487,7 @@ async fn run_with_recovery(
     let _identity_lock = AgentPaths::identity_lock(identity.node_id())?;
     let mut session = record.settings.session().map_err(io::Error::other)?;
     session.tunnel_rules.clear();
+    #[cfg(feature = "agent-files")]
     let (control, mut raw) = if session.enable_files {
         crate::storage::permissions::ensure_directory(&record.settings.receive_root)?;
         let (control, events) = control::spawn_with_storage(
@@ -558,6 +513,8 @@ async fn run_with_recovery(
     } else {
         control::spawn(identity, session)?
     };
+    #[cfg(not(feature = "agent-files"))]
+    let (control, mut raw) = control::spawn(identity, session)?;
     control
         .configuration_committed(record.revision)
         .map_err(io::Error::other)?;
@@ -575,6 +532,7 @@ async fn run_with_recovery(
         mutations: Mutex::new(()),
         workers: Mutex::new(JoinSet::new()),
         mutation_slots: Arc::new(Semaphore::new(32)),
+        #[cfg(feature = "agent-files")]
         previews: Mutex::new(VecDeque::new()),
         diagnostics: Mutex::new(VecDeque::new()),
         restart_pending: std::sync::atomic::AtomicBool::new(false),
@@ -597,7 +555,9 @@ async fn run_with_recovery(
         loop {
             tokio::select! {
                 raw=raw.recv()=>{match raw {
+                    #[cfg(feature = "agent-files")]
                     Some(control::SessionEvent::DirectoryPreview(preview))=>{let mut previews=collector.previews.lock().await;previews.retain(|(_,p)|p.id!=preview.id);if previews.len()==32{previews.pop_front();}previews.push_back((Instant::now(),preview));},
+                    #[cfg(feature = "agent-files")]
                     Some(control::SessionEvent::DirectoryPreviewFailed(id))=>collector.previews.lock().await.retain(|(_,p)|p.id!=id),
                     Some(control::SessionEvent::Diagnostic(message))=>{let mut lines=collector.diagnostics.lock().await;if lines.len()==32{lines.pop_front();}lines.push_back(message.chars().take(512).collect());},
                     Some(control::SessionEvent::PeerState { peer, state: crate::node::core::network_state::PeerLifecycle::Failed(message), .. })=>{let mut lines=collector.diagnostics.lock().await;if lines.len()==32{lines.pop_front();}lines.push_back(format!("设备 {}：{}",peer.short(),message).chars().take(512).collect());},

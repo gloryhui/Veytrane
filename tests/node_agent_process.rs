@@ -110,6 +110,9 @@ struct Node {
 impl Node {
     fn init(root: PathBuf) -> Self {
         cli_ok(&root, &["init"]);
+        Self::open(root)
+    }
+    fn open(root: PathBuf) -> Self {
         let paths = AgentPaths::new(&root).unwrap();
         Self {
             log: root.join("process.log"),
@@ -125,8 +128,11 @@ impl Node {
             .to_hex()
     }
     async fn start(&mut self) {
+        self.start_with(env!("CARGO_BIN_EXE_p2p-agent")).await;
+    }
+    async fn start_with(&mut self, binary: &str) {
         self.process = Some(spawn(
-            env!("CARGO_BIN_EXE_p2p-agent"),
+            binary,
             &["--data-dir", self.root.to_str().unwrap()],
             &self.log,
         ));

@@ -41,14 +41,14 @@ pub(crate) struct Prepared {
 pub(crate) struct ForwardManager {
     suppressed: HashSet<String>,
     active: HashMap<String, Running>,
-    owner: Arc<crate::tunnel::ForwardStreamOwner>,
+    owner: Arc<veytrane_tcp::ForwardStreamOwner>,
 }
 impl Default for ForwardManager {
     fn default() -> Self {
         Self {
             active: HashMap::new(),
             suppressed: HashSet::new(),
-            owner: Arc::new(crate::tunnel::ForwardStreamOwner::new(256)),
+            owner: Arc::new(veytrane_tcp::ForwardStreamOwner::new(256)),
         }
     }
 }
@@ -218,5 +218,5 @@ async fn open(tcp: tokio::net::TcpStream, mut route: Route) -> Result<()> {
     .await
     .map_err(|_| Error::Transport("等待对端认证超时，请先连接设备".into()))??;
     let stream = crate::node::core::services::open_tcp(&connection, &route.service).await?;
-    crate::tunnel::bridge_tcp(tcp, stream.send, stream.recv).await
+    veytrane_tcp::bridge_tcp(tcp, stream.send, stream.recv).await
 }

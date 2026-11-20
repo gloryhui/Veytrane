@@ -303,10 +303,8 @@ pub fn duration(seconds: u64) -> String {
 mod tests {
     use super::*;
     use crate::node::core::task_model::{PeerId, ProgressHint, TaskDiagnostic, TaskErrorCode};
-    use crate::{
-        identity::Identity,
-        protocol::manifest::{ChunkHash, FileManifest, MIN_CHUNK_SIZE},
-    };
+    use crate::identity::Identity;
+    use veytrane_files::manifest::{ChunkHash, FileManifest, MIN_CHUNK_SIZE};
     fn file(
         peer: NodeId,
         root: &std::path::Path,

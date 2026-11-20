@@ -1,48 +1,67 @@
 # 当前仓库分层与维护边界
 
-本说明对应 2026-10-21 的源码整理。它描述现有实现，不将历史规划或本地编译视为发布验收。网络协议设计见 [ARCHITECTURE.md](ARCHITECTURE.md)，协议兼容边界见 [NODE_COMPATIBILITY.md](specs/NODE_COMPATIBILITY.md)。
+本说明描述当前实现。施工阶段和验收记录见[节点模块化施工说明](../architecture/node-modularization-plan.md)，网络协议和兼容要求见 [ARCHITECTURE.md](ARCHITECTURE.md) 与 [NODE_COMPATIBILITY.md](specs/NODE_COMPATIBILITY.md)。
 
 ## 入口与依赖方向
 
 ```text
 src/bin/p2p-desktop.rs → desktop/agent_shell → node/api + node/local
 src/bin/p2p-node.rs   → node/adapters（CLI、HTTP）
-src/bin/p2p-agent.rs  → node/host → node/core + node/api + node/local
+src/bin/p2p-agent.rs  → node/host + 可选的 node/adapters/navigation
 src/bin/sub2api-*.rs / p2p-sub2api-gateway.rs → node/products
 src/main.rs          → 既有独立 CLI（admin、tunnel、transfer 等）
 
-node/core → 网络、协议、身份、通用存储基础设施
+node/core → 节点/传输、TCP、测速及选装的文件能力
 node/api  → core 的数据类型 + local 的 IPC 连接
 node/local → OS 路径、实例锁、通用私有目录权限
 node/host → core、api、local
 node/adapters / node/products → 以上服务与契约
 ```
 
-当前只维护现有调用方：`node/mod.rs` 只声明六个分层模块，旧 public 路径别名已删除，源码和集成测试均使用所属层路径。二进制名称、默认 feature、node.json、IPC JSON 和线上字节协议未变。
+默认构建保留现有二进制入口、`node.json`、IPC JSON 和线上协议。Agent 可选装文件和导航。根包的部分重导出仍供现有调用方使用。
 
 ## 源码职责
 
 | 位置 | 职责与边界 |
 | --- | --- |
-| `src/node/core/` | 唯一无 GUI 业务实现：会话、授权、配置、文件任务、服务目录、测速、调度与恢复。不得依赖 Agent 宿主、管理适配器、IPC 客户端或桌面。 |
+| `src/node/core/` | 节点会话、配置与运行装配。底层认证、流分发及业务执行由各能力包承接。 |
 | `src/node/core/settings.rs` | `NodeSettings`、持久配置记录及核心提交参数。`CommitOptions` 不再由宿主定义，核心可独立接收配置事务。 |
 | `src/node/host/` | Agent 进程所有权、管理命令执行、配置协调、转发监听和运行恢复。 |
 | `src/node/local/` | 当前 OS 用户的节点路径、IPC socket/pipe 连接与监听；权限实现由通用存储层提供。 |
 | `src/node/api/` | 管理请求/响应、版本信息与客户端。客户端不持有 Agent 实例、身份或网络会话。 |
-| `src/node/adapters/` | 管理 CLI、HTTP 网关、内嵌 Web HTML。Web 是 Agent 的客户端。 |
+| `src/node/adapters/` | 管理 CLI、独立 HTTP 网关和私有导航。Web 经本机 IPC 调用 Agent，可由 Agent 入口在同进程装配。 |
 | `src/node/products/` | Sub2API 限定用途组合及其恢复策略；复用核心与监听机制。 |
 | `src/desktop/agent_shell/` | 唯一 IPC 桌面及其工作台、窗口、托盘宿主。 |
 | `src/desktop/ui/` | 工作台与二级窗口共用控件、文本输入、视觉主题、品牌。无业务运行时所有权。 |
 | `src/desktop/platform/` | 桌面共用托盘、窗口隐藏/显示、展示状态；不反向引用任一窗口所有者。 |
-| `src/storage/` | 原子写入、私有目录权限、相对路径校验、句柄相对文件访问与下载落盘；不依赖 node/desktop。 |
+| `src/storage/` | 基础存储和独立 CLI 文件存储的兼容入口。 |
 | `src/discovery/`、`nat/`、`net/`、`transport/`、`relay/` | 共用的发现、打洞、连接竞速、QUIC、Relay。 |
 | `src/protocol/`、`transfer/`、`tunnel/`、`admin/` | 原独立 CLI 仍在使用的协议与执行路径；不能因与 node 同名就删除。 |
+| `crates/veytrane-transport` | 身份、绑定到 QUIC 会话的握手、端点、有界原始帧和 OS 存储原语。 |
+| `crates/veytrane-node` | P2PN 协商、双向流分发、会话授权、设备容量、连接代际及活动许可。 |
+| `crates/veytrane-files` | P2PF 文件协议、文件收发、调度、限速、落盘、回执、任务库及断点恢复。 |
+| `crates/veytrane-file-policy` | 保留配置中的限速值和接收余量校验，供裁剪 Agent 读写同一份 `node.json`。 |
+| `crates/veytrane-speed` | 测速控制、数据流、租约及结果。 |
+| `crates/veytrane-tcp` | TCP 规则校验、流配额、监听和 QUIC 字节桥接。 |
 
 `core/settings.rs` 定义当前 `node.json`。`core/config.rs` 仍有共享规则校验、测速类型和独立核心配置读写调用；已移除旧 schema 1–10 升级、历史目录发现、通知/后台偏好及无生产调用的偏好写入接口。旧桌面导入适配器与对应 CLI / UI 已删除。
 
 `core/process_tests.rs` 保留原先位于旧桌面目录的真实进程业务回归，直接依赖核心，随 node 特性测试执行，全部使用 P2PN v2 协商及统一分发器。
 
-`core/session.rs` 与 `core/transfer.rs` 的大型测试模块分别位于同名子目录的 `tests.rs`，仍然是原模块的子测试，可访问必要私有状态。进程测试使用 `module_path!()` 构造子进程入口，避免目录重组后悄悄执行零个测试。
+会话回归在 `src/node/core/session/tests.rs`，文件收发回归在 `crates/veytrane-files/src/transfer/tests.rs`。`scripts/node-core-e2e.py` 同时运行根节点、节点包及文件包的用例。
+
+## 构建组合
+
+```sh
+cargo build --locked --no-default-features --features node --bin p2p-agent --bin p2p-node
+cargo build --locked --no-default-features --features agent-base --bin p2p-agent
+cargo tree --locked --no-default-features --features agent-base -e normal,features
+cargo build --locked --no-default-features --features standalone --bin p2p_file
+```
+
+`node` 包含完整发行的文件、测速、TCP、导航与独立命令。`agent-base` 提供节点、测速、TCP 和 IPC，运行依赖树无需文件执行包、GPUI 或 HTTP 管理。`agent-files` 增加文件能力，`agent-web` 增加同进程导航。通过 `--no-default-features` 单独构建旧命令时，显式选择 `standalone`。已有安装版命令用法沿用。
+
+裁剪 Agent 初始化时把 `enable_files` 设为 `false`。读取或提交明确启用文件的配置时返回能力错误，保留当前配置文件。文件命令返回 `capability_disabled`，`Tasks` 仍返回空文件列表、空预览、可空队列与测速结果。
 
 ## 本次审阅后的处置
 
@@ -78,18 +97,18 @@ node/adapters / node/products → 以上服务与契约
 python3 scripts/check-architecture.py
 python3 scripts/update-architecture-map.py --check
 cargo fmt --all -- --check
-cargo check --locked --no-default-features --all-targets
+cargo check --locked --no-default-features --features standalone --all-targets
 cargo check --locked --all-features --all-targets
 cargo test --locked --all-features --all-targets --no-fail-fast -- --test-threads=4
 python3 scripts/package-desktop-tests.py
 python3 scripts/node-host-tests.py
 ```
 
-边界脚本检查显式 crate 路径，覆盖测试与当前主机未激活的条件分支，已接入现有 GPUI CI；它不替代 Rust 名称解析或运行验收。跨层导入采用规范路径，不绕过公共层级重导出来隐藏依赖。桌面核心中的会话与文件执行仍是较大的状态机；进一步拆业务算法需连同并发、事务及协议负例独立验证，不能只按行数切碎。
+边界脚本覆盖显式分层导入，包括测试与当前主机未激活的条件分支。Cargo 依赖树和实际进程分别用于核对编译边界与运行行为。
 
 本次清理与验证见 [遗留代码清理记录](task-reports/LEGACY_CLEANUP.md)；首次分层证据见 [分层整理验证记录](task-reports/REPOSITORY_REORGANIZATION.md)。
 
-当前节点只有 `wire.rs` 协商和 `dispatch.rs` 分发入口。`protocol.rs` 是 P2PF 文件/测速载荷；`services.rs` 负责服务 ID 开流，字节搬运复用 `src/tunnel/mod.rs`。旧 `core/tunnel.rs`、PeerWireMode 与双路入站循环已删除。
+节点的 P2PN 协商与双向流分发位于 `veytrane-node`。文件与测速分别解码已分配的 P2PF 消息，`services.rs` 负责按服务 ID 开流并复用 `veytrane-tcp` 的字节搬运。
 
 ## 无信令连接入口
 

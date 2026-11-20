@@ -3,4 +3,5 @@
 pub mod agent;
 pub mod configuration;
 pub(crate) mod forwarding;
+#[cfg(feature = "node")]
 pub(crate) mod recovery;

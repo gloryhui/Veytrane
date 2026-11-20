@@ -148,6 +148,9 @@ impl Agent {
                 current.revision
             ));
         }
+        if let Some(error) = settings.unsupported_capability() {
+            return Err(error.into());
+        }
         settings.validate().map_err(|e| e.to_string())?;
         // These fields change network/runtime ownership. An online update must
         // never tear down a healthy node merely to learn whether it can start.

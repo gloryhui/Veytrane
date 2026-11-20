@@ -149,7 +149,11 @@ Veytrane 的核心是可信节点之间建立、维持和恢复连接的机制�
 - `cb0c80f`、`1737a67` 迁移分片、自动续传计划、扫描、目录比较与接收发布。实际增量收发通过。发布进程在 10 个步骤分别被终止后，恢复均保全旧内容、新内容及唯一完成回执。
 - `4d17e22`、`a0d1e2d`、`274af9f` 将任务尝试计量、有界快照事实和路径重验迁入文件能力。快照排序、暂停、继续、回执以及路径替换回归通过，现有管理呈现仍从同一份事实转换。
 - `0172ef9`、`b8ad91f` 迁移 v3 身份握手报文、签名载荷与 QUIC 会话绑定。固定字节、原始帧往返、旧 CLI 编解码及真实 QUIC 握手定向验证通过。
-- 后续仍需迁出文件任务执行与会话中的具体文件类型，并用真实裁剪 Agent 构建与完整安装组合检验 S3。
+- `17e6935` 将文件收发运行时和原真实连接测试迁入 `veytrane-files`。61 项运行时用例通过，涵盖重启恢复、增量、队列、完整性和测速互斥；根双进程暂停、存储故障以及新会话续传回归通过。
+- `1ae0129`、`ee337ba` 将 peer 容量、代际和会话鉴权迁入节点包。7 项容量与代际、18 项鉴权及现有会话强撤销回归通过。`3fe7063` 由节点组装共享活动许可、变更通知和帧预算。
+- `d5a1406` 将既有文件配置值从执行包分出。`agent-base` 保留 `node.json` 字段，仅链接纯配置规则。根包默认 `node` 继续包含全部原发行入口，独立 CLI 使用 `--no-default-features --features standalone` 构建。
+- 已实际构建 `cargo build --locked --offline --no-default-features --features agent-base --bin p2p-agent`。同组合正常依赖树无 `veytrane-files`、GPUI 或 Axum。用 `VEYTRANE_TEST_MINIMAL_AGENT` 指向该二进制运行 `file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage`，两个进程分别初始化并通过 TCP、30 秒测速和重连，拒绝启用缺失能力且配置字节未变，停止后无接收目录和任务库。`agent-base,agent-web` 的入口也通过编译检查。
+- 完整 `node` 构建的真实 Agent 文件、TCP 与撤销回归通过。显式 `standalone` 构建的 IPv4、IPv6 独立收发通过。混合构建组合、Windows/Linux 实机及完整交付矩阵仍需最终验收。
 
 ## 7. 新增或移除业务时的操作示例
 

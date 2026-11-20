@@ -56,12 +56,20 @@ impl NodeSettings {
             auto_resume: true,
             receive_safety_mib: 64,
             file_limits: Default::default(),
-            enable_files: true,
+            enable_files: cfg!(feature = "agent-files"),
             enable_speed: true,
             enable_tcp: true,
         }
     }
+    pub(crate) fn unsupported_capability(&self) -> Option<&'static str> {
+        (self.enable_files && !cfg!(feature = "agent-files"))
+            .then_some("capability_disabled: 当前构建未包含文件服务")
+    }
+
     pub fn validate(&self) -> Result<()> {
+        if let Some(error) = self.unsupported_capability() {
+            return Err(Error::Protocol(error.into()));
+        }
         self.direct.validate()?;
         if !self.receive_root.is_absolute() || self.receive_root.as_os_str().len() > 4096 {
             return Err(Error::Protocol("接收根必须是绝对路径".into()));

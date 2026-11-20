@@ -51,7 +51,7 @@ use crate::identity::{
     Identity, NodeId, public_key_from_bytes, signature_from_bytes, verify_signature,
 };
 use crate::nat::punch::PunchToken;
-use crate::protocol::frame::{read_raw_frame_limited, write_raw_frame_limited};
+use crate::protocol::raw_frame::{read_raw_frame_limited, write_raw_frame_limited};
 trait SignalIo: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> SignalIo for T {}
 type SignalStream = Box<dyn SignalIo>;

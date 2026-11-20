@@ -46,8 +46,30 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
     use p2p_file::node::core::config::SpeedtestDirection;
 
     let sandbox = Sandbox::new();
-    let mut client = Node::init(sandbox.0.join("client"));
-    let mut server = Node::init(sandbox.0.join("server"));
+    let minimal = std::env::var_os("VEYTRANE_TEST_MINIMAL_AGENT")
+        .map(|path| path.into_string().expect("验收二进制路径不是 UTF-8"));
+    let init = |name: &str| {
+        let root = sandbox.0.join(name);
+        let Some(binary) = minimal.as_deref() else {
+            return Node::init(root);
+        };
+        let initialized = Command::new(binary)
+            .arg("--data-dir")
+            .arg(&root)
+            .arg("--init")
+            .output()
+            .unwrap();
+        assert!(
+            initialized.status.success(),
+            "{}",
+            String::from_utf8_lossy(&initialized.stderr)
+        );
+        let record = ConfigRecord::load(&root.join("node.json")).unwrap();
+        assert!(!record.settings.enable_files);
+        Node::open(root)
+    };
+    let mut client = init("client");
+    let mut server = init("server");
     let client_id = client.id();
     let server_id = server.id();
     let target = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -82,8 +104,21 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
         offline(node, settings);
     }
 
-    server.start().await;
-    client.start().await;
+    if let Some(binary) = minimal.as_deref() {
+        server.start_with(binary).await;
+        client.start_with(binary).await;
+    } else {
+        server.start().await;
+        client.start().await;
+    }
+    if minimal.is_some() {
+        let before = fs::read(client.root.join("node.json")).unwrap();
+        let mut config = client.config().await;
+        config["settings"]["enable_files"] = json!(true);
+        let rejected = client.apply(&config).await;
+        assert_eq!(rejected.error.unwrap().code, "capability_disabled");
+        assert_eq!(fs::read(client.root.join("node.json")).unwrap(), before);
+    }
     for node in [&client, &server] {
         node.ok(Api::SetPassword {
             expected_revision: 1,
@@ -119,6 +154,7 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
         let tasks = client.ok(Api::Tasks { offset: 0 }).await;
         assert_eq!(tasks["tasks"], json!([]));
         assert!(tasks["queue"].is_null());
+        assert_eq!(tasks["directory_previews"], json!([]));
         let speeds = tasks["speeds"].as_array().unwrap();
         if !tcp_during_speed
             && speeds

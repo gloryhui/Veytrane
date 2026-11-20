@@ -1,9 +1,11 @@
 //! Compatibility path for the file protocol and shared capability/speed IDs.
 
+#[cfg(feature = "agent-files")]
 pub use veytrane_files::protocol::{
     Actor, Difference, Entry, ErrorCode, Frame, MAX_TASKS_PER_PEER, Message, TaskProtocol,
     WireTaskState, read, validate_relative_path, write,
 };
+#[cfg(feature = "agent-files")]
 pub use veytrane_files::task_model::MAX_CHUNKS;
 pub use veytrane_node::capability::{
     CAP_AUTO_RESUME, CAP_DIRECTORY_TRANSFER, CAP_FILE_FLOW, CAP_FILE_TRANSFER,
@@ -18,7 +20,7 @@ pub use veytrane_speed::control::{SpeedArbiter, SpeedControl, SpeedDirection, Sp
 mod tests {
     use super::*;
     use crate::identity::Identity;
-    use crate::node::core::task_model::TaskId;
+    use veytrane_node::operation_id::TaskId;
 
     fn task() -> TaskId {
         TaskId::parse("00112233445566778899aabbccddeeff").unwrap()

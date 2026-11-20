@@ -47,6 +47,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", p2p_file::node::api::build_info::value("p2p-agent"));
         return Ok(());
     }
+    #[cfg(not(feature = "agent-web"))]
+    if !args.no_navigation && args.navigation_config.is_some() {
+        return Err("当前构建未包含导航管理".into());
+    }
     let root = match args.data_dir {
         Some(root) => root,
         None => AgentPaths::default_root()?,
@@ -64,6 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         p2p_file::transport::diagnostic::configure(path, seconds)?;
         p2p_file::transport::diagnostic::startup(seconds);
     }
+    #[cfg(feature = "agent-web")]
     let navigation = if args.no_navigation {
         None
     } else if let Some(path) = args.navigation_config {
@@ -75,9 +80,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|root| root.join("navigation/config.json"))
             .filter(|path| path.is_file())
     };
+    #[cfg(feature = "agent-web")]
     if let Some(config) = navigation {
         run_with_navigation(paths, args.managed, config).await?;
-    } else if args.managed {
+        return Ok(());
+    }
+    if args.managed {
         agent::run_managed(paths).await?;
     } else {
         agent::run(paths).await?;
@@ -85,6 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(feature = "agent-web")]
 async fn run_with_navigation(
     paths: AgentPaths,
     managed: bool,

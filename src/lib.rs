@@ -13,7 +13,9 @@
 //! - [`tunnel`]     TCP-over-QUIC 端口转发
 //! - [`storage`]    落盘与续传状态
 
+#[cfg(feature = "standalone")]
 pub mod admin;
+#[cfg(feature = "standalone")]
 pub mod cli;
 pub mod discovery;
 pub mod error;
@@ -23,13 +25,17 @@ pub mod nat;
 pub mod net;
 pub mod protocol;
 pub mod relay;
+#[cfg(feature = "standalone")]
 pub mod speedtest;
+#[cfg(any(feature = "standalone", feature = "agent-base"))]
 pub mod storage;
+#[cfg(feature = "standalone")]
 pub mod transfer;
 pub mod transport;
+#[cfg(feature = "standalone")]
 pub mod tunnel;
 
-#[cfg(feature = "node")]
+#[cfg(feature = "agent-base")]
 pub mod node;
 
 #[cfg(feature = "gui")]

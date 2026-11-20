@@ -5,7 +5,7 @@ pub use veytrane_transport::identity_wire::{
     read_identity_frame, write_identity_frame,
 };
 
-#[cfg(test)]
+#[cfg(all(test, feature = "standalone"))]
 mod tests {
     use super::*;
     use crate::identity::NodeId;

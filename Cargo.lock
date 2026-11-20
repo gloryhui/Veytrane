@@ -4415,8 +4415,6 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "blake3",
- "cap-fs-ext",
- "cap-std",
  "clap",
  "dirs 5.0.1",
  "ed25519-dalek",
@@ -4446,7 +4444,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tray-icon",
- "unicode-normalization",
  "unicode-segmentation",
  "veytrane-file-policy",
  "veytrane-files",

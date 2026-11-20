@@ -27,21 +27,21 @@ default = ["node"]
 sub2api-client = ["node"]
 sub2api-gateway = ["node"]
 live = ["node", "dep:reqwest"]
-node = [
+node = ["agent-base", "agent-files", "agent-web", "standalone"]
+agent-base = [
     "dep:veytrane-file-policy",
     "dep:veytrane-node",
     "veytrane-node/remote-auth",
     "veytrane-speed/node-runtime",
-    "veytrane-files/node-runtime",
     "veytrane-transport/private-storage",
     "dep:sha2",
     "dep:dirs",
-    "dep:cap-std",
-    "dep:cap-fs-ext",
-    "dep:unicode-normalization",
     "dep:rustix",
     "dep:windows-sys",
 ]
+agent-files = ["agent-base", "dep:veytrane-files", "veytrane-files/node-runtime"]
+agent-web = ["agent-base", "dep:axum"]
+standalone = ["dep:veytrane-files", "dep:axum"]
 gui = [
     "node",
     "dep:gpui",
@@ -55,7 +55,7 @@ gui = [
 
 [dependencies]
 veytrane-file-policy = { path = "crates/veytrane-file-policy", optional = true }
-veytrane-files = { path = "crates/veytrane-files" }
+veytrane-files = { path = "crates/veytrane-files", optional = true }
 veytrane-node = { path = "crates/veytrane-node", optional = true }
 veytrane-speed = { path = "crates/veytrane-speed", default-features = false }
 veytrane-tcp = { path = "crates/veytrane-tcp" }
@@ -84,13 +84,10 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 gpui = { version = "=0.2.2", optional = true }
 dirs = { version = "=5.0.1", optional = true }
 serde_json = "=1.0.151"
-axum = "=0.8.9"
+axum = { version = "=0.8.9", optional = true }
 reqwest = { version = "=0.13.5", default-features = false, optional = true }
 unicode-segmentation = { version = "1.13.3", optional = true }
-cap-std = { version = "=3.4.6", optional = true }
-cap-fs-ext = { version = "=3.4.6", optional = true }
 raw-window-handle = { version = "=0.6.2", optional = true }
-unicode-normalization = { version = "=0.1.25", optional = true }
 
 [build-dependencies]
 embed-resource = "=3.0.11"
@@ -110,7 +107,12 @@ required-features = ["gui"]
 [[bin]]
 name = "p2p-agent"
 path = "src/bin/p2p-agent.rs"
-required-features = ["node"]
+required-features = ["agent-base"]
+
+[[bin]]
+name = "p2p_file"
+path = "src/main.rs"
+required-features = ["standalone"]
 
 [[bin]]
 name = "p2p-node"
@@ -141,6 +143,18 @@ required-features = ["live"]
 name = "live-gateway"
 path = "src/bin/live-gateway.rs"
 required-features = ["live"]
+
+[[test]]
+name = "ipv6_cli_send"
+required-features = ["standalone"]
+
+[[test]]
+name = "issue3_chunk_size_before_alloc"
+required-features = ["standalone"]
+
+[[test]]
+name = "signaling_tls_cli"
+required-features = ["standalone"]
 
 [target."cfg(unix)".dependencies]
 rustix = { version = "=1.1.5", features = ["fs", "process"], optional = true }

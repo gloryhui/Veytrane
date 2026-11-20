@@ -1,6 +1,7 @@
 //! In-process node control. Commands and snapshots contain no GUI or QUIC handles.
 
 use std::collections::BTreeMap;
+#[cfg(feature = "agent-files")]
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -9,10 +10,11 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::error::{Error, Result};
 use crate::identity::{Identity, NodeId};
+#[cfg(feature = "agent-files")]
 pub use crate::node::core::drop_send::Admission as PathAdmission;
 use crate::node::core::remote_auth::SecretPassword;
 pub use crate::node::core::session::{SessionEvent, change_trusted_device};
-use crate::node::core::task_model::TaskId;
+use veytrane_node::operation_id::TaskId;
 
 pub use crate::node::core::session::{
     NodeSessionConfig, NodeSessionHandle as NodeControl, TrustedDeviceChange,
@@ -114,6 +116,7 @@ pub(crate) struct ControlState {
     events: broadcast::Sender<SequencedEvent>,
     trust_sources: Arc<Mutex<BTreeMap<String, crate::node::core::authorization::TrustSource>>>,
     max_peers: usize,
+    #[cfg(feature = "agent-files")]
     pub(crate) transfer: Option<crate::node::core::transfer::TransferService>,
     pub(crate) speed: Option<crate::node::core::speed::SpeedService>,
 }
@@ -159,7 +162,6 @@ impl ControlState {
     }
     pub(crate) fn new(
         identity: NodeId,
-        transfer: Option<crate::node::core::transfer::TransferService>,
         speed: Option<crate::node::core::speed::SpeedService>,
         max_peers: usize,
     ) -> Self {
@@ -173,9 +175,21 @@ impl ControlState {
             events,
             trust_sources: Default::default(),
             max_peers,
-            transfer,
+            #[cfg(feature = "agent-files")]
+            transfer: None,
             speed,
         }
+    }
+    #[cfg(feature = "agent-files")]
+    pub(crate) fn new_with_files(
+        identity: NodeId,
+        transfer: Option<crate::node::core::transfer::TransferService>,
+        speed: Option<crate::node::core::speed::SpeedService>,
+        max_peers: usize,
+    ) -> Self {
+        let mut state = Self::new(identity, speed, max_peers);
+        state.transfer = transfer;
+        state
     }
 
     pub(crate) fn observe(&self, event: &SessionEvent) {
@@ -357,6 +371,7 @@ pub fn spawn(
     Ok((handle, ControlEvents { receiver }))
 }
 
+#[cfg(feature = "agent-files")]
 /// Explicit persistent file service; capability negotiation is finalized in P3.
 pub fn spawn_with_storage(
     identity: Identity,
@@ -394,21 +409,26 @@ pub enum NodeCommand {
     StopTunnel {
         rule_id: String,
     },
+    #[cfg(feature = "agent-files")]
     SendPaths {
         peer: NodeId,
         paths: Vec<PathBuf>,
     },
+    #[cfg(feature = "agent-files")]
     Pause {
         task: TaskId,
     },
+    #[cfg(feature = "agent-files")]
     Resume {
         peer: NodeId,
         task: TaskId,
     },
+    #[cfg(feature = "agent-files")]
     ConfirmDirectory {
         peer: NodeId,
         request: TaskId,
     },
+    #[cfg(feature = "agent-files")]
     CancelDirectory {
         request: TaskId,
     },
@@ -456,12 +476,17 @@ impl NodeControl {
             NodeCommand::ConnectTrusted { peer } => self.connect_peer_trusted(peer),
             NodeCommand::StartTunnel { rule_id } => self.start_tunnel_rule(rule_id),
             NodeCommand::StopTunnel { rule_id } => self.stop_tunnel_rule(rule_id),
+            #[cfg(feature = "agent-files")]
             NodeCommand::SendPaths { peer, paths } => self.send_paths(peer, paths),
+            #[cfg(feature = "agent-files")]
             NodeCommand::Pause { task } => self.pause_task(task),
+            #[cfg(feature = "agent-files")]
             NodeCommand::Resume { peer, task } => self.resume_task(peer, task),
+            #[cfg(feature = "agent-files")]
             NodeCommand::ConfirmDirectory { peer, request } => {
                 self.confirm_directory(peer, request)
             }
+            #[cfg(feature = "agent-files")]
             NodeCommand::CancelDirectory { request } => self.cancel_directory_preview(request),
             NodeCommand::StartSpeed {
                 peer,
@@ -476,6 +501,7 @@ impl NodeControl {
         };
         result.map_err(Error::Protocol)
     }
+    #[cfg(feature = "agent-files")]
     pub fn task_snapshot(&self) -> Result<Option<crate::node::core::snapshot::Snapshot>> {
         self.control
             .transfer
@@ -487,8 +513,16 @@ impl NodeControl {
             })
             .transpose()
     }
+    #[cfg_attr(not(feature = "agent-files"), allow(dead_code))]
     pub(crate) fn has_file_service(&self) -> bool {
-        self.control.transfer.is_some()
+        #[cfg(feature = "agent-files")]
+        {
+            self.control.transfer.is_some()
+        }
+        #[cfg(not(feature = "agent-files"))]
+        {
+            false
+        }
     }
     pub(crate) fn speed_snapshots(
         &self,
@@ -502,44 +536,55 @@ impl NodeControl {
 }
 
 impl NodeControl {
+    #[cfg(feature = "agent-files")]
     fn file_service(&self) -> Result<&crate::node::core::transfer::TransferService> {
         self.control
             .transfer
             .as_ref()
             .ok_or_else(|| Error::Protocol("文件服务未启用".into()))
     }
+    #[cfg(feature = "agent-files")]
     pub async fn cancel_task(&self, task: TaskId) -> Result<()> {
         self.file_service()?.cancel_task(task).await
     }
+    #[cfg(feature = "agent-files")]
     pub fn set_auto_resume(&self, enabled: bool) -> Result<()> {
         self.file_service()?.set_auto_resume(enabled);
         Ok(())
     }
+    #[cfg(feature = "agent-files")]
     pub fn set_send_limit(&self, limit: u8) -> Result<()> {
         self.file_service()?.set_send_limit(limit)
     }
+    #[cfg(feature = "agent-files")]
     pub fn set_file_limits(&self, limits: crate::node::core::bandwidth::FileLimits) -> Result<()> {
         self.file_service()?.set_file_limits(limits)
     }
+    #[cfg(feature = "agent-files")]
     pub fn set_receive_root(&self, root: PathBuf) -> Result<()> {
         self.file_service()?.set_receive_root(root);
         Ok(())
     }
+    #[cfg(feature = "agent-files")]
     pub fn set_receive_safety_mib(&self, value: u16) -> Result<()> {
         self.file_service()?.set_receive_safety_mib(value)
     }
+    #[cfg(feature = "agent-files")]
     pub fn remove_completed_task(&self, task: &TaskId) -> Result<()> {
         self.file_service()?.remove_completed_task(task)
     }
+    #[cfg(feature = "agent-files")]
     pub fn remove_completed_history(
         &self,
         tasks: std::collections::BTreeSet<TaskId>,
     ) -> Result<Vec<TaskId>> {
         self.file_service()?.remove_completed_history(tasks)
     }
+    #[cfg(feature = "agent-files")]
     pub fn delete_completed_receive_file(&self, task: &TaskId) -> Result<()> {
         self.file_service()?.delete_completed_receive_file(task)
     }
+    #[cfg(feature = "agent-files")]
     pub fn reveal_task(
         &self,
         selection: &crate::node::core::task_details::Selection,
@@ -557,7 +602,6 @@ mod transport_tests {
         let id = Identity::generate().node_id();
         let state = ControlState::new(
             id,
-            None,
             None,
             crate::node::core::network_state::DEFAULT_MAX_PEERS,
         );
@@ -612,7 +656,7 @@ mod transport_tests {
     fn peer_snapshot_and_short_id_cache_follow_instance_capacity() {
         let local = Identity::generate().node_id();
         let capacity = 3;
-        let state = ControlState::new(local, None, None, capacity);
+        let state = ControlState::new(local, None, capacity);
         for generation in 1..=capacity as u64 + 1 {
             state.observe(&SessionEvent::PeerState {
                 peer: Identity::generate().node_id(),

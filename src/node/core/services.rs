@@ -41,7 +41,7 @@ pub async fn serve(
     targets: watch::Receiver<Vec<AllowedForwardTarget>>,
     resources: watch::Receiver<ResourcePolicy>,
     mut incoming: mpsc::Receiver<BiStream>,
-    tcp_streams: Arc<crate::tunnel::ForwardStreamOwner>,
+    tcp_streams: Arc<veytrane_tcp::ForwardStreamOwner>,
 ) -> Result<()> {
     let mut streams = JoinSet::new();
     let controls = Arc::new(Semaphore::new(MAX_PENDING_CONTROLS));
@@ -86,7 +86,7 @@ async fn handle(
     resources: &watch::Receiver<ResourcePolicy>,
     mut stream: BiStream,
     control: OwnedSemaphorePermit,
-    tcp_streams: Arc<crate::tunnel::ForwardStreamOwner>,
+    tcp_streams: Arc<veytrane_tcp::ForwardStreamOwner>,
 ) -> Result<()> {
     let prepared = tokio::time::timeout(
         RPC_TIMEOUT,
@@ -98,7 +98,7 @@ async fn handle(
     drop(control);
     match prepared {
         Ok(Ok(Some((tcp, _tcp_permit)))) => {
-            crate::tunnel::bridge_tcp(tcp, stream.send, stream.recv).await
+            veytrane_tcp::bridge_tcp(tcp, stream.send, stream.recv).await
         }
         Ok(Ok(None)) => Ok(()),
         Ok(Err(error)) => Err(error),
@@ -115,7 +115,7 @@ async fn prepare(
     targets: &watch::Receiver<Vec<AllowedForwardTarget>>,
     resources: &watch::Receiver<ResourcePolicy>,
     stream: &mut BiStream,
-    tcp_streams: &crate::tunnel::ForwardStreamOwner,
+    tcp_streams: &veytrane_tcp::ForwardStreamOwner,
 ) -> Result<Option<(tokio::net::TcpStream, OwnedSemaphorePermit)>> {
     let request = tokio::time::timeout(Duration::from_secs(5), wire::read(&mut stream.recv))
         .await
@@ -158,7 +158,7 @@ async fn prepare(
             let Some(permit) = tcp_streams.try_reserve() else {
                 return reject(stream, id, NodeErrorCode::Busy).await.map(|_| None);
             };
-            let tcp = match crate::tunnel::connect_allowed_target(target, &[target]).await {
+            let tcp = match veytrane_tcp::connect_allowed_target(target, &[target]).await {
                 Ok(tcp) => tcp,
                 Err(_) => {
                     return reject(stream, id, NodeErrorCode::TargetUnavailable)

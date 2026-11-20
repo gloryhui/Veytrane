@@ -21,6 +21,7 @@
 
 pub mod family;
 pub mod race;
+#[cfg(feature = "standalone")]
 pub(crate) mod signaling;
 pub use family::{AddressFamily, NetworkFamilies};
 
@@ -238,6 +239,7 @@ pub struct DirectLink {
     observations: Vec<race::ProbeObservation>,
 }
 impl DirectLink {
+    #[cfg(feature = "standalone")]
     pub(crate) fn signaling_config(
         &self,
     ) -> (
@@ -247,6 +249,7 @@ impl DirectLink {
         (self.signal_server.clone(), self.signal_tls.clone())
     }
 
+    #[cfg(feature = "standalone")]
     pub(crate) fn probe_observations(&self) -> Vec<race::ProbeObservation> {
         self.observations.clone()
     }

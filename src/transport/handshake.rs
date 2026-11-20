@@ -6,7 +6,7 @@ pub use veytrane_transport::handshake::{
     prepare_handshake_responder,
 };
 
-#[cfg(test)]
+#[cfg(all(test, feature = "standalone"))]
 mod tests {
     use super::*;
     use crate::error::{Error, Result};

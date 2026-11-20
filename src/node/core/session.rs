@@ -24,7 +24,7 @@ use crate::net::race::{ConnectionGuard, PreparedTransport};
 use crate::net::{
     AddressFamily, DesktopNetwork, DesktopNetworkConfig, NetworkPath, prepare_desktop_network,
 };
-#[cfg(feature = "node")]
+#[cfg(feature = "agent-base")]
 use crate::transport::diagnostic as udp_diag;
 #[cfg(test)]
 use crate::transport::handshake::handshake_initiator;
@@ -40,6 +40,7 @@ use crate::discovery::short_id::ShortId;
 use crate::node::core::remote_auth::{
     AuthContext, RemoteAuthorization, RemoteVerifier, SecretPassword,
 };
+use veytrane_node::operation_id::TaskId;
 
 use crate::node::core::network_state::{
     BeginPeerAttempt, DEFAULT_MAX_PEERS, MAX_PEER_CAPACITY, MAX_PENDING_PEERS, NetworkLifecycle,
@@ -218,6 +219,7 @@ pub struct NodeSessionConfig {
     pub network: DesktopNetworkConfig,
     pub allowed_forward_targets: Vec<crate::node::core::config::AllowedForwardTarget>,
     pub tunnel_rules: Vec<crate::node::core::config::TunnelRule>,
+    #[cfg(feature = "agent-files")]
     pub(crate) transfer: Option<crate::node::core::transfer::TransferService>,
     pub(crate) shared_runtime: Option<SharedRuntime>,
 }
@@ -272,6 +274,7 @@ impl NodeSessionConfig {
             network: DesktopNetworkConfig::default(),
             allowed_forward_targets: Vec::new(),
             tunnel_rules: Vec::new(),
+            #[cfg(feature = "agent-files")]
             transfer: None,
             shared_runtime: None,
         }
@@ -360,8 +363,11 @@ pub enum SessionEvent {
         peer: Option<NodeId>,
     },
     Diagnostic(String),
+    #[cfg(feature = "agent-files")]
     DirectoryPreview(crate::node::core::incremental::Preview),
-    DirectoryPreviewFailed(crate::node::core::task_model::TaskId),
+    #[cfg(feature = "agent-files")]
+    DirectoryPreviewFailed(TaskId),
+    #[cfg(feature = "agent-files")]
     SelectionQueued {
         peer: NodeId,
         count: usize,
@@ -706,6 +712,7 @@ impl NodeSessionHandle {
             .map_err(|_| "网络会话在停止规则前退出".to_owned())
     }
 
+    #[cfg(feature = "agent-files")]
     pub fn send_paths(
         &self,
         peer: NodeId,
@@ -718,6 +725,7 @@ impl NodeSessionHandle {
             .map_err(|_| "传输命令队列已满或会话已关闭；拖入项尚未提交".into())
     }
     #[allow(dead_code)] // T010 product controls call this tested backend command.
+    #[cfg(feature = "agent-files")]
     pub fn send_file(
         &self,
         peer: NodeId,
@@ -728,19 +736,21 @@ impl NodeSessionHandle {
             .map_err(|_| "传输命令队列已满或会话已关闭".into())
     }
     #[allow(dead_code)] // T010 product controls call this tested backend command.
+    #[cfg(feature = "agent-files")]
     pub fn pause_task(
         &self,
-        id: crate::node::core::task_model::TaskId,
+        id: TaskId,
     ) -> std::result::Result<(), String> {
         self.commands
             .try_send(SessionCommand::PauseTask(id))
             .map_err(|_| "传输命令队列已满或会话已关闭".into())
     }
     #[allow(dead_code)] // T010 product controls call this tested backend command.
+    #[cfg(feature = "agent-files")]
     pub fn resume_task(
         &self,
         peer: NodeId,
-        id: crate::node::core::task_model::TaskId,
+        id: TaskId,
     ) -> std::result::Result<(), String> {
         self.commands
             .try_send(SessionCommand::ResumeTask { peer, id })
@@ -748,12 +758,13 @@ impl NodeSessionHandle {
     }
 
     #[allow(dead_code)] // T010 selection controls.
+    #[cfg(feature = "agent-files")]
     pub fn preview_directory(
         &self,
         peer: NodeId,
         source: std::path::PathBuf,
-    ) -> std::result::Result<crate::node::core::task_model::TaskId, String> {
-        let request = crate::node::core::task_model::TaskId::generate();
+    ) -> std::result::Result<TaskId, String> {
+        let request = TaskId::generate();
         self.commands
             .try_send(SessionCommand::PreviewDirectory {
                 peer,
@@ -763,24 +774,27 @@ impl NodeSessionHandle {
             .map_err(|_| "目录预览命令队列已满或会话已关闭".to_owned())?;
         Ok(request)
     }
+    #[cfg(feature = "agent-files")]
     pub fn confirm_directory(
         &self,
         peer: NodeId,
-        id: crate::node::core::task_model::TaskId,
+        id: TaskId,
     ) -> std::result::Result<(), String> {
         self.commands
             .try_send(SessionCommand::ConfirmDirectory { peer, id })
             .map_err(|_| "目录确认命令队列已满或会话已关闭".into())
     }
+    #[cfg(feature = "agent-files")]
     pub fn cancel_directory_preview(
         &self,
-        id: crate::node::core::task_model::TaskId,
+        id: TaskId,
     ) -> std::result::Result<(), String> {
         self.commands
             .try_send(SessionCommand::CancelDirectoryPreview(id))
             .map_err(|_| "目录取消命令队列已满或会话已关闭".into())
     }
 
+    #[cfg(feature = "agent-files")]
     pub fn send_directory(
         &self,
         peer: NodeId,
@@ -812,7 +826,7 @@ impl NodeSessionHandle {
     pub fn cancel_speed(
         &self,
         peer: NodeId,
-        id: crate::node::core::task_model::TaskId,
+        id: TaskId,
     ) -> std::result::Result<(), String> {
         if self.control.speed.is_none() {
             return Err("capability_disabled: 测速服务未启用".into());
@@ -937,38 +951,46 @@ enum SessionCommand {
     },
     CancelSpeed {
         peer: NodeId,
-        id: crate::node::core::task_model::TaskId,
+        id: TaskId,
     },
+    #[cfg(feature = "agent-files")]
     PreviewDirectory {
         peer: NodeId,
         source: std::path::PathBuf,
-        request: crate::node::core::task_model::TaskId,
+        request: TaskId,
     },
+    #[cfg(feature = "agent-files")]
     ConfirmDirectory {
         peer: NodeId,
-        id: crate::node::core::task_model::TaskId,
+        id: TaskId,
     },
-    CancelDirectoryPreview(crate::node::core::task_model::TaskId),
+    #[cfg(feature = "agent-files")]
+    CancelDirectoryPreview(TaskId),
+    #[cfg(feature = "agent-files")]
     SendPaths {
         peer: NodeId,
         sources: Vec<std::path::PathBuf>,
     },
     #[allow(dead_code)] // T010 selection controls.
+    #[cfg(feature = "agent-files")]
     SendDirectory {
         peer: NodeId,
         source: std::path::PathBuf,
     },
     #[allow(dead_code)] // T010 product controls.
+    #[cfg(feature = "agent-files")]
     SendFile {
         peer: NodeId,
         source: std::path::PathBuf,
     },
     #[allow(dead_code)] // T010 product controls.
-    PauseTask(crate::node::core::task_model::TaskId),
+    #[cfg(feature = "agent-files")]
+    PauseTask(TaskId),
     #[allow(dead_code)] // T010 product controls.
+    #[cfg(feature = "agent-files")]
     ResumeTask {
         peer: NodeId,
-        id: crate::node::core::task_model::TaskId,
+        id: TaskId,
     },
     ConnectPeer(NodeId),
     ConnectTrusted(NodeId),
@@ -1012,7 +1034,7 @@ enum SessionCommand {
     UpdateTunnelSettings {
         tunnel_rules: Vec<crate::node::core::config::TunnelRule>,
     },
-    #[cfg(test)]
+    #[cfg(all(test, feature = "node"))]
     TestNetworkLoss(NodeId, oneshot::Sender<()>),
     #[cfg(test)]
     InspectDeferred(NodeId, oneshot::Sender<Option<PunchToken>>),
@@ -1023,28 +1045,37 @@ enum SessionCommand {
 impl SessionCommand {
     fn required_capability(&self) -> u64 {
         match self {
-            Self::StartSpeed { .. } => crate::node::core::protocol::CAP_SPEED_EXECUTION,
+            Self::StartSpeed { .. } => veytrane_node::capability::CAP_SPEED_EXECUTION,
+            #[cfg(feature = "agent-files")]
             Self::PreviewDirectory { .. }
             | Self::ConfirmDirectory { .. }
-            | Self::SendDirectory { .. } => crate::node::core::protocol::CAP_DIRECTORY_TRANSFER,
-            _ => crate::node::core::protocol::CAP_FILE_TRANSFER,
+            | Self::SendDirectory { .. } => veytrane_node::capability::CAP_DIRECTORY_TRANSFER,
+            #[cfg(feature = "agent-files")]
+            _ => veytrane_node::capability::CAP_FILE_TRANSFER,
+            #[cfg(not(feature = "agent-files"))]
+            _ => 0,
         }
     }
-    fn preview_request(&self) -> Option<crate::node::core::task_model::TaskId> {
+    #[cfg_attr(not(feature = "agent-files"), allow(dead_code))]
+    fn preview_request(&self) -> Option<TaskId> {
+        #[cfg(feature = "agent-files")]
         match self {
             Self::PreviewDirectory { request, .. } => Some(request.clone()),
             _ => None,
         }
+        #[cfg(not(feature = "agent-files"))]
+        None
     }
     fn business_peer(&self) -> Option<NodeId> {
         match self {
+            #[cfg(feature = "agent-files")]
             Self::PreviewDirectory { peer, .. }
             | Self::ConfirmDirectory { peer, .. }
             | Self::SendPaths { peer, .. }
             | Self::SendFile { peer, .. }
             | Self::SendDirectory { peer, .. }
-            | Self::ResumeTask { peer, .. }
-            | Self::StartSpeed { peer, .. } => Some(*peer),
+            | Self::ResumeTask { peer, .. } => Some(*peer),
+            Self::StartSpeed { peer, .. } => Some(*peer),
             _ => None,
         }
     }
@@ -1262,7 +1293,7 @@ pub fn spawn(
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let max_peers = config.max_peers;
     let shared_runtime = config.shared_runtime.take().unwrap_or_else(|| {
-        #[cfg(test)]
+        #[cfg(all(test, feature = "agent-files"))]
         if let Some(service) = config.transfer.as_ref() {
             let (activity, changed, frame_budget) = service.shared_parts();
             return SharedRuntime {
@@ -1280,9 +1311,16 @@ pub fn spawn(
             shared_runtime.frame_budget.clone(),
         )
     });
-    let control = crate::node::core::control::ControlState::new(
+    #[cfg(feature = "agent-files")]
+    let control = crate::node::core::control::ControlState::new_with_files(
         identity.node_id(),
         config.transfer.clone(),
+        speed,
+        max_peers,
+    );
+    #[cfg(not(feature = "agent-files"))]
+    let control = crate::node::core::control::ControlState::new(
+        identity.node_id(),
         speed,
         max_peers,
     );
@@ -1309,6 +1347,7 @@ pub fn spawn(
             match runtime {
                 Ok(runtime) => {
                     runtime.block_on(async move {
+                        #[cfg(feature = "agent-files")]
                         let transfer = config.transfer.clone();
                         run_session(
                             identity,
@@ -1328,6 +1367,7 @@ pub fn spawn(
                             ),
                         )
                         .await;
+                        #[cfg(feature = "agent-files")]
                         if let Some(transfer) = transfer {
                             let _ = transfer.interrupt_all().await;
                         }
@@ -1450,9 +1490,13 @@ async fn run_session(
         services: config.service_ids.clone(),
     };
     let service_queries = Arc::new(Semaphore::new(16));
-    let forward_streams = Arc::new(crate::tunnel::ForwardStreamOwner::new(256));
+    let forward_streams = Arc::new(veytrane_tcp::ForwardStreamOwner::new(256));
+    #[cfg(feature = "agent-files")]
+    let files_enabled = config.transfer.is_some() && config.enable_files;
+    #[cfg(not(feature = "agent-files"))]
+    let files_enabled = false;
     let local_capabilities = crate::node::core::wire::capabilities(
-        config.transfer.is_some() && config.enable_files,
+        files_enabled,
         speed_service.is_some(),
         config.enable_tcp,
     );
@@ -1538,10 +1582,21 @@ async fn run_session(
     let mut peer_attempts: HashMap<NodeId, ActivePeerAttempt> = HashMap::new();
     let mut deferred_candidates: HashMap<NodeId, (Vec<Candidate>, PunchToken)> = HashMap::new();
     let mut tunnel_tasks: JoinSet<TunnelTaskResult> = JoinSet::new();
+    #[cfg(feature = "agent-files")]
     let selection_workers = Arc::new(Semaphore::new(3));
+    #[cfg(feature = "agent-files")]
     let selection_jobs = Arc::new(Semaphore::new(64));
+    #[cfg(feature = "agent-files")]
     let continuation_jobs = Arc::new(Semaphore::new(3));
-    let mut queue_changes = config.transfer.as_ref().map(|service| service.subscribe());
+    let mut queue_changes: Option<watch::Receiver<u64>>;
+    #[cfg(feature = "agent-files")]
+    {
+        queue_changes = config.transfer.as_ref().map(|service| service.subscribe());
+    }
+    #[cfg(not(feature = "agent-files"))]
+    {
+        queue_changes = None;
+    }
     let mut peers = PeerRegistry::new(max_peers);
     let mut connections: HashMap<NodeId, (u64, quinn::Connection)> = HashMap::new();
     let mut reconnect_probes: HashMap<NodeId, VecDeque<ReconnectProbe>> = HashMap::new();
@@ -1587,7 +1642,7 @@ async fn run_session(
     let mut reconnect_attempt = 0u32;
     let mut session_shutdown = false;
     let mut maintenance = time::interval(Duration::from_secs(1));
-    #[cfg(test)]
+    #[cfg(all(test, feature = "node"))]
     let mut test_network_losses = HashSet::new();
 
     start_signal_connect(
@@ -1778,6 +1833,7 @@ async fn run_session(
             let _ = events
                 .send(SessionEvent::Diagnostic("对端未启用此节点业务能力".into()))
                 .await;
+            #[cfg(feature = "agent-files")]
             if let Some(request) = command.preview_request() {
                 let _ = events
                     .send(SessionEvent::DirectoryPreviewFailed(request))
@@ -1804,6 +1860,7 @@ async fn run_session(
                     "远程访问尚未授权；请先连接设备并完成密码认证".into(),
                 ))
                 .await;
+            #[cfg(feature = "agent-files")]
             if let Some(request) = command.preview_request() {
                 let _ = events
                     .send(SessionEvent::DirectoryPreviewFailed(request))
@@ -1815,7 +1872,7 @@ async fn run_session(
             continue;
         }
         match wake {
-            #[cfg(test)]
+            #[cfg(all(test, feature = "node"))]
             Wake::Command(Some(SessionCommand::TestNetworkLoss(peer, done))) => {
                 if let Some(generation) = peers.generation(peer) {
                     test_network_losses.insert((peer, generation));
@@ -1855,7 +1912,7 @@ async fn run_session(
                     && !resource_policy.borrow().for_peer(peer).disabled
                     && peer_capabilities
                         .get(&peer)
-                        .is_some_and(|c| c & crate::node::core::protocol::CAP_TCP_TUNNEL != 0);
+                        .is_some_and(|c| c & veytrane_node::capability::CAP_TCP_TUNNEL != 0);
                 let current = connections
                     .get(&peer)
                     .filter(|(_, c)| authorized && c.close_reason().is_none())
@@ -1890,6 +1947,7 @@ async fn run_session(
                         continue;
                     }
                 }
+                #[cfg(feature = "agent-files")]
                 if let Some(service) = &config.transfer
                     && service.receive_root_path() != record.settings.receive_root
                     && let Err(error) = crate::node::core::config::validate_receive_directory(
@@ -2003,10 +2061,12 @@ async fn run_session(
                     if let Some(sender) = peer_connection_updates.get(&peer) {
                         sender.send_replace(None);
                     }
+                    #[cfg(feature = "agent-files")]
                     if let Some(service) = &config.transfer {
                         service.cancel_peer_recovery(peer);
                     }
                 }
+                #[cfg(feature = "agent-files")]
                 if let Some(service) = &config.transfer {
                     // Values have already been validated before persistence.
                     if service.receive_root_path() != record.settings.receive_root {
@@ -2098,6 +2158,7 @@ async fn run_session(
                         running.shutdown.send_replace(true);
                     }
                 }
+                #[cfg(feature = "agent-files")]
                 let result = if let Some(service) = &config.transfer {
                     service.cancel_peer_recovery(peer);
                     service
@@ -2107,6 +2168,8 @@ async fn run_session(
                 } else {
                     Ok(())
                 };
+                #[cfg(not(feature = "agent-files"))]
+                let result: std::result::Result<(), String> = Ok(());
                 if let Some(service) = &speed_service {
                     service.revoke_authorization(peer, RemoteAuthorization::default());
                 }
@@ -2148,6 +2211,7 @@ async fn run_session(
                         }
                     }
 
+                    #[cfg(feature = "agent-files")]
                     if let Some(service) = &config.transfer {
                         service.cancel_peer_recovery(peer);
                     }
@@ -2263,6 +2327,7 @@ async fn run_session(
                             }
                         }
 
+                        #[cfg(feature = "agent-files")]
                         if let Some(service) = &config.transfer {
                             service.cancel_peer_recovery(peer);
                         }
@@ -2331,6 +2396,7 @@ async fn run_session(
                 if let Some(service) = &speed_service {
                     service.revoke_authorization(peer, authorization);
                 }
+                #[cfg(feature = "agent-files")]
                 if let Some(service) = &config.transfer
                     && let Err(error) = service.revoke_authorization(peer, authorization).await
                 {
@@ -2345,7 +2411,7 @@ async fn run_session(
                         updates.send_replace(
                             connections.get(&peer).map(|(_, c)| c.clone()).filter(|_| {
                                 peer_capabilities.get(&peer).is_some_and(|c| {
-                                    c & crate::node::core::protocol::CAP_TCP_TUNNEL != 0
+                                    c & veytrane_node::capability::CAP_TCP_TUNNEL != 0
                                 })
                             }),
                         );
@@ -2418,7 +2484,7 @@ async fn run_session(
                                         match service
                                             .start(
                                                 peer,
-                                                crate::node::core::protocol::SpeedDirection::Upload,
+                                                veytrane_speed::control::SpeedDirection::Upload,
                                                 seconds,
                                             )
                                             .await
@@ -2433,7 +2499,7 @@ async fn run_session(
                                                 let download = service
                                                     .start(
                                                         peer,
-                                                        crate::node::core::protocol::SpeedDirection::Download,
+                                                        veytrane_speed::control::SpeedDirection::Download,
                                                         seconds,
                                                     )
                                                     .await;
@@ -2454,10 +2520,10 @@ async fn run_session(
                                     | crate::node::core::config::SpeedtestDirection::Download => {
                                         let wire_direction = match direction {
                                             crate::node::core::config::SpeedtestDirection::Upload => {
-                                                crate::node::core::protocol::SpeedDirection::Upload
+                                                veytrane_speed::control::SpeedDirection::Upload
                                             }
                                             crate::node::core::config::SpeedtestDirection::Download => {
-                                                crate::node::core::protocol::SpeedDirection::Download
+                                                veytrane_speed::control::SpeedDirection::Download
                                             }
                                             crate::node::core::config::SpeedtestDirection::Both => {
                                                 unreachable!()
@@ -2497,6 +2563,7 @@ async fn run_session(
                         .await;
                 }
             }
+            #[cfg(feature = "agent-files")]
             Wake::Command(Some(SessionCommand::PauseTask(id))) => {
                 if let Some(service) = &config.transfer
                     && let Err(error) = service.pause_task(id).await
@@ -2506,11 +2573,13 @@ async fn run_session(
                         .await;
                 }
             }
+            #[cfg(feature = "agent-files")]
             Wake::Command(Some(SessionCommand::CancelDirectoryPreview(id))) => {
                 if let Some(service) = &config.transfer {
                     service.cancel_preview(&id);
                 }
             }
+            #[cfg(feature = "agent-files")]
             Wake::Command(Some(
                 command @ (SessionCommand::PreviewDirectory { .. }
                 | SessionCommand::ConfirmDirectory { .. }
@@ -2765,6 +2834,7 @@ async fn run_session(
                                     .get(&peer)
                                     .is_some_and(|(_, c)| c.close_reason().is_none()))
                     });
+                #[cfg(feature = "agent-files")]
                 if !same_credential && let Some(service) = &config.transfer {
                     service.cancel_peer_recovery(peer);
                 }
@@ -2805,6 +2875,7 @@ async fn run_session(
                         );
                         connection.close(0u32.into(), b"new explicit remote credential");
                         peer_capabilities.remove(&peer);
+                        #[cfg(feature = "agent-files")]
                         if let Some(service) = config.transfer.as_ref() {
                             service.set_peer_flow_support(peer, false);
                         }
@@ -3256,7 +3327,9 @@ async fn run_session(
                 connect_task = None;
                 reconnect_sleep = None;
                 reconnect_attempt = 0;
+                #[allow(unused_variables)]
                 let lost_peers = connections.keys().copied().collect::<Vec<_>>();
+                #[cfg(feature = "agent-files")]
                 if let Some(service) = &config.transfer {
                     for peer in &lost_peers {
                         service.network_lost(*peer);
@@ -3291,6 +3364,7 @@ async fn run_session(
                 while peer_tasks.join_next().await.is_some() {}
                 while session_tasks.join_next().await.is_some() {}
                 (input_tx, inputs) = mpsc::channel(SESSION_INPUT_CAPACITY);
+                #[cfg(feature = "agent-files")]
                 if let Some(service) = &config.transfer {
                     for peer in lost_peers {
                         let _ = service.settle_network_loss(peer).await;
@@ -3510,6 +3584,7 @@ async fn run_session(
                 deferred_candidates.clear();
                 peer_tasks.abort_all();
                 while peer_tasks.join_next().await.is_some() {}
+                #[cfg(feature = "agent-files")]
                 if let Some(service) = &config.transfer {
                     let _ = service.interrupt_all().await;
                 }
@@ -3901,6 +3976,7 @@ async fn run_session(
                         // A changed mapping alone never retires a live winner. This branch
                         // only clears a transport that Quinn has already closed.
                         if let Some((generation, connection)) = connections.remove(&node_id) {
+                            #[cfg(feature = "agent-files")]
                             if let Some(service) = config.transfer.clone() {
                                 service.network_lost(node_id);
                                 peer_tasks.spawn(async move {
@@ -3918,6 +3994,7 @@ async fn run_session(
                             );
                             connection.close(0u32.into(), b"peer mapping changed");
                             peer_capabilities.remove(&node_id);
+                            #[cfg(feature = "agent-files")]
                             if let Some(service) = config.transfer.as_ref() {
                                 service.set_peer_flow_support(node_id, false);
                             }
@@ -4423,7 +4500,7 @@ async fn run_session(
                         }
                     }
                 }
-                if capabilities & crate::node::core::protocol::CAP_TRUSTED_DEVICE_AUTH == 0 {
+                if capabilities & veytrane_node::capability::CAP_TRUSTED_DEVICE_AUTH == 0 {
                     let _ = events
                         .send(SessionEvent::Diagnostic(
                             "对端不支持可信设备授权；本次仅使用密码认证".into(),
@@ -4446,17 +4523,19 @@ async fn run_session(
                 connections.insert(peer, (generation, connection.clone()));
                 connection_routes.insert(peer, network_id);
                 peer_capabilities.insert(peer, capabilities);
+                #[cfg(feature = "agent-files")]
                 if let Some(service) = config.transfer.as_ref() {
                     service.set_peer_incremental_support(
                         peer,
-                        capabilities & crate::node::core::protocol::CAP_INCREMENTAL_DIRECTORY != 0,
+                        capabilities & veytrane_node::capability::CAP_INCREMENTAL_DIRECTORY != 0,
                     );
                     service.set_peer_flow_support(
                         peer,
-                        capabilities & crate::node::core::protocol::CAP_FILE_FLOW != 0,
+                        capabilities & veytrane_node::capability::CAP_FILE_FLOW != 0,
                     );
                 }
-                if capabilities & crate::node::core::protocol::CAP_AUTO_RESUME == 0
+                #[cfg(feature = "agent-files")]
+                if capabilities & veytrane_node::capability::CAP_AUTO_RESUME == 0
                     && let Some(service) = &config.transfer
                     && service.cancel_peer_recovery(peer)
                 {
@@ -4466,7 +4545,7 @@ async fn run_session(
                         ))
                         .await;
                 }
-                if capabilities & crate::node::core::protocol::CAP_TCP_TUNNEL == 0 {
+                if capabilities & veytrane_node::capability::CAP_TCP_TUNNEL == 0 {
                     let incompatible_rules = running_tunnels
                         .iter()
                         .filter(|(_, running)| running.rule.peer_node_id == peer.to_hex())
@@ -4487,7 +4566,7 @@ async fn run_session(
                     .or_insert_with(|| watch::channel(None).0)
                     .send_replace(
                         (authorization.outbound_authorized()
-                            && capabilities & crate::node::core::protocol::CAP_TCP_TUNNEL != 0)
+                            && capabilities & veytrane_node::capability::CAP_TCP_TUNNEL != 0)
                             .then(|| connection.clone()),
                     );
                 emit_peer_state(
@@ -4528,9 +4607,10 @@ async fn run_session(
                         .await;
                     }
                 }
+                #[cfg(feature = "agent-files")]
                 let transfer = config.transfer.clone();
                 let negotiated_speed = speed_service.clone().filter(|_| {
-                    capabilities & crate::node::core::protocol::CAP_SPEED_EXECUTION != 0
+                    capabilities & veytrane_node::capability::CAP_SPEED_EXECUTION != 0
                 });
                 let business_connection = connection.clone();
                 let allowed_targets = allowed_forward_targets.subscribe();
@@ -4568,6 +4648,8 @@ async fn run_session(
                         }
                     };
                     let handle_file = async {
+                        #[cfg(feature = "agent-files")]
+                        {
                         if let Some(service) = transfer {
                             service
                                 .serve_files_dispatched(
@@ -4582,6 +4664,12 @@ async fn run_session(
                         } else {
                             drop(files);
                             Ok(())
+                        }
+                        }
+                        #[cfg(not(feature = "agent-files"))]
+                        {
+                            drop(files);
+                            Ok::<(), Error>(())
                         }
                     };
                     let (speed_result, file_result, _tcp_result) = tokio::join!(
@@ -4769,7 +4857,7 @@ async fn run_session(
                 network_interruption,
                 recovery_started,
             })) => {
-                #[cfg(test)]
+                #[cfg(all(test, feature = "node"))]
                 let network_interruption =
                     network_interruption || test_network_losses.remove(&(peer, generation));
                 if peers.is_current(peer, generation)
@@ -4784,6 +4872,7 @@ async fn run_session(
                     let closed_network = connection_routes
                         .remove(&peer)
                         .unwrap_or(current_network_id);
+                    #[cfg(feature = "agent-files")]
                     if network_interruption && let Some(service) = &config.transfer {
                         service.network_lost(peer);
                     }
@@ -4794,17 +4883,20 @@ async fn run_session(
                     if let Some(service) = &speed_service {
                         service.revoke_authorization(peer, RemoteAuthorization::default());
                     }
+                    #[cfg(feature = "agent-files")]
                     if !network_interruption && let Some(service) = &config.transfer {
                         let _ = service
                             .revoke_authorization(peer, RemoteAuthorization::default())
                             .await;
                     }
+                    #[cfg(feature = "agent-files")]
                     if network_interruption && let Some(service) = config.transfer.clone() {
                         peer_tasks.spawn(async move {
                             let _ = service.settle_network_loss(peer).await;
                         });
                     }
                     peer_capabilities.remove(&peer);
+                    #[cfg(feature = "agent-files")]
                     if let Some(service) = config.transfer.as_ref() {
                         service.set_peer_flow_support(peer, false);
                     }
@@ -4922,6 +5014,7 @@ async fn run_session(
                 };
                 if let Some((_, old)) = connections.remove(&peer) {
                     connection_routes.remove(&peer);
+                    #[cfg(feature = "agent-files")]
                     if let Some(service) = config.transfer.clone() {
                         service.network_lost(peer);
                         peer_tasks.spawn(async move {
@@ -4939,6 +5032,7 @@ async fn run_session(
                     );
                     old.close(0u32.into(), b"peer requested fresh authenticated transport");
                     peer_capabilities.remove(&peer);
+                    #[cfg(feature = "agent-files")]
                     if let Some(service) = config.transfer.as_ref() {
                         service.set_peer_flow_support(peer, false);
                     }
@@ -5028,6 +5122,7 @@ async fn run_session(
                         let _ = command_tx.try_send(SessionCommand::ConnectPeer(peer));
                     }
                 }
+                #[cfg(feature = "agent-files")]
                 if let Some(service) = &config.transfer {
                     let (reconnect, jobs) = service.auto_due(
                         |peer, direction| {
@@ -5036,7 +5131,7 @@ async fn run_session(
                                 .get(&peer)
                                 .is_some_and(|(_, c)| c.close_reason().is_none())
                                 && peer_capabilities.get(&peer).is_some_and(|c| {
-                                    c & crate::node::core::protocol::CAP_AUTO_RESUME != 0
+                                    c & veytrane_node::capability::CAP_AUTO_RESUME != 0
                                 })
                                 && rights.is_some_and(|r| {
                                     r.outbound_authorized()
@@ -5227,6 +5322,7 @@ async fn run_session(
             }
             Wake::TunnelTask(None) => {}
         }
+        #[cfg(feature = "agent-files")]
         if !session_shutdown && let Some(service) = config.transfer.as_ref() {
             let ready_connections = connections
                 .iter()
@@ -5236,7 +5332,7 @@ async fn run_session(
                         .is_some_and(PeerLifecycle::outbound_authorized)
                         && connection.close_reason().is_none()
                         && (peer_capabilities.get(*peer).is_some_and(|caps| {
-                            caps & crate::node::core::protocol::CAP_FILE_TRANSFER != 0
+                            caps & veytrane_node::capability::CAP_FILE_TRANSFER != 0
                         }))
                 })
                 .map(|(peer, (_, connection))| (*peer, connection.clone()))
@@ -5406,7 +5502,7 @@ async fn start_tunnel_rule(
     command_tx: &mpsc::Sender<SessionCommand>,
     events: &SessionEvents,
     policy: &TunnelServices,
-    stream_owner: &Arc<crate::tunnel::ForwardStreamOwner>,
+    stream_owner: &Arc<veytrane_tcp::ForwardStreamOwner>,
 ) {
     if running_tunnels.contains_key(&rule.id) {
         return;
@@ -5465,7 +5561,7 @@ async fn start_tunnel_rule(
     }
     if peer_capabilities
         .get(&peer)
-        .is_some_and(|capabilities| capabilities & crate::node::core::protocol::CAP_TCP_TUNNEL == 0)
+        .is_some_and(|capabilities| capabilities & veytrane_node::capability::CAP_TCP_TUNNEL == 0)
     {
         let _ = events
             .send(SessionEvent::TunnelState {
@@ -5532,7 +5628,7 @@ async fn start_tunnel_rule(
     let task_rule_id = rule_id.clone();
     let stream_owner = stream_owner.clone();
     tunnel_tasks.spawn(async move {
-        let forward = crate::tunnel::forward_with_owner(
+        let forward = veytrane_tcp::forward_with_owner(
             listener,
             rule.target,
             connection_updates,
@@ -5543,7 +5639,7 @@ async fn start_tunnel_rule(
                 let service_id = service_id.clone();
                 async move {
                     let stream = crate::node::core::services::open_tcp(&connection, &service_id).await?;
-                    crate::tunnel::bridge_tcp(tcp, stream.send, stream.recv).await
+                    veytrane_tcp::bridge_tcp(tcp, stream.send, stream.recv).await
                 }
             },
         );
@@ -6617,5 +6713,5 @@ fn test_verifier() -> RemoteVerifier {
         .clone()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "node"))]
 mod tests;
