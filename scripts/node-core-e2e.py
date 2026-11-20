@@ -32,6 +32,15 @@ CASES = {
     "source-storage-network-signal-errors": ["two_process_pause_both_sides_and_storage_source_errors_reach_ui", "session_process_kill_either_endpoint_restart_requires_manual_continue", "three_process_passive_directory_collision_and_signal_restart", "permissions_failure_keeps_recovery_and_does_not_commit_receipt", "receiver_continue_reports_previously_detected_source_change"],
     "security-boundaries": ["paths_are_relative_portable_and_never_silently_rewritten", "source_symlink_and_normalization_or_case_collision_are_rejected", "malicious_manifest_path_trailing_bytes_and_bitmap_are_rejected", "oversized_length_header_fails_without_waiting_for_payload", "unexpected_authenticated_target_fails_before_connected"],
     "node-negotiation-rejection": ["unsupported_version_missing_security_capability_and_old_frames_are_rejected", "authenticated_non_node_peer_is_rejected_by_node_negotiation", "schema_only_speed_capability_does_not_enable_execution"],
+    "stream-registration-and-backpressure": [
+        "registered_dispatcher_only_creates_requested_stream_slots",
+        "duplicate_stream_registration_fails_before_starting_a_worker",
+        "registered_dispatcher_preserves_unregistered_unknown_and_cancelled_resets",
+        "legacy_disabled_routes_reject_streams_but_keep_channels_attached_until_drop",
+        "pending_header_slots_are_bounded_by_the_next_business_stream",
+        "slow_low_header_times_out_after_a_later_business_stream_opens_it",
+        "valid_stream_queue_is_bounded_per_kind_and_reuses_a_freed_slot",
+    ],
     "tcp-authorization": ["service_stream_reuses_core_for_allowed_target_and_reports_whitelist_denial", "service_checks_latest_grant_after_delayed_open"],
     "speed-file-arbitration-and-cancel": ["speed_cancel_and_stale_uni_token_do_not_pollute_next_test_or_file_transfer", "speed_and_file_activity_exclude_each_other_without_silent_pause", "speed_simultaneous_requests_have_one_grant_and_one_busy"],
 }
