@@ -8,7 +8,7 @@ pub(in crate::desktop) fn brand_identity(title: &'static str, subtitle: &'static
         .get_or_init(|| {
             std::sync::Arc::new(gpui::Image::from_bytes(
                 gpui::ImageFormat::Png,
-                include_bytes!("../../../assets/icons/app-icon-ui.png").to_vec(),
+                include_bytes!("../../../../assets/icons/app-icon-ui.png").to_vec(),
             ))
         })
         .clone();

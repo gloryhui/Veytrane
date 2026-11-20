@@ -26,9 +26,19 @@ fn hwnd(handle: gpui::AnyWindowHandle, cx: &mut App) -> Result<isize, String> {
 fn native_close_hides_to_tray_restore_and_explicit_exit() {
     let root = std::env::temp_dir().join(format!("p2p-tray-test-{:032x}", rand::random::<u128>()));
     let paths = AgentPaths::new(&root).unwrap();
-    crate::node::adapters::cli::initialize(&paths).unwrap();
-    let identity = std::fs::read(paths.identity()).unwrap();
     let binary = std::env::var_os("P2P_AGENT_TEST_BINARY").expect("set P2P_AGENT_TEST_BINARY");
+    let initialized = std::process::Command::new(&binary)
+        .arg("--data-dir")
+        .arg(&root)
+        .arg("--init")
+        .output()
+        .unwrap();
+    assert!(
+        initialized.status.success(),
+        "test Agent init failed: {}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+    let identity = std::fs::read(paths.identity()).unwrap();
     struct Process(std::process::Child);
     impl Drop for Process {
         fn drop(&mut self) {

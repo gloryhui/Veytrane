@@ -39,6 +39,7 @@ pub mod tunnel;
 pub mod node;
 
 #[cfg(feature = "desktop-client")]
+#[path = "../apps/desktop/src/mod.rs"]
 pub mod desktop;
 
 pub use error::{Error, Result};

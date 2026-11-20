@@ -6,7 +6,7 @@
       "id": "desktop",
       "title": "桌面工作台",
       "tag": "PRESENTATION",
-      "path": "src/desktop/agent_shell.rs",
+      "path": "apps/desktop/src/agent_shell.rs",
       "summary": "默认 GPUI 桌面通过 IPC 管理已有 Agent，多个窗口共享一个模型。",
       "rules": [
         "不持有私钥、任务库或 P2P 连接。",
@@ -15,17 +15,17 @@
       "parts": [
         {
           "name": "工作台",
-          "path": "src/desktop/agent_shell/workbench.rs",
+          "path": "apps/desktop/src/agent_shell/workbench.rs",
           "detail": "文件任务、配置、诊断与服务入口。"
         },
         {
           "name": "窗口注册",
-          "path": "src/desktop/agent_shell/windows.rs",
+          "path": "apps/desktop/src/agent_shell/windows.rs",
           "detail": "二级原生窗口共用 AgentShell。"
         },
         {
           "name": "托盘宿主",
-          "path": "src/desktop/agent_shell/tray_host.rs",
+          "path": "apps/desktop/src/agent_shell/tray_host.rs",
           "detail": "通过管理 API 投影后台状态。"
         }
       ],
@@ -639,7 +639,7 @@
       "id": "ui",
       "title": "共享界面组件",
       "tag": "DESKTOP / UI",
-      "path": "src/desktop/ui/mod.rs",
+      "path": "apps/desktop/src/ui/mod.rs",
       "summary": "工作台与二级窗口使用的输入、主题、按钮和品牌组件。",
       "rules": [
         "不引用 AgentShell 或旧 DesktopShell。",
@@ -648,17 +648,17 @@
       "parts": [
         {
           "name": "输入与 IME",
-          "path": "src/desktop/ui/text_field.rs",
+          "path": "apps/desktop/src/ui/text_field.rs",
           "detail": "光标、UTF-16、密码与粘贴。"
         },
         {
           "name": "组件与主题",
-          "path": "src/desktop/ui/components.rs",
+          "path": "apps/desktop/src/ui/components.rs",
           "detail": "统一视觉组件。"
         },
         {
           "name": "品牌",
-          "path": "src/desktop/ui/branding.rs",
+          "path": "apps/desktop/src/ui/branding.rs",
           "detail": "工作台与二级窗口共用图标与标题。"
         }
       ],
@@ -668,7 +668,7 @@
       "id": "platform",
       "title": "原生窗口与托盘",
       "tag": "DESKTOP / PLATFORM",
-      "path": "src/desktop/platform/mod.rs",
+      "path": "apps/desktop/src/platform/mod.rs",
       "summary": "跨桌面入口共享窗口显隐、系统托盘和展示状态。",
       "rules": [
         "平台工具不反向引用窗口所有者。",
@@ -677,17 +677,17 @@
       "parts": [
         {
           "name": "窗口操作",
-          "path": "src/desktop/platform/window.rs",
+          "path": "apps/desktop/src/platform/window.rs",
           "detail": "macOS、Windows、X11 可见性控制。"
         },
         {
           "name": "托盘",
-          "path": "src/desktop/platform/tray.rs",
+          "path": "apps/desktop/src/platform/tray.rs",
           "detail": "原生菜单和事件。"
         },
         {
           "name": "展示状态",
-          "path": "src/desktop/platform/status.rs",
+          "path": "apps/desktop/src/platform/status.rs",
           "detail": "无运行时所有权的状态投影。"
         }
       ],

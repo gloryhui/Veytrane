@@ -95,11 +95,17 @@ def violations(root):
         if parts[:2] == ("apps", "node-cli"):
             reject(r"\bcrate::node::(?!host::configuration\b)(?:\w+|\s*\{)|\bcrate::desktop\b",
                    "management CLI must use IPC and the local configuration operations")
-        if parts[1:3] == ("desktop", "agent_shell") or relative.as_posix() == "src/desktop/agent_shell.rs":
-            reject(r"\blegacy\s*::|\bDesktopShell\b", "Agent desktop must not borrow the embedded legacy runtime")
-            reject(r"crate::node::(?:core|host|products)::", "Agent desktop must use management contracts and shared validation")
-        if parts[1:3] in (("desktop", "ui"), ("desktop", "platform")):
-            reject(r"\blegacy\s*::|\bDesktopShell\b|\bAgentShell\b", "shared UI/native primitives must not depend on shell owners")
+        desktop = parts[3:] if parts[:3] == ("apps", "desktop", "src") else None
+        if desktop:
+            desktop_module = desktop[0].removesuffix(".rs")
+            reject(r"\b(?:crate|p2p_file)::(?:node\b|\s*\{[^}]*\bnode\b)",
+                   "desktop must use management contracts instead of Agent/core/product modules")
+            if desktop_module == "agent_shell":
+                reject(r"\blegacy\s*::|\bDesktopShell\b",
+                       "Agent desktop must not borrow the embedded legacy runtime")
+            if desktop_module in {"ui", "platform"}:
+                reject(r"\blegacy\s*::|\bDesktopShell\b|\bAgentShell\b|crate::desktop::agent_shell\b",
+                       "shared UI/native primitives must not depend on shell owners")
     return errors
 
 
