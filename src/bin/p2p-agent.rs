@@ -73,11 +73,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .filter(|path| path.is_file())
     };
     if let Some(config) = navigation {
-        agent::run_integrated(paths, args.managed, config).await?;
+        run_with_navigation(paths, args.managed, config).await?;
     } else if args.managed {
         agent::run_managed(paths).await?;
     } else {
         agent::run(paths).await?;
     }
     Ok(())
+}
+
+async fn run_with_navigation(
+    paths: AgentPaths,
+    managed: bool,
+    configuration: PathBuf,
+) -> std::io::Result<()> {
+    let (restart, restart_rx) = tokio::sync::watch::channel(false);
+    let (shutdown, shutdown_rx) = tokio::sync::watch::channel(false);
+    let web_paths = paths.clone();
+    let web = tokio::spawn(async move {
+        if let Err(error) = p2p_file::node::adapters::navigation::serve(
+            web_paths,
+            &configuration,
+            restart,
+            shutdown_rx,
+        )
+        .await
+        {
+            // A presentation failure must not tear down established forwards.
+            tracing::error!(%error, "内置导航不可用，P2P 核心继续运行");
+        }
+    });
+    let mut restart_rx = restart_rx;
+    let result = loop {
+        match agent::run_with_restart(paths.clone(), managed, restart_rx.clone()).await {
+            Ok(true) => {
+                restart_rx.borrow_and_update();
+            }
+            Ok(false) => break Ok(()),
+            Err(error) => break Err(error),
+        }
+    };
+    let _ = shutdown.send(true);
+    let abort = web.abort_handle();
+    if tokio::time::timeout(std::time::Duration::from_secs(45), web)
+        .await
+        .is_err()
+    {
+        abort.abort();
+    }
+    result
 }

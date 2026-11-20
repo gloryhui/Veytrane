@@ -503,48 +503,13 @@ pub async fn run_managed(paths: AgentPaths) -> io::Result<()> {
     run_with_recovery(paths, true, None).await.map(|_| ())
 }
 
-/// The HTTP adapter lives beside the core, so a user-requested core restart
-/// releases all ownership before rebuilding it while the navigation stays up.
-pub async fn run_integrated(
+/// Stop the current core when a caller requests a restart. The caller owns rebuilding it.
+pub async fn run_with_restart(
     paths: AgentPaths,
     managed: bool,
-    configuration: std::path::PathBuf,
-) -> io::Result<()> {
-    let (restart, restart_rx) = watch::channel(false);
-    let (shutdown, shutdown_rx) = watch::channel(false);
-    let web_paths = paths.clone();
-    let web = tokio::spawn(async move {
-        if let Err(error) = crate::node::adapters::navigation::serve(
-            web_paths,
-            &configuration,
-            restart,
-            shutdown_rx,
-        )
-        .await
-        {
-            // A presentation failure must not tear down established forwards.
-            tracing::error!(%error, "内置导航不可用，P2P 核心继续运行");
-        }
-    });
-    let mut restart_rx = restart_rx;
-    let result = loop {
-        match run_with_recovery(paths.clone(), managed, Some(restart_rx.clone())).await {
-            Ok(true) => {
-                restart_rx.borrow_and_update();
-            }
-            Ok(false) => break Ok(()),
-            Err(error) => break Err(error),
-        }
-    };
-    let _ = shutdown.send(true);
-    let abort = web.abort_handle();
-    if tokio::time::timeout(Duration::from_secs(45), web)
-        .await
-        .is_err()
-    {
-        abort.abort();
-    }
-    result
+    restart: watch::Receiver<bool>,
+) -> io::Result<bool> {
+    run_with_recovery(paths, managed, Some(restart)).await
 }
 
 async fn navigation_restart(receiver: &mut Option<watch::Receiver<bool>>) {
