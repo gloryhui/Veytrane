@@ -54,6 +54,10 @@ fn initialization_preserves_existing_identity_and_refuses_to_replace_configurati
     );
     let config_before = fs::read(root.join("node.json")).unwrap();
     ConfigRecord::load(&root.join("node.json")).unwrap();
+    cli_ok(&root, &["ownership-status"]);
+    for name in ["receive", "tasks.json", "tasks.lock"] {
+        assert!(!root.join(name).exists(), "init created {name}");
+    }
     assert!(!cli(&root, &["init"]).status.success());
     assert_eq!(fs::read(root.join("identity.key")).unwrap(), key_before);
     assert_eq!(fs::read(root.join("node.json")).unwrap(), config_before);

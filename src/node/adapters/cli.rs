@@ -164,7 +164,6 @@ pub fn initialize(paths: &AgentPaths) -> io::Result<Value> {
         crate::identity::Identity::load_or_create(&paths.identity()).map_err(io::Error::other)?;
     let _identity = AgentPaths::identity_lock(identity.node_id())?;
     let receive = paths.root.join("receive");
-    crate::storage::permissions::ensure_directory(&receive)?;
     ConfigRecord::initialize(&paths.config(), receive).map_err(io::Error::other)?;
     Ok(json!({"node_id":identity.node_id().to_hex(),"config":paths.config()}))
 }
@@ -234,9 +233,15 @@ pub async fn run(args: Args) -> io::Result<Response> {
                 .as_ref()
                 .map(|identity| AgentPaths::identity_lock(identity.node_id()))
                 .transpose()?;
-            let _tasks =
-                crate::instance_lock::InstanceLock::acquire(&paths.root.join("tasks.lock"))
-                    .map_err(io::Error::other)?;
+            let tasks_lock = paths.tasks().with_extension("lock");
+            let _tasks = match std::fs::symlink_metadata(&tasks_lock) {
+                Ok(_) => Some(
+                    crate::instance_lock::InstanceLock::acquire(&tasks_lock)
+                        .map_err(io::Error::other)?,
+                ),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error),
+            };
             return Ok(Response::ok(
                 "ownership_status",
                 json!({"running":false,"node_id":identity.map(|id|id.node_id().to_hex())}),
