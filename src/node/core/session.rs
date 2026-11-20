@@ -227,7 +227,7 @@ pub struct NodeSessionConfig {
     pub network: DesktopNetworkConfig,
     pub allowed_forward_targets: Vec<crate::node::core::config::AllowedForwardTarget>,
     pub tunnel_rules: Vec<crate::node::core::config::TunnelRule>,
-    #[cfg(feature = "agent-files")]
+    #[cfg(all(test, feature = "agent-files"))]
     pub(crate) transfer: Option<crate::node::core::transfer::TransferService>,
 }
 
@@ -258,7 +258,7 @@ impl NodeSessionConfig {
             network: DesktopNetworkConfig::default(),
             allowed_forward_targets: Vec::new(),
             tunnel_rules: Vec::new(),
-            #[cfg(feature = "agent-files")]
+            #[cfg(all(test, feature = "agent-files"))]
             transfer: None,
         }
     }
@@ -1288,6 +1288,8 @@ pub(crate) fn spawn_for_test(
 pub(crate) struct SessionServices<B> {
     #[cfg(feature = "node-speed")]
     pub speed: Option<SpeedService>,
+    #[cfg(feature = "agent-files")]
+    pub files: Option<crate::node::core::transfer::TransferService>,
     pub business: Arc<B>,
     pub tcp_streams: Arc<veytrane_tcp::ForwardStreamOwner>,
 }
@@ -1383,7 +1385,7 @@ where
                 Ok(runtime) => {
                     runtime.block_on(async move {
                         #[cfg(feature = "agent-files")]
-                        let transfer = config.transfer.clone();
+                        let transfer = services.files.clone();
                         run_session(
                             identity,
                             config,
@@ -1458,6 +1460,8 @@ async fn run_session<B>(
 {
     #[cfg(feature = "node-speed")]
     let speed_service = services.speed;
+    #[cfg(feature = "agent-files")]
+    let files = services.files;
     let business = services.business;
     let forward_streams = services.tcp_streams;
     let SessionChannels {
@@ -1539,7 +1543,7 @@ async fn run_session<B>(
     };
     let service_queries = Arc::new(Semaphore::new(16));
     #[cfg(feature = "agent-files")]
-    let files_enabled = config.transfer.is_some() && config.enable_files;
+    let files_enabled = files.is_some() && config.enable_files;
     #[cfg(not(feature = "agent-files"))]
     let files_enabled = false;
     #[cfg(feature = "node-speed")]
@@ -1640,7 +1644,7 @@ async fn run_session<B>(
     let mut queue_changes: Option<watch::Receiver<u64>>;
     #[cfg(feature = "agent-files")]
     {
-        queue_changes = config.transfer.as_ref().map(|service| service.subscribe());
+        queue_changes = files.as_ref().map(|service| service.subscribe());
     }
     #[cfg(not(feature = "agent-files"))]
     {
@@ -1928,7 +1932,7 @@ async fn run_session<B>(
                 if let Some(generation) = peers.generation(peer) {
                     test_network_losses.insert((peer, generation));
                 }
-                if let Some(service) = config.transfer.clone() {
+                if let Some(service) = files.clone() {
                     service.network_lost(peer);
                     peer_tasks.spawn(async move {
                         let _ = service.settle_network_loss(peer).await;
@@ -2091,7 +2095,7 @@ async fn run_session<B>(
                         sender.send_replace(None);
                     }
                     #[cfg(feature = "agent-files")]
-                    if let Some(service) = &config.transfer {
+                    if let Some(service) = &files {
                         service.cancel_peer_recovery(peer);
                     }
                 }
@@ -2178,7 +2182,7 @@ async fn run_session<B>(
                     }
                 }
                 #[cfg(feature = "agent-files")]
-                let result = if let Some(service) = &config.transfer {
+                let result = if let Some(service) = &files {
                     service.cancel_peer_recovery(peer);
                     service
                         .revoke_authorization(peer, RemoteAuthorization::default())
@@ -2232,7 +2236,7 @@ async fn run_session<B>(
                     }
 
                     #[cfg(feature = "agent-files")]
-                    if let Some(service) = &config.transfer {
+                    if let Some(service) = &files {
                         service.cancel_peer_recovery(peer);
                     }
                 }
@@ -2349,7 +2353,7 @@ async fn run_session<B>(
                         }
 
                         #[cfg(feature = "agent-files")]
-                        if let Some(service) = &config.transfer {
+                        if let Some(service) = &files {
                             service.cancel_peer_recovery(peer);
                         }
                     }
@@ -2419,7 +2423,7 @@ async fn run_session<B>(
                     service.revoke_authorization(peer, authorization);
                 }
                 #[cfg(feature = "agent-files")]
-                if let Some(service) = &config.transfer
+                if let Some(service) = &files
                     && let Err(error) = service.revoke_authorization(peer, authorization).await
                 {
                     let _ = events
@@ -2589,7 +2593,7 @@ async fn run_session<B>(
             }
             #[cfg(feature = "agent-files")]
             Wake::Command(Some(SessionCommand::PauseTask(id))) => {
-                if let Some(service) = &config.transfer
+                if let Some(service) = &files
                     && let Err(error) = service.pause_task(id).await
                 {
                     let _ = events
@@ -2599,7 +2603,7 @@ async fn run_session<B>(
             }
             #[cfg(feature = "agent-files")]
             Wake::Command(Some(SessionCommand::CancelDirectoryPreview(id))) => {
-                if let Some(service) = &config.transfer {
+                if let Some(service) = &files {
                     service.cancel_preview(&id);
                 }
             }
@@ -2610,7 +2614,7 @@ async fn run_session<B>(
                     FileCommand::PreviewDirectory { request, .. } => Some(request.clone()),
                     _ => None,
                 };
-                let Some(service) = config.transfer.clone() else {
+                let Some(service) = files.clone() else {
                     let _ = events
                         .send(SessionEvent::Diagnostic("任务存储尚未就绪".into()))
                         .await;
@@ -2753,7 +2757,7 @@ async fn run_session<B>(
                                     .is_some_and(|(_, c)| c.close_reason().is_none()))
                     });
                 #[cfg(feature = "agent-files")]
-                if !same_credential && let Some(service) = &config.transfer {
+                if !same_credential && let Some(service) = &files {
                     service.cancel_peer_recovery(peer);
                 }
                 credentials.insert(peer, password);
@@ -2794,7 +2798,7 @@ async fn run_session<B>(
                         connection.close(0u32.into(), b"new explicit remote credential");
                         peer_capabilities.remove(&peer);
                         #[cfg(feature = "agent-files")]
-                        if let Some(service) = config.transfer.as_ref() {
+                        if let Some(service) = files.as_ref() {
                             service.set_peer_flow_support(peer, false);
                         }
                         if let Some(updates) = peer_connection_updates.get(&peer) {
@@ -3248,7 +3252,7 @@ async fn run_session<B>(
                 #[allow(unused_variables)]
                 let lost_peers = connections.keys().copied().collect::<Vec<_>>();
                 #[cfg(feature = "agent-files")]
-                if let Some(service) = &config.transfer {
+                if let Some(service) = &files {
                     for peer in &lost_peers {
                         service.network_lost(*peer);
                         service.set_peer_flow_support(*peer, false);
@@ -3283,7 +3287,7 @@ async fn run_session<B>(
                 while session_tasks.join_next().await.is_some() {}
                 (input_tx, inputs) = mpsc::channel(SESSION_INPUT_CAPACITY);
                 #[cfg(feature = "agent-files")]
-                if let Some(service) = &config.transfer {
+                if let Some(service) = &files {
                     for peer in lost_peers {
                         let _ = service.settle_network_loss(peer).await;
                     }
@@ -3503,7 +3507,7 @@ async fn run_session<B>(
                 peer_tasks.abort_all();
                 while peer_tasks.join_next().await.is_some() {}
                 #[cfg(feature = "agent-files")]
-                if let Some(service) = &config.transfer {
+                if let Some(service) = &files {
                     let _ = service.interrupt_all().await;
                 }
                 pending_inbound.clear();
@@ -3895,7 +3899,7 @@ async fn run_session<B>(
                         // only clears a transport that Quinn has already closed.
                         if let Some((generation, connection)) = connections.remove(&node_id) {
                             #[cfg(feature = "agent-files")]
-                            if let Some(service) = config.transfer.clone() {
+                            if let Some(service) = files.clone() {
                                 service.network_lost(node_id);
                                 peer_tasks.spawn(async move {
                                     let _ = service.settle_network_loss(node_id).await;
@@ -3913,7 +3917,7 @@ async fn run_session<B>(
                             connection.close(0u32.into(), b"peer mapping changed");
                             peer_capabilities.remove(&node_id);
                             #[cfg(feature = "agent-files")]
-                            if let Some(service) = config.transfer.as_ref() {
+                            if let Some(service) = files.as_ref() {
                                 service.set_peer_flow_support(node_id, false);
                             }
                             if let Some(updates) = peer_connection_updates.get(&node_id) {
@@ -4443,7 +4447,7 @@ async fn run_session<B>(
                 connection_routes.insert(peer, network_id);
                 peer_capabilities.insert(peer, capabilities);
                 #[cfg(feature = "agent-files")]
-                if let Some(service) = config.transfer.as_ref() {
+                if let Some(service) = files.as_ref() {
                     service.set_peer_incremental_support(
                         peer,
                         capabilities & veytrane_node::capability::CAP_INCREMENTAL_DIRECTORY != 0,
@@ -4455,7 +4459,7 @@ async fn run_session<B>(
                 }
                 #[cfg(feature = "agent-files")]
                 if capabilities & veytrane_node::capability::CAP_AUTO_RESUME == 0
-                    && let Some(service) = &config.transfer
+                    && let Some(service) = &files
                     && service.cancel_peer_recovery(peer)
                 {
                     let _ = events
@@ -4757,7 +4761,7 @@ async fn run_session<B>(
                         .remove(&peer)
                         .unwrap_or(current_network_id);
                     #[cfg(feature = "agent-files")]
-                    if network_interruption && let Some(service) = &config.transfer {
+                    if network_interruption && let Some(service) = &files {
                         service.network_lost(peer);
                     }
                     connections.remove(&peer);
@@ -4769,20 +4773,20 @@ async fn run_session<B>(
                         service.revoke_authorization(peer, RemoteAuthorization::default());
                     }
                     #[cfg(feature = "agent-files")]
-                    if !network_interruption && let Some(service) = &config.transfer {
+                    if !network_interruption && let Some(service) = &files {
                         let _ = service
                             .revoke_authorization(peer, RemoteAuthorization::default())
                             .await;
                     }
                     #[cfg(feature = "agent-files")]
-                    if network_interruption && let Some(service) = config.transfer.clone() {
+                    if network_interruption && let Some(service) = files.clone() {
                         peer_tasks.spawn(async move {
                             let _ = service.settle_network_loss(peer).await;
                         });
                     }
                     peer_capabilities.remove(&peer);
                     #[cfg(feature = "agent-files")]
-                    if let Some(service) = config.transfer.as_ref() {
+                    if let Some(service) = files.as_ref() {
                         service.set_peer_flow_support(peer, false);
                     }
                     if let Some(updates) = peer_connection_updates.get(&peer) {
@@ -4900,7 +4904,7 @@ async fn run_session<B>(
                 if let Some((_, old)) = connections.remove(&peer) {
                     connection_routes.remove(&peer);
                     #[cfg(feature = "agent-files")]
-                    if let Some(service) = config.transfer.clone() {
+                    if let Some(service) = files.clone() {
                         service.network_lost(peer);
                         peer_tasks.spawn(async move {
                             let _ = service.settle_network_loss(peer).await;
@@ -4918,7 +4922,7 @@ async fn run_session<B>(
                     old.close(0u32.into(), b"peer requested fresh authenticated transport");
                     peer_capabilities.remove(&peer);
                     #[cfg(feature = "agent-files")]
-                    if let Some(service) = config.transfer.as_ref() {
+                    if let Some(service) = files.as_ref() {
                         service.set_peer_flow_support(peer, false);
                     }
                     if let Some(updates) = peer_connection_updates.get(&peer) {
@@ -5008,7 +5012,7 @@ async fn run_session<B>(
                     }
                 }
                 #[cfg(feature = "agent-files")]
-                if let Some(service) = &config.transfer {
+                if let Some(service) = &files {
                     let (reconnect, jobs) = service.auto_due(
                         |peer, direction| {
                             let rights = authorizations.get(&peer).map(|(_, _, r)| *r.borrow());
@@ -5208,7 +5212,7 @@ async fn run_session<B>(
             Wake::TunnelTask(None) => {}
         }
         #[cfg(feature = "agent-files")]
-        if !session_shutdown && let Some(service) = config.transfer.as_ref() {
+        if !session_shutdown && let Some(service) = files.as_ref() {
             let ready_connections = connections
                 .iter()
                 .filter(|(peer, (_, connection))| {

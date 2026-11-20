@@ -81,6 +81,8 @@ pub(crate) fn spawn_assembled(
         SessionServices {
             #[cfg(feature = "node-speed")]
             speed: speed.clone(),
+            #[cfg(feature = "agent-files")]
+            files: None,
             business,
             tcp_streams,
         },
@@ -98,7 +100,7 @@ pub(crate) fn spawn_assembled(
 #[cfg(feature = "agent-files")]
 pub fn spawn_with_storage(
     identity: Identity,
-    mut config: NodeSessionConfig,
+    config: NodeSessionConfig,
     tasks: &Path,
     receive_root: PathBuf,
 ) -> crate::error::Result<RuntimeAssembly> {
@@ -116,7 +118,6 @@ pub fn spawn_with_storage(
         shared.changed,
         shared.frame_budget,
     );
-    config.transfer = Some(file_service.clone());
     let tcp_streams = Arc::new(veytrane_tcp::ForwardStreamOwner::new(
         veytrane_tcp::DEFAULT_MAX_NODE_TCP_STREAMS,
     ));
@@ -130,6 +131,7 @@ pub fn spawn_with_storage(
         config,
         SessionServices {
             speed: speed.clone(),
+            files: Some(file_service.clone()),
             business,
             tcp_streams,
         },

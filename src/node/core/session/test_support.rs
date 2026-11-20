@@ -17,8 +17,9 @@ pub(super) fn spawn(
         veytrane_tcp::DEFAULT_MAX_NODE_TCP_STREAMS,
     ));
     #[cfg(feature = "agent-files")]
-    let business =
-        StaticBusiness::with_files(speed.clone(), config.transfer.clone(), tcp_streams.clone());
+    let files = config.transfer.clone();
+    #[cfg(feature = "agent-files")]
+    let business = StaticBusiness::with_files(speed.clone(), files.clone(), tcp_streams.clone());
     #[cfg(not(feature = "agent-files"))]
     let business = StaticBusiness::new(speed.clone(), tcp_streams.clone());
     super::spawn(
@@ -26,6 +27,8 @@ pub(super) fn spawn(
         config,
         SessionServices {
             speed,
+            #[cfg(feature = "agent-files")]
+            files,
             business: Arc::new(business),
             tcp_streams,
         },
