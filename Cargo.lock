@@ -4447,6 +4447,7 @@ dependencies = [
  "unicode-segmentation",
  "veytrane-file-policy",
  "veytrane-files",
+ "veytrane-management",
  "veytrane-node",
  "veytrane-speed",
  "veytrane-tcp",
@@ -7128,6 +7129,21 @@ dependencies = [
  "veytrane-file-policy",
  "veytrane-node",
  "veytrane-speed",
+ "veytrane-transport",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "veytrane-management"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "dirs 5.0.1",
+ "rand 0.10.3",
+ "rustix 1.1.5",
+ "serde",
+ "serde_json",
+ "tokio",
  "veytrane-transport",
  "windows-sys 0.59.0",
 ]

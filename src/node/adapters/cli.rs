@@ -1,6 +1,7 @@
 //! Typed local management; never starts a second networking runtime.
 use crate::node::api::client::AgentClient;
-use crate::node::api::protocol::{Command, Request, Response};
+use crate::node::api::protocol::{Command, Request, Response, SpeedtestDirection};
+use crate::node::host::configuration::ownership_status;
 pub use crate::node::host::configuration::{initialize, offline_apply, read_json};
 use crate::node::local::paths::AgentPaths;
 use clap::{Parser, Subcommand};
@@ -9,7 +10,7 @@ use std::{
     io::{self, Read},
     path::PathBuf,
 };
-use veytrane_node::operation_id::TaskId;
+use veytrane_transport::operation_id::TaskId;
 
 #[derive(Parser)]
 #[command(about = "Veytrane Node · 管理同一后台 Agent", version)]
@@ -147,30 +148,7 @@ pub async fn run(args: Args) -> io::Result<Response> {
     let paths = AgentPaths::new(&root)?;
     let command = match args.command {
         Action::OwnershipStatus => {
-            let _directory = crate::instance_lock::InstanceLock::acquire(&paths.lock())
-                .map_err(io::Error::other)?;
-            let identity = if paths.identity().try_exists()? {
-                Some(crate::identity::Identity::load(&paths.identity()).map_err(io::Error::other)?)
-            } else {
-                None
-            };
-            let _identity = identity
-                .as_ref()
-                .map(|identity| AgentPaths::identity_lock(identity.node_id()))
-                .transpose()?;
-            let tasks_lock = paths.tasks().with_extension("lock");
-            let _tasks = match std::fs::symlink_metadata(&tasks_lock) {
-                Ok(_) => Some(
-                    crate::instance_lock::InstanceLock::acquire(&tasks_lock)
-                        .map_err(io::Error::other)?,
-                ),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-                Err(error) => return Err(error),
-            };
-            return Ok(Response::ok(
-                "ownership_status",
-                json!({"running":false,"node_id":identity.map(|id|id.node_id().to_hex())}),
-            ));
+            return Ok(Response::ok("ownership_status", ownership_status(&paths)?));
         }
         Action::Web { listen } => {
             crate::node::adapters::web::run(paths, listen).await?;
@@ -254,9 +232,9 @@ pub async fn run(args: Args) -> io::Result<Response> {
             peer,
             seconds,
             direction: if download {
-                crate::node::core::config::SpeedtestDirection::Download
+                SpeedtestDirection::Download
             } else {
-                crate::node::core::config::SpeedtestDirection::Upload
+                SpeedtestDirection::Upload
             },
         },
         Action::StopSpeed { peer, task } => Command::StopSpeed {

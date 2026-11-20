@@ -43,7 +43,7 @@ async fn ipv4_listener(node: &Node) -> std::net::SocketAddr {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage() {
-    use p2p_file::node::core::config::SpeedtestDirection;
+    use p2p_file::node::api::protocol::SpeedtestDirection;
 
     let sandbox = Sandbox::new();
     let minimal = std::env::var_os("VEYTRANE_TEST_MINIMAL_AGENT")

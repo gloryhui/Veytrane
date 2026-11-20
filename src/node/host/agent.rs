@@ -210,11 +210,17 @@ impl Agent {
                 direction,
                 seconds,
             } => {
+                use crate::node::core::config::SpeedtestDirection;
+
                 crate::node::core::config::validate_speedtest_seconds(seconds)
                     .map_err(|e| e.to_string())?;
                 self.control.start_speed(
                     NodeId::from_hex(&peer).map_err(|e| e.to_string())?,
-                    direction,
+                    match direction {
+                        ipc::SpeedtestDirection::Both => SpeedtestDirection::Both,
+                        ipc::SpeedtestDirection::Upload => SpeedtestDirection::Upload,
+                        ipc::SpeedtestDirection::Download => SpeedtestDirection::Download,
+                    },
                     seconds,
                 )?;
                 Ok(json!({"accepted":true}))
@@ -484,7 +490,8 @@ async fn run_with_recovery(
         crate::instance_lock::InstanceLock::acquire(&paths.lock()).map_err(io::Error::other)?;
     let record = ConfigRecord::load(&paths.config()).map_err(io::Error::other)?;
     let identity = Identity::load(&paths.identity()).map_err(io::Error::other)?;
-    let _identity_lock = AgentPaths::identity_lock(identity.node_id())?;
+    let _identity_lock = crate::identity::acquire_identity_lease(identity.node_id())
+        .map_err(io::Error::other)?;
     let mut session = record.settings.session().map_err(io::Error::other)?;
     session.tunnel_rules.clear();
     #[cfg(feature = "agent-files")]

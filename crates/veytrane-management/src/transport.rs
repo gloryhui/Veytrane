@@ -1,5 +1,5 @@
 //! Local authenticated byte transport. The protocol never listens on TCP.
-use crate::node::local::paths::AgentPaths;
+use crate::paths::AgentPaths;
 use std::io;
 
 pub trait LocalStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
@@ -108,7 +108,7 @@ fn create_pipe(
 ) -> io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
     use tokio::net::windows::named_pipe::ServerOptions;
     use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
-    let descriptor = crate::storage::permissions::windows::Descriptor::new(false)?;
+    let descriptor = veytrane_transport::permissions::windows::Descriptor::new(false)?;
     let mut attributes = SECURITY_ATTRIBUTES {
         nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
         lpSecurityDescriptor: descriptor.pointer(),

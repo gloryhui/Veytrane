@@ -1,7 +1,7 @@
 //! The original desktop workbench, projected exclusively from Agent IPC DTOs.
 //! This view never opens an identity, task store, network session or transfer service.
 use super::*;
-use crate::node::core::config::SpeedtestDirection as AgentSpeedDirection;
+use crate::node::api::protocol::SpeedtestDirection as AgentSpeedDirection;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Page {

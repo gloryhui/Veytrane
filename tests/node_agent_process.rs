@@ -692,7 +692,7 @@ async fn three_agent_processes_unified_files_directory_four_forwards_and_revocat
     assert!(!home.root.join("receive/pause-cancel.bin").exists());
     mac.ok(Api::StartSpeed {
         peer: home_id.clone(),
-        direction: p2p_file::node::core::config::SpeedtestDirection::Upload,
+        direction: p2p_file::node::api::protocol::SpeedtestDirection::Upload,
         seconds: 30,
     })
     .await;

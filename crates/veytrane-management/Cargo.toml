@@ -1,0 +1,21 @@
+[package]
+name = "veytrane-management"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+
+[dependencies]
+dirs = "=5.0.1"
+rand = "0.10.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+tokio = { version = "1.53.1", features = ["io-util", "net", "rt", "time"] }
+veytrane-transport = { path = "../veytrane-transport", features = ["private-storage"] }
+
+[target."cfg(unix)".dependencies]
+rustix = { version = "=1.1.5", features = ["process"] }
+
+[target."cfg(windows)".dependencies]
+blake3 = "1.8.7"
+windows-sys = { version = "=0.59.0", features = ["Win32_Security"] }

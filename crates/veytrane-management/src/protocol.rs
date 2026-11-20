@@ -1,7 +1,9 @@
+//! Management request/response contracts and bounded IPC v1 framing.
+
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{io, path::PathBuf};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use veytrane_node::operation_id::TaskId;
+use veytrane_transport::operation_id::TaskId;
 
 pub const API_VERSION: u16 = 1;
 pub const FRAME_LIMIT: usize = 1024 * 1024;
@@ -14,6 +16,7 @@ pub struct Request {
     pub timeout_ms: u32,
     pub command: Command,
 }
+
 impl Request {
     pub fn new(command: Command) -> Self {
         Self {
@@ -23,6 +26,7 @@ impl Request {
             command,
         }
     }
+
     pub fn validate(&self) -> io::Result<()> {
         if self.api_version != API_VERSION {
             return Err(io::Error::other("api_version_unsupported"));
@@ -42,6 +46,16 @@ impl Request {
         Ok(())
     }
 }
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeedtestDirection {
+    #[default]
+    Both,
+    Upload,
+    Download,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
@@ -107,7 +121,7 @@ pub enum Command {
     },
     StartSpeed {
         peer: String,
-        direction: crate::node::core::config::SpeedtestDirection,
+        direction: SpeedtestDirection,
         seconds: u16,
     },
     StopSpeed {
@@ -140,6 +154,7 @@ pub enum Command {
     },
     Stop,
 }
+
 impl Command {
     pub fn is_query(&self) -> bool {
         matches!(
@@ -154,6 +169,7 @@ impl Command {
         )
     }
 }
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Response {
@@ -162,11 +178,13 @@ pub struct Response {
     pub result: Option<serde_json::Value>,
     pub error: Option<ApiError>,
 }
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ApiError {
     pub code: String,
     pub message: String,
 }
+
 impl Response {
     pub fn ok(id: &str, result: serde_json::Value) -> Self {
         Self {
@@ -176,6 +194,7 @@ impl Response {
             error: None,
         }
     }
+
     pub fn error(id: &str, code: &str, message: impl ToString) -> Self {
         Self {
             api_version: API_VERSION,
@@ -188,6 +207,7 @@ impl Response {
         }
     }
 }
+
 pub async fn read<T: DeserializeOwned>(
     stream: &mut (impl AsyncRead + Unpin + ?Sized),
 ) -> io::Result<T> {
@@ -199,6 +219,7 @@ pub async fn read<T: DeserializeOwned>(
     stream.read_exact(&mut bytes).await?;
     serde_json::from_slice(&bytes).map_err(io::Error::other)
 }
+
 pub async fn write<T: Serialize>(
     stream: &mut (impl AsyncWrite + Unpin + ?Sized),
     value: &T,

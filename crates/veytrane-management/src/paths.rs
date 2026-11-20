@@ -2,6 +2,7 @@ use std::{
     io,
     path::{Path, PathBuf},
 };
+use veytrane_transport::permissions;
 
 #[derive(Clone, Debug)]
 pub struct AgentPaths {
@@ -17,13 +18,13 @@ impl AgentPaths {
     }
 
     pub fn new(root: &Path) -> io::Result<Self> {
-        crate::storage::permissions::ensure_directory(root)?;
+        permissions::ensure_directory(root)?;
         let root = root.canonicalize()?;
         #[cfg(windows)]
         let endpoint = {
             let key = format!(
                 "{}:{}",
-                crate::storage::permissions::user_key()?,
+                permissions::user_key()?,
                 root.to_string_lossy().to_lowercase()
             );
             format!(
@@ -50,10 +51,5 @@ impl AgentPaths {
     }
     pub fn lock(&self) -> PathBuf {
         self.root.join("agent.lock")
-    }
-    pub fn identity_lock(
-        id: crate::identity::NodeId,
-    ) -> io::Result<crate::instance_lock::InstanceLock> {
-        crate::identity::acquire_identity_lease(id).map_err(io::Error::other)
     }
 }

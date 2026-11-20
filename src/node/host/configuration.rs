@@ -28,6 +28,30 @@ pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> io::Result<T> {
     serde_json::from_slice(&bytes).map_err(io::Error::other)
 }
 
+pub fn ownership_status(paths: &AgentPaths) -> io::Result<Value> {
+    use crate::identity::{Identity, acquire_identity_lease};
+    use crate::instance_lock::InstanceLock;
+
+    let _directory = InstanceLock::acquire(&paths.lock()).map_err(io::Error::other)?;
+    let identity = if paths.identity().try_exists()? {
+        Some(Identity::load(&paths.identity()).map_err(io::Error::other)?)
+    } else {
+        None
+    };
+    let _identity = identity
+        .as_ref()
+        .map(|identity| acquire_identity_lease(identity.node_id()))
+        .transpose()
+        .map_err(io::Error::other)?;
+    let tasks_lock = paths.tasks().with_extension("lock");
+    let _tasks = match std::fs::symlink_metadata(&tasks_lock) {
+        Ok(_) => Some(InstanceLock::acquire(&tasks_lock).map_err(io::Error::other)?),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    Ok(json!({"running":false,"node_id":identity.map(|id|id.node_id().to_hex())}))
+}
+
 pub fn initialize(paths: &AgentPaths) -> io::Result<Value> {
     let _lock =
         crate::instance_lock::InstanceLock::acquire(&paths.lock()).map_err(io::Error::other)?;
@@ -36,7 +60,8 @@ pub fn initialize(paths: &AgentPaths) -> io::Result<Value> {
     }
     let identity =
         crate::identity::Identity::load_or_create(&paths.identity()).map_err(io::Error::other)?;
-    let _identity = AgentPaths::identity_lock(identity.node_id())?;
+    let _identity = crate::identity::acquire_identity_lease(identity.node_id())
+        .map_err(io::Error::other)?;
     let receive = paths.root.join("receive");
     ConfigRecord::initialize(&paths.config(), receive).map_err(io::Error::other)?;
     Ok(json!({"node_id":identity.node_id().to_hex(),"config":paths.config()}))
@@ -45,7 +70,8 @@ pub fn offline_apply(paths: &AgentPaths, file: &Path, expected: u64) -> io::Resu
     let _lock =
         crate::instance_lock::InstanceLock::acquire(&paths.lock()).map_err(io::Error::other)?;
     let identity = crate::identity::Identity::load(&paths.identity()).map_err(io::Error::other)?;
-    let _identity = AgentPaths::identity_lock(identity.node_id())?;
+    let _identity = crate::identity::acquire_identity_lease(identity.node_id())
+        .map_err(io::Error::other)?;
     let mut record = ConfigRecord::load(&paths.config()).map_err(io::Error::other)?;
     if record.revision != expected {
         return Err(io::Error::other(format!(

@@ -1,5 +1,5 @@
-use crate::node::api::protocol::{self as ipc, Command, Request, Response};
-use crate::node::local::paths::AgentPaths;
+use crate::paths::AgentPaths;
+use crate::protocol::{self as ipc, Command, Request, Response};
 use std::{io, time::Duration};
 
 #[derive(Clone)]
@@ -18,7 +18,7 @@ impl AgentClient {
         tokio::time::timeout(
             Duration::from_millis(u64::from(request.timeout_ms) + 5000),
             async {
-                let mut stream = crate::node::local::transport::connect(&self.paths).await?;
+                let mut stream = crate::transport::connect(&self.paths).await?;
                 ipc::write(&mut *stream, &request).await?;
                 let response: Response = ipc::read(&mut *stream).await?;
                 if response.api_version != ipc::API_VERSION
