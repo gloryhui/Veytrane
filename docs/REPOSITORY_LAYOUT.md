@@ -29,13 +29,13 @@ src/main.rs → 独立 CLI
 | `src/node/adapters/` | `p2p-node` 的命令编排，正常请求走 IPC，离线操作调用宿主。 |
 | `apps/web-management` | `p2p-node web` 管理页和 Agent 默认 `3001` 导航。两个入口经同一 IPC 使用 Agent。内置导航与 Agent 同进程，核心重建时导航继续运行。 |
 | `crates/veytrane-http-auth` | 旧独立管理页与节点管理页共用的回环 Host、Origin、Bearer 和令牌文件逻辑。 |
-| `src/node/products/` | Live 和 Sub2API 的独立装配、授权、容量及恢复策略，共用节点与监听辅助。 |
+| `apps/live`、`apps/sub2api` | 专用产品各自的装配、授权、容量和界面。共用恢复退避及节点事件辅助仍在 `src/node/products/`。 |
 | `src/desktop/agent_shell/` | 唯一 IPC 桌面及其工作台、窗口、托盘宿主。 |
 | `src/desktop/ui/` | 工作台与二级窗口共用控件、文本输入、视觉主题、品牌。无业务运行时所有权。 |
 | `src/desktop/platform/` | 桌面共用托盘、窗口隐藏/显示、展示状态；不反向引用任一窗口所有者。 |
 | `src/storage/` | 基础存储和独立 CLI 文件存储的兼容入口。 |
 | `src/discovery/`、`nat/`、`net/`、`transport/`、`relay/` | 共用发现客户端、打洞、连接竞速、QUIC 和 Relay 客户端。服务端模块只在 `signaling-server` 及测试构建启用。 |
-| `apps/signaling` | `p2p_file signal-server` 的启动、端口与 TLS/Relay 参数装配。登记状态和 SQLite 位于 `src/discovery` 的服务端模块。 |
+| `apps/signaling` | `p2p_file signal-server` 的启动、TLS 监听、设备登记与短 ID SQLite，以及可选 Relay 服务端。 |
 | `src/protocol/`、`transfer/`、`tunnel/`、`admin/` | 原独立 CLI 仍在使用的协议与执行路径；不能因与 node 同名就删除。 |
 | `crates/veytrane-transport` | 身份、绑定到 QUIC 会话的握手、端点、有界原始帧和 OS 存储原语。 |
 | `crates/veytrane-node` | P2PN 协商、双向流分发、会话授权、设备容量、连接代际及活动许可。 |

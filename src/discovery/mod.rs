@@ -16,4 +16,5 @@ pub use signal::{run_signal_server, run_signal_server_on};
 
 pub mod short_id;
 #[cfg(any(feature = "signaling-server", test))]
+#[path = "../../apps/signaling/src/short_id_store.rs"]
 mod short_id_store;

@@ -48,7 +48,14 @@ agent-base = [
 agent-files = ["agent-base", "dep:veytrane-files", "veytrane-files/node-runtime"]
 agent-web = ["agent-base", "dep:veytrane-web-management"]
 node-cli = ["agent-base", "agent-web"]
-standalone = ["dep:veytrane-files", "dep:veytrane-http-auth", "dep:axum", "signaling-server"]
+standalone = [
+    "dep:veytrane-files",
+    "dep:veytrane-http-auth",
+    "dep:veytrane-speed",
+    "dep:veytrane-tcp",
+    "dep:axum",
+    "signaling-server",
+]
 signaling-server = ["dep:rusqlite"]
 gui = ["node", "desktop-client"]
 desktop-client = [
@@ -71,8 +78,8 @@ veytrane-files = { path = "crates/veytrane-files", optional = true }
 veytrane-http-auth = { path = "crates/veytrane-http-auth", optional = true }
 veytrane-management = { path = "crates/veytrane-management", optional = true }
 veytrane-node = { path = "crates/veytrane-node", optional = true }
-veytrane-speed = { path = "crates/veytrane-speed", default-features = false }
-veytrane-tcp = { path = "crates/veytrane-tcp" }
+veytrane-speed = { path = "crates/veytrane-speed", default-features = false, optional = true }
+veytrane-tcp = { path = "crates/veytrane-tcp", optional = true }
 veytrane-transport = { path = "crates/veytrane-transport", features = ["quic"] }
 veytrane-web-management = { path = "apps/web-management", optional = true }
 socket2 = "0.6.5"

@@ -40,7 +40,10 @@ PROFILE_EXCLUSIONS = {
     "agent-base": {"veytrane-files", "veytrane-web-management", "axum", "gpui", "rusqlite"},
     "agent-base,agent-web": {"veytrane-files", "gpui", "rusqlite"},
     "agent-full": {"gpui", "rusqlite"},
-    "desktop-client": {"veytrane-files", "veytrane-web-management", "axum", "rusqlite"},
+    "desktop-client": {
+        "veytrane-files", "veytrane-speed", "veytrane-tcp", "veytrane-web-management",
+        "axum", "rusqlite",
+    },
     "live": {"veytrane-files", "veytrane-web-management", "gpui", "rusqlite"},
     "sub2api-client,sub2api-gateway": {
         "veytrane-files", "veytrane-web-management", "axum", "gpui", "rusqlite"
@@ -51,7 +54,9 @@ PROFILE_EXCLUSIONS = {
 
 def violations(root):
     errors = []
-    for path in sorted((root / "src").rglob("*.rs")):
+    paths = (path for directory in ("src", "apps", "crates")
+             for path in (root / directory).rglob("*.rs"))
+    for path in sorted(paths):
         relative = path.relative_to(root)
         parts = relative.parts
         # Keep line numbers stable, ignore line comments/doc comments.
@@ -63,7 +68,7 @@ def violations(root):
                 line = code.count("\n", 0, match.start()) + 1
                 errors.append(f"{relative}:{line}: {reason}")
 
-        if parts[1] == "node" and len(parts) > 3:
+        if parts[:2] == ("src", "node") and len(parts) > 3:
             layer = parts[2]
             if layer not in LAYERS:
                 errors.append(f"{relative}: unknown node layer {layer}")
@@ -75,11 +80,18 @@ def violations(root):
                     line = code.count("\n", 0, match.start()) + 1
                     errors.append(f"{relative}:{line}: {layer} -> {dependency} is forbidden; use the owning layer")
             reject(r"\bcrate::node::\s*\{", "use explicit layer imports")
-        if parts[1] in FOUNDATION:
+        if parts[0] == "src" and parts[1] in FOUNDATION:
             reject(r"\b(?:node|desktop)\s*::", "foundation must not depend on node/desktop")
+        if parts[:2] == ("apps", "web-management") or parts[0] == "crates":
+            reject(r"\bp2p_file\s*::", "workspace packages must not borrow the root runtime")
+        if parts[0] == "apps" and parts[1] in {"live", "sub2api"}:
+            reject(r"\bcrate::node::(?:adapters|api|host|local)\s*::",
+                   "products must assemble their own node outside the Agent host")
+            reject(r"\bsuper::(?:live|sub2api)\s*::",
+                   "products must share helpers through the common runtime module")
         if parts[1:3] == ("desktop", "agent_shell") or relative.as_posix() == "src/desktop/agent_shell.rs":
             reject(r"\blegacy\s*::|\bDesktopShell\b", "Agent desktop must not borrow the embedded legacy runtime")
-            reject(r"crate::node::(?:host|products)::", "Agent desktop must use management contracts, not a runtime owner")
+            reject(r"crate::node::(?:core|host|products)::", "Agent desktop must use management contracts and shared validation")
         if parts[1:3] in (("desktop", "ui"), ("desktop", "platform")):
             reject(r"\blegacy\s*::|\bDesktopShell\b|\bAgentShell\b", "shared UI/native primitives must not depend on shell owners")
     return errors

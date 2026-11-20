@@ -32,7 +32,7 @@ def render(check=False):
             assert edge['kind'] in {'control', 'data', 'store', 'dependency'}, edge
     assert visible == modules.keys(), 'unreachable module'
     # Validate static and existing flow-source links too, after source moves.
-    for link in re.findall(r'[\"\'](\.\./(?:src|scripts|packaging)/[^\"\']+)[\"\']', source):
+    for link in re.findall(r'[\"\'](\.\./(?:src|crates|apps|scripts|packaging)/[^\"\']+)[\"\']', source):
         assert (HTML.parent / link).exists(), f'broken guide link: {link}'
     payload = json.dumps(data, ensure_ascii=False, indent=2).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
     output, count = re.subn(r'(<script id="architecture-map-data" type="application/json">).*?(</script>)', lambda m: m[1]+'\n'+payload+'\n'+m[2], source, flags=re.S)

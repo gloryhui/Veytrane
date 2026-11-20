@@ -13,7 +13,7 @@
 | 管理应用 | `desktop` 处理窗口、托盘、文件选择和视图状态。管理 CLI 和 `p2p-node web` 调用同一个 Agent。浏览器导航由 Agent 的 `adapters/navigation` 提供。 | 改桌面交互从 `desktop` 入手。改业务规则从 `core` 入手。两个 Web 入口由不同进程提供。 |
 | 专用产品与独立 CLI | `products/sub2api` 与 `products/live` 直接创建核心实例，复用宿主转发、恢复等能力。独立 `p2p_file` 有自己的文件收发、隧道、管理入口与信令服务端。 | 不能假定所有可执行程序都经过 `p2p-agent`。直播产品另有对 Sub2API 授权设备枚举、事件日志和停止函数的横向依赖。 |
 
-主要入口可从 [Agent 启动](../src/bin/p2p-agent.rs)、[IPC 客户端](../crates/veytrane-management/src/client.rs)、[桌面工作台](../src/desktop/agent_shell/workbench.rs)、[专用网关](../src/node/products/sub2api.rs)、[直播产品](../src/node/products/live.rs) 和 [独立 CLI](../src/main.rs) 追踪。
+主要入口可从 [Agent 启动](../src/bin/p2p-agent.rs)、[IPC 客户端](../crates/veytrane-management/src/client.rs)、[桌面工作台](../src/desktop/agent_shell/workbench.rs)、[专用网关](../apps/sub2api/src/runtime.rs)、[直播产品](../apps/live/src/runtime.rs) 和 [独立 CLI](../src/main.rs) 追踪。
 
 ## 应优先处理的边界
 

@@ -84,22 +84,22 @@
       "id": "products",
       "title": "专用产品组合",
       "tag": "PRODUCT COMPOSITION",
-      "path": "src/node/products/sub2api.rs",
-      "summary": "Live 与 Sub2API 产品入口继续位于 src/node/products，直接组合节点与 TCP，不经过通用 Agent 管理 IPC。",
+      "path": "apps/sub2api/src/runtime.rs",
+      "summary": "Live 与 Sub2API 的发行入口仍在 src/bin，运行组合分别位于 apps/live 与 apps/sub2api，直接复用节点与 TCP。",
       "rules": [
         "不经过通用 Agent 管理 IPC。",
         "固定服务目标，连接授权与应用账号分开。",
-        "产品路径本阶段保留在根包，不随库包迁移。"
+        "产品 runtime 不反向依赖其它产品；入口与打包名称保持原路径。"
       ],
       "parts": [
         {
           "name": "Sub2API 组合",
-          "path": "src/node/products/sub2api.rs",
+          "path": "apps/sub2api/src/runtime.rs",
           "detail": "客户端监听、网关内存 ACL 和服务就绪探测。"
         },
         {
           "name": "Live 组合",
-          "path": "src/node/products/live.rs",
+          "path": "apps/live/src/runtime.rs",
           "detail": "只读 WHEP 代理和固定媒体转发。"
         },
         {
@@ -325,7 +325,7 @@
         },
         {
           "name": "信令服务端",
-          "path": "src/discovery/signal/server.rs",
+          "path": "apps/signaling/src/server.rs",
           "detail": "ServerConfig、Registry、监听、TLS/Relay 装配与注册处理。"
         },
         {
@@ -335,7 +335,7 @@
         },
         {
           "name": "短 ID 存储",
-          "path": "src/discovery/short_id_store.rs",
+          "path": "apps/signaling/src/short_id_store.rs",
           "detail": "服务端 SQLite 分配与查找。"
         }
       ],
@@ -359,7 +359,7 @@
         },
         {
           "name": "服务端",
-          "path": "src/relay/server.rs",
+          "path": "apps/signaling/src/relay.rs",
           "detail": "配对、额度和超时。"
         }
       ],

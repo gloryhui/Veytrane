@@ -35,8 +35,8 @@ const MEDIA_TARGET: &str = "127.0.0.1:18190";
 const WEB_SERVICE: &str = "live-web";
 const MEDIA_SERVICE: &str = "live-media";
 const MAX_SDP: usize = 64 * 1024;
-const PLAYER: &str = include_str!("../../live/player.html");
-const PLAYER_JS: &str = include_str!("../../live/player.js");
+const PLAYER: &str = include_str!("player.html");
+const PLAYER_JS: &str = include_str!("player.js");
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

@@ -99,6 +99,7 @@ pub const MAX_CANDIDATES: usize = 32;
 pub const OUTBOX_CAPACITY: usize = 64;
 
 #[cfg(any(feature = "signaling-server", test))]
+#[path = "../../apps/signaling/src/server.rs"]
 mod server;
 
 #[cfg(all(test, feature = "agent-base"))]
