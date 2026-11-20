@@ -57,7 +57,7 @@ gui = [
 veytrane-files = { path = "crates/veytrane-files" }
 veytrane-node = { path = "crates/veytrane-node", optional = true }
 veytrane-speed = { path = "crates/veytrane-speed", default-features = false }
-veytrane-transport = { path = "crates/veytrane-transport" }
+veytrane-transport = { path = "crates/veytrane-transport", features = ["quic"] }
 socket2 = "0.6.5"
 rusqlite = { version = "=0.37.0", features = ["bundled"] }
 argon2 = { version = "=0.5.3", optional = true }
@@ -101,6 +101,7 @@ tower = { version = "=0.5.3", features = ["util"] }
 veytrane-files = { path = "crates/veytrane-files", features = ["test-support"] }
 veytrane-node = { path = "crates/veytrane-node", features = ["test-support"] }
 veytrane-speed = { path = "crates/veytrane-speed", default-features = false, features = ["test-support"] }
+veytrane-transport = { path = "crates/veytrane-transport", features = ["test-support"] }
 
 [[bin]]
 name = "p2p-desktop"

@@ -101,7 +101,7 @@ impl PreparedTransport {
             &mut send, &mut recv, identity, &binding,
         )
         .await?;
-        let peer = verified.outcome.peer_node_id;
+        let peer = verified.outcome().peer_node_id;
         if expected.is_some_and(|id| id != peer) {
             return Err(Error::Identity("unexpected Relay peer NodeId".into()));
         }

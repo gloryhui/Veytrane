@@ -1,7 +1,11 @@
 //! Shared transport primitives for Veytrane.
 
 pub mod atomic;
+#[cfg(feature = "quic")]
+pub mod channel_binding;
 pub mod error;
+#[cfg(feature = "quic")]
+pub mod handshake;
 pub mod identity;
 pub mod identity_wire;
 pub mod instance_lock;

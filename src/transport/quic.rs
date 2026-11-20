@@ -16,7 +16,6 @@
 //! exporter 导出）纳入签名载荷，见 [`crate::transport::handshake`]。
 
 use std::collections::{HashMap, HashSet};
-use std::fmt;
 use std::io::{self, IoSliceMut};
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -52,9 +51,6 @@ pub const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
 /// 空闲超时。超过这个时间没有任何活动就认为连接死了。
 pub const MAX_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// 应用层握手各阶段允许的最大静默时间。
-pub const APPLICATION_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-
 /// 等待 QUIC transport handshake 完成的最大时间；与应用层四阶段握手分开计时。
 pub const QUIC_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -65,69 +61,10 @@ pub const ACCEPT_FIRST_BI_STREAM_TIMEOUT: Duration = Duration::from_secs(10);
 pub const STREAM_FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub use veytrane_transport::TRANSFER_IDLE_TIMEOUT;
-
-/// 导出会话绑定值时使用的 TLS exporter 标签（RFC 5705）。
-///
-/// 标签是固定的：只要双方在同一条 TLS 会话上、传同样的标签和 context，
-/// 就会导出完全相同的字节。
-pub const CHANNEL_BINDING_LABEL: &[u8] = b"p2p_file/channel-binding/v1";
-
-/// 会话绑定值长度。32 字节足够，且不会触发 exporter 的长度限制。
-pub const CHANNEL_BINDING_LEN: usize = 32;
-
-/// 当前 QUIC/TLS 会话的通道绑定值（channel binding）。
-///
-/// 这是把应用层 Ed25519 认证钉死在**这一条** TLS 会话上的关键：绑定值由
-/// [`quinn::Connection::export_keying_material`] 从当前会话的 TLS 密钥材料派生，
-/// 不同 TLS 会话（哪怕对端、参数完全相同）导出的是各自独立的伪随机值。
-///
-/// 因此中间人无法建立 A↔M、M↔B 两条连接后原样转发应用层握手：A 用 A↔M 的
-/// 绑定值签名，B 用 M↔B 的绑定值校验，签名必然对不上。
-///
-/// 安全约束：绑定值**只能**来自当前连接。本类型字段私有，唯一的公开构造入口
-/// 是 [`ChannelBinding::from_connection`]，从类型上杜绝调用方传常量、空值或
-/// 自己随机出来的值。
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct ChannelBinding([u8; CHANNEL_BINDING_LEN]);
-
-impl ChannelBinding {
-    /// 从当前 QUIC/TLS 会话导出绑定值。
-    ///
-    /// 必须在 TLS 握手完成后调用；调用方拿到 [`quinn::Connection`] 时握手
-    /// 已经完成，所以正常路径不会失败，失败会得到明确错误而不是 panic。
-    pub fn from_connection(connection: &quinn::Connection) -> Result<Self> {
-        let mut binding = [0u8; CHANNEL_BINDING_LEN];
-        connection
-            .export_keying_material(&mut binding, CHANNEL_BINDING_LABEL, b"")
-            .map_err(|_| {
-                Error::Transport("导出 TLS 会话绑定值失败：TLS 握手尚未完成或连接已失效".into())
-            })?;
-        Ok(Self(binding))
-    }
-
-    /// 供签名载荷使用。
-    pub fn as_bytes(&self) -> &[u8; CHANNEL_BINDING_LEN] {
-        &self.0
-    }
-}
-
-impl fmt::Debug for ChannelBinding {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // 绑定值是会话相关的伪随机串，不是长期密钥，但也没有进日志的必要。
-        f.write_str("ChannelBinding(<32 bytes>)")
-    }
-}
-
-/// 仅测试用：直接指定绑定值。
-///
-/// 用来模拟「不同会话导出不同绑定值」以及「翻转 1 bit」这类场景；
-/// 生产代码拿不到这个入口（`cfg(test)`），只能从真实连接导出。
-#[cfg(test)]
-impl ChannelBinding {
-    pub(crate) fn from_bytes_for_test(bytes: [u8; CHANNEL_BINDING_LEN]) -> Self {
-        Self(bytes)
-    }
-}
+pub use veytrane_transport::channel_binding::{
+    CHANNEL_BINDING_LABEL, CHANNEL_BINDING_LEN, ChannelBinding,
+};
+pub use veytrane_transport::handshake::APPLICATION_HANDSHAKE_TIMEOUT;
 
 static CRYPTO_PROVIDER: OnceLock<()> = OnceLock::new();
 
