@@ -7175,6 +7175,7 @@ dependencies = [
  "serde",
  "tokio",
  "tracing",
+ "veytrane-node",
  "veytrane-transport",
 ]
 

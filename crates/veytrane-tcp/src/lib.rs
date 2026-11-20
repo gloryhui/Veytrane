@@ -1,6 +1,8 @@
 //! TCP stream budgets, listener supervision, and QUIC byte forwarding.
 
 pub mod rules;
+#[cfg(feature = "node-runtime")]
+pub mod services;
 
 use std::future::Future;
 use std::net::SocketAddr;

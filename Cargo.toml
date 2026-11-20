@@ -33,6 +33,7 @@ agent-base = [
     "dep:veytrane-node",
     "veytrane-node/remote-auth",
     "veytrane-speed/node-runtime",
+    "veytrane-tcp/node-runtime",
     "veytrane-transport/private-storage",
     "dep:sha2",
     "dep:dirs",

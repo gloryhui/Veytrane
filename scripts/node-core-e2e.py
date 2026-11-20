@@ -32,6 +32,7 @@ CASES = {
     "source-storage-network-signal-errors": ["two_process_pause_both_sides_and_storage_source_errors_reach_ui", "session_process_kill_either_endpoint_restart_requires_manual_continue", "three_process_passive_directory_collision_and_signal_restart", "permissions_failure_keeps_recovery_and_does_not_commit_receipt", "receiver_continue_reports_previously_detected_source_change"],
     "security-boundaries": ["paths_are_relative_portable_and_never_silently_rewritten", "source_symlink_and_normalization_or_case_collision_are_rejected", "malicious_manifest_path_trailing_bytes_and_bitmap_are_rejected", "oversized_length_header_fails_without_waiting_for_payload", "unexpected_authenticated_target_fails_before_connected"],
     "node-negotiation-rejection": ["unsupported_version_missing_security_capability_and_old_frames_are_rejected", "authenticated_non_node_peer_is_rejected_by_node_negotiation", "schema_only_speed_capability_does_not_enable_execution"],
+    "tcp-authorization": ["service_stream_reuses_core_for_allowed_target_and_reports_whitelist_denial", "service_checks_latest_grant_after_delayed_open"],
     "speed-file-arbitration-and-cancel": ["speed_cancel_and_stale_uni_token_do_not_pollute_next_test_or_file_transfer", "speed_and_file_activity_exclude_each_other_without_silent_pause", "speed_simultaneous_requests_have_one_grant_and_one_busy"],
 }
 
@@ -55,7 +56,8 @@ def main():
     command = cargo + ["-p", "p2p_file", "--features", "node", "--lib", "node::core::"] + test_args
     wire_command = cargo + ["-p", "veytrane-node", "--features", "remote-auth", "--lib"] + test_args
     file_command = cargo + ["-p", "veytrane-files", "--features", "node-runtime", "--lib"] + test_args
-    commands = (command, wire_command, file_command)
+    tcp_command = cargo + ["-p", "veytrane-tcp", "--features", "node-runtime", "--lib"] + test_args
+    commands = (command, wire_command, file_command, tcp_command)
     started = datetime.datetime.now(datetime.timezone.utc).isoformat()
     begin = time.monotonic()
     log_file = output / "node-core.log"
@@ -92,7 +94,7 @@ def main():
     proof_complete = len(boundary) == 10 and kills == {"a", "b"} and pause == {"sender", "receiver", "simultaneous"}
     complete_runs = len(re.findall(r"test result: ok\. [1-9]\d* passed; 0 failed; 0 ignored", text)) == len(commands)
     success = exit_code == 0 and complete_runs and proof_complete and all(c["result"] == "PASS" for c in cases)
-    matrix = {"schema": "node-core-e2e/v1", "head_sha": head, "working_tree_dirty": dirty, "platform": platform.platform(), "architecture": platform.machine(), "started_utc": started, "elapsed_seconds": round(time.monotonic()-begin, 3), "command": command, "wire_command": wire_command, "file_command": file_command, "exit_code": exit_code, "result": "PASS" if success else "FAIL", "cases": cases, "process_proofs": proofs, "proof_complete": proof_complete, "limits": ["Process actors execute production NodeSession, not GPUI window automation.", "StorageFull/PermissionDenied injection is modeled I/O; Unix chmod denial and Windows occupied-target denial are distinct actual platform tests.", "Controlled writer fairness is not a physical bandwidth threshold.", "Loopback/CI are not physical Win10/11, Apple Silicon interaction or dual NAT.", "Independent CLI tests and scripts/e2e.sh run separately after rebuild; this script does not claim them."]}
+    matrix = {"schema": "node-core-e2e/v1", "head_sha": head, "working_tree_dirty": dirty, "platform": platform.platform(), "architecture": platform.machine(), "started_utc": started, "elapsed_seconds": round(time.monotonic()-begin, 3), "command": command, "wire_command": wire_command, "file_command": file_command, "tcp_command": tcp_command, "exit_code": exit_code, "result": "PASS" if success else "FAIL", "cases": cases, "process_proofs": proofs, "proof_complete": proof_complete, "limits": ["Process actors execute production NodeSession, not GPUI window automation.", "StorageFull/PermissionDenied injection is modeled I/O; Unix chmod denial and Windows occupied-target denial are distinct actual platform tests.", "Controlled writer fairness is not a physical bandwidth threshold.", "Loopback/CI are not physical Win10/11, Apple Silicon interaction or dual NAT.", "Independent CLI tests and scripts/e2e.sh run separately after rebuild; this script does not claim them."]}
     (output / "matrix.json").write_text(json.dumps(matrix, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")
     print(json.dumps({"result": matrix["result"], "head_sha": head, "working_tree_dirty": dirty, "platform": matrix["platform"], "elapsed_seconds": matrix["elapsed_seconds"], "evidence": str(output), "cases": len(cases), "process_proofs": len(proofs)}, ensure_ascii=False))
     return 0 if success else 1

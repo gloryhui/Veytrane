@@ -1,8 +1,12 @@
 use super::*;
-use crate::node::core::dispatch;
-use crate::node::core::wire::{self, NodeFrame, NodeMessage, StreamKind};
-use crate::transport::quic::{client_endpoint, connect, server_endpoint};
 use tokio::sync::watch;
+use veytrane_node::dispatch;
+use veytrane_node::live_authorization::{
+    AuthorizationGrant, LiveAuthorization, RemoteAuthorization, RevocationEpochs,
+};
+use veytrane_node::wire::{self, NodeFrame, NodeMessage, StreamKind};
+use veytrane_transport::identity::Identity;
+use veytrane_transport::quic::{client_endpoint, connect, server_endpoint};
 fn serve_connection(
     connection: Connection,
     peer: NodeId,
@@ -12,13 +16,21 @@ fn serve_connection(
         let (_dispatcher, incoming) =
             dispatch::Dispatcher::start(connection.clone(), wire::capabilities(false, false, true));
         let (_resources, policy) = watch::channel(Default::default());
+        let rights = RemoteAuthorization {
+            inbound: AuthorizationGrant::password(true),
+            outbound: AuthorizationGrant::password(true),
+        };
+        let (rights_tx, rights_rx) = watch::channel(rights);
+        let _rights_tx = rights_tx;
+        let authorization =
+            LiveAuthorization::Live(rights_rx, Arc::new(RevocationEpochs::default()));
         serve(
             peer,
-            crate::node::core::remote_auth::RemoteAuthorization::BOTH.into(),
+            authorization,
             grants,
             policy,
             incoming.services,
-            Arc::new(veytrane_tcp::ForwardStreamOwner::new(16)),
+            Arc::new(ForwardStreamOwner::new(16)),
         )
         .await
     })
@@ -46,15 +58,15 @@ async fn exercise_forwarding(allowed: bool, peer_allowed: bool) {
     let client_connection = connect(&client, server_addr, "p2pfile").await.unwrap();
     let server_connection = server_connection_task.await.unwrap();
 
-    let peer = crate::identity::Identity::generate().node_id();
+    let peer = Identity::generate().node_id();
     let server_allowed = if allowed {
-        vec![crate::node::core::config::AllowedForwardTarget::new(
+        vec![AllowedForwardTarget::new(
             "echo",
             target,
             vec![if peer_allowed {
                 peer.to_hex()
             } else {
-                crate::identity::Identity::generate().node_id().to_hex()
+                Identity::generate().node_id().to_hex()
             }],
         )]
     } else {
@@ -72,7 +84,7 @@ async fn exercise_forwarding(allowed: bool, peer_allowed: bool) {
     let (peer_updates, peer_connection) = watch::channel(Some(client_connection.clone()));
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let (errors_tx, mut errors_rx) = tokio::sync::mpsc::unbounded_channel();
-    let forwarder = tokio::spawn(veytrane_tcp::forward_on_authenticated_session(
+    let forwarder = tokio::spawn(crate::forward_on_authenticated_session(
         local_listener,
         target,
         peer_connection,
@@ -80,7 +92,7 @@ async fn exercise_forwarding(allowed: bool, peer_allowed: bool) {
         errors_tx,
         |tcp, connection, _target| async move {
             let stream = open_tcp(&connection, "echo").await?;
-            veytrane_tcp::bridge_tcp(tcp, stream.send, stream.recv).await
+            crate::bridge_tcp(tcp, stream.send, stream.recv).await
         },
     ));
 
@@ -128,7 +140,7 @@ async fn service_stream_reuses_core_for_allowed_target_and_reports_whitelist_den
 async fn service_checks_latest_grant_after_delayed_open() {
     let echo = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let target = echo.local_addr().unwrap();
-    let peer = crate::identity::Identity::generate().node_id();
+    let peer = Identity::generate().node_id();
     let server = server_endpoint("127.0.0.1:0".parse().unwrap()).unwrap();
     let client = client_endpoint("127.0.0.1:0".parse().unwrap()).unwrap();
     let accept = server.clone();
@@ -137,8 +149,7 @@ async fn service_checks_latest_grant_after_delayed_open() {
         .await
         .unwrap();
     let server_conn = accepted.await.unwrap();
-    let mut grant =
-        crate::node::core::config::AllowedForwardTarget::new("echo", target, vec![peer.to_hex()]);
+    let mut grant = AllowedForwardTarget::new("echo", target, vec![peer.to_hex()]);
     grant.id = "echo".into();
     let (updates, grants) = watch::channel(vec![grant]);
     let service = serve_connection(server_conn.clone(), peer, grants);

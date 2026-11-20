@@ -5,10 +5,17 @@ edition = "2024"
 rust-version = "1.90"
 publish = false
 
+[features]
+node-runtime = ["dep:veytrane-node", "tokio/time"]
+
 [dependencies]
 quinn = "0.11.12"
 rand = "0.10.3"
 serde = { version = "1.0.229", features = ["derive"] }
 tokio = { version = "1.53.1", features = ["io-util", "macros", "net", "rt", "sync"] }
 tracing = "0.1.44"
+veytrane-node = { path = "../veytrane-node", optional = true }
 veytrane-transport = { path = "../veytrane-transport" }
+
+[dev-dependencies]
+veytrane-transport = { path = "../veytrane-transport", features = ["quic"] }
