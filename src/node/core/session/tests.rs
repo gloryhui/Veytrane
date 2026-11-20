@@ -2453,8 +2453,10 @@ async fn simultaneous_connect_requests_converge_to_one_authenticated_peer() {
     let (signal_server, mut server) = start_local_server().await;
     let identity_a = Identity::generate();
     let identity_b = Identity::generate();
-    let (handle_a, mut events_a) = spawn(identity_a.clone(), local_config(signal_server)).unwrap();
-    let (handle_b, mut events_b) = spawn(identity_b.clone(), local_config(signal_server)).unwrap();
+    let mut config = local_config(signal_server);
+    config.enable_speed = false;
+    let (handle_a, mut events_a) = spawn(identity_a.clone(), config.clone()).unwrap();
+    let (handle_b, mut events_b) = spawn(identity_b.clone(), config).unwrap();
     wait_signal_online(&mut events_a).await;
     wait_signal_online(&mut events_b).await;
 
@@ -3285,8 +3287,10 @@ async fn explicit_mapping_refresh_preserves_unchanged_authenticated_connection()
     let (addr, server) = start_local_server().await;
     let ia = Identity::generate();
     let ib = Identity::generate();
-    let (a, mut ea) = spawn(ia.clone(), local_config(addr)).unwrap();
-    let (b, mut eb) = spawn(ib.clone(), local_config(addr)).unwrap();
+    let mut config = local_config(addr);
+    config.enable_speed = false;
+    let (a, mut ea) = spawn(ia.clone(), config.clone()).unwrap();
+    let (b, mut eb) = spawn(ib.clone(), config).unwrap();
     wait_signal_online(&mut ea).await;
     wait_signal_online(&mut eb).await;
     a.connect_peer(ib.node_id()).unwrap();
@@ -3860,6 +3864,7 @@ async fn restart_auto_start_uses_fresh_identity_bound_trust_and_revoke_closes_ru
         .is_empty()
     );
     // Explicit password reconnect restores the listener; removed trust never follows it.
+    wait_failed(&mut ea).await;
     ha.connect_peer_with_password(b.node_id(), test_password())
         .unwrap();
     wait_specific_tunnel_state(&mut ea, &rule.id, TunnelRuntimeState::Running).await;
