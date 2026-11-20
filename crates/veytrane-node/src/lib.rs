@@ -1,5 +1,7 @@
 //! Node capability negotiation and authenticated stream routing for Veytrane.
 
+pub mod activity;
+pub mod authorization;
 pub mod capability;
 pub mod dispatch;
 pub mod operation_id;
