@@ -1,28 +1,41 @@
 //! Lease-bound memory speed business on an existing authenticated connection.
 //! The session's sole BI reader routes control here; one UNI owner routes data.
 use crate::node::core::activity::{Activity, ExclusivePermit};
+use crate::node::core::authorization::ResourcePolicy;
+use crate::node::core::dispatch::{BiStream, RESET_INVALID, RESET_UNAUTHORIZED};
+use crate::node::core::frame_budget::{BufferedFrame, FrameBudget};
 use crate::node::core::protocol::{
     self, Frame, Message, SpeedArbiter, SpeedControl, SpeedDirection, SpeedLease,
 };
+use crate::node::core::remote_auth::{LiveAuthorization, RemoteAuthorization};
 use crate::node::core::task_model::TaskId;
-use crate::node::core::transfer_files::{failure, local_error};
 use crate::{
     error::{Error, Result},
     identity::NodeId,
 };
 use quinn::{Connection, RecvStream, SendStream};
 use std::{
+    collections::HashMap,
     sync::{Arc, Mutex},
     time::Duration,
 };
 use tokio::{
-    sync::{mpsc, oneshot, watch},
+    sync::{Semaphore, mpsc, oneshot, watch},
     task::JoinSet,
 };
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
 const IDLE: Duration = Duration::from_secs(30);
 const BLOCK: usize = 64 * 1024;
 const HEADER_LIMIT: u32 = 4096;
+pub(crate) const DEFAULT_MAX_PEER_BUSINESS_STREAMS: usize = 8;
+
+fn failure(message: &str) -> Error {
+    Error::Protocol(message.into())
+}
+
+fn local_error(error: impl std::fmt::Display) -> Error {
+    Error::Protocol(error.to_string())
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SpeedStatus {
@@ -59,6 +72,213 @@ impl SpeedSnapshot {
         }
     }
 }
+
+#[derive(Clone)]
+pub(crate) struct SpeedService {
+    peers: Arc<Mutex<HashMap<NodeId, SpeedPeer>>>,
+    activity: Activity,
+    changed: watch::Sender<u64>,
+    frame_budget: FrameBudget,
+}
+
+impl SpeedService {
+    pub(crate) fn new(
+        activity: Activity,
+        changed: watch::Sender<u64>,
+        frame_budget: FrameBudget,
+    ) -> Self {
+        Self {
+            peers: Arc::new(Mutex::new(HashMap::new())),
+            activity,
+            changed,
+            frame_budget,
+        }
+    }
+
+    pub(crate) fn peer(&self, peer: NodeId) -> Option<SpeedPeer> {
+        self.peers.lock().unwrap().get(&peer).cloned()
+    }
+
+    pub(crate) async fn start(
+        &self,
+        peer: NodeId,
+        direction: SpeedDirection,
+        seconds: u16,
+    ) -> Result<SpeedSnapshot> {
+        self.peer(peer)
+            .ok_or_else(|| failure("请先连接测速对端"))?
+            .start(direction, seconds)
+            .await
+    }
+
+    pub(crate) fn cancel(&self, peer: NodeId, id: &TaskId) -> Result<()> {
+        self.peer(peer)
+            .ok_or_else(|| failure("测速连接已断开"))?
+            .cancel(id)
+    }
+
+    pub(crate) fn snapshots(&self) -> HashMap<NodeId, SpeedSnapshot> {
+        self.peers
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(peer, speed)| speed.snapshot().map(|snapshot| (*peer, snapshot)))
+            .collect()
+    }
+
+    pub(crate) fn revoke_authorization(&self, peer: NodeId, authorization: RemoteAuthorization) {
+        if let Some(speed) = self.peer(peer) {
+            speed.revoke_authorization(authorization);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_test_duration(&self, peer: NodeId, duration: Duration) -> bool {
+        if let Some(speed) = self.peer(peer) {
+            speed.set_test_duration(duration);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn register(
+        &self,
+        connection: Connection,
+        local: NodeId,
+        remote: NodeId,
+    ) -> SpeedPeerRegistration {
+        let speed = SpeedPeer::new(
+            connection,
+            local,
+            remote,
+            self.activity.clone(),
+            self.changed.clone(),
+        );
+        self.peers.lock().unwrap().insert(remote, speed.clone());
+        SpeedPeerRegistration {
+            service: self.clone(),
+            peer: remote,
+            speed,
+        }
+    }
+
+    pub(crate) async fn serve_peer(
+        &self,
+        connection: Connection,
+        peer: NodeId,
+        local: NodeId,
+        authorization: LiveAuthorization,
+        resources: watch::Receiver<ResourcePolicy>,
+        bi_budget: Arc<Semaphore>,
+        mut incoming: mpsc::Receiver<BiStream>,
+    ) -> Result<()> {
+        let registration = self.register(connection.clone(), local, peer);
+        let speed = registration.handle();
+        let uni_slot = bi_budget
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| failure("测速并发槽已满"))?;
+        let mut streams = JoinSet::new();
+        {
+            let speed = speed.clone();
+            streams.spawn(async move {
+                let _uni_slot = uni_slot;
+                speed.serve_uni().await;
+                Ok(())
+            });
+        }
+        loop {
+            tokio::select! {
+                accepted = incoming.recv() => {
+                    let Some(BiStream { mut send, mut recv }) = accepted else { break };
+                    if !authorization.current().inbound_authorized() {
+                        let _ = send.reset(4u32.into());
+                        let _ = recv.stop(4u32.into());
+                        continue;
+                    }
+                    let permit = match bi_budget.clone().try_acquire_owned() {
+                        Ok(permit) => permit,
+                        Err(_) => {
+                            let _ = send.reset(4u32.into());
+                            let _ = recv.stop(4u32.into());
+                            continue;
+                        }
+                    };
+                    let service = self.clone();
+                    let speed = speed.clone();
+                    let authorization = authorization.clone();
+                    let resources = resources.clone();
+                    streams.spawn(async move {
+                        let _permit = permit;
+                        let result = authorization.guard(true, async {
+                            let buffered = tokio::time::timeout(
+                                Duration::from_secs(5),
+                                service.frame_budget.read(&mut recv, None),
+                            )
+                            .await
+                            .map_err(|_| failure("测速流首帧超时"))??;
+                            let BufferedFrame { frame: first, _lease } = buffered;
+                            if !matches!(&first.message, Message::Speed(_)) {
+                                let _ = send.reset(RESET_INVALID.into());
+                                let _ = recv.stop(RESET_INVALID.into());
+                                return Err(failure("节点测速流类型不符"));
+                            }
+                            let allowed = resources.borrow().for_peer(peer);
+                            if allowed.disabled || !allowed.speed {
+                                let _ = send.reset(RESET_UNAUTHORIZED.into());
+                                let _ = recv.stop(RESET_UNAUTHORIZED.into());
+                                return Err(failure("节点测速资源权限拒绝"));
+                            }
+                            drop(_lease);
+                            speed.serve_control(send, recv, first).await
+                        })
+                        .await;
+                        if let Err(error) = &result {
+                            tracing::warn!(%error, "测速业务流终止");
+                        }
+                        result
+                    });
+                }
+                result = streams.join_next(), if !streams.is_empty() => {
+                    if let Some(Err(error)) = result {
+                        tracing::warn!(%error, "测速任务终止");
+                    }
+                }
+            }
+        }
+        streams.abort_all();
+        while streams.join_next().await.is_some() {}
+        drop(registration);
+        Ok(())
+    }
+}
+
+struct SpeedPeerRegistration {
+    service: SpeedService,
+    peer: NodeId,
+    speed: SpeedPeer,
+}
+
+impl SpeedPeerRegistration {
+    fn handle(&self) -> SpeedPeer {
+        self.speed.clone()
+    }
+}
+
+impl Drop for SpeedPeerRegistration {
+    fn drop(&mut self) {
+        self.speed.cancel_all();
+        let mut peers = self.service.peers.lock().unwrap();
+        if peers
+            .get(&self.peer)
+            .is_some_and(|speed| speed.same_connection(&self.speed))
+        {
+            peers.remove(&self.peer);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct SpeedPeer(Arc<Peer>);
 struct Peer {
@@ -217,10 +437,7 @@ impl SpeedPeer {
             active.cancel.send_replace(true);
         }
     }
-    pub fn revoke_authorization(
-        &self,
-        authorization: crate::node::core::remote_auth::RemoteAuthorization,
-    ) {
+    pub fn revoke_authorization(&self, authorization: RemoteAuthorization) {
         if let Some(active) = self.0.state.lock().unwrap().active.as_ref() {
             let authorized = if active.lease.owner == self.0.local {
                 authorization.outbound_authorized()

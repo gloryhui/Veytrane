@@ -48,6 +48,7 @@ fn start(
         )
         .to_string(),
     );
+    conf.enable_speed = true;
     conf.network = DesktopNetworkConfig {
         local_port: 0,
         stun_servers: Vec::new(),

@@ -115,6 +115,7 @@ pub(crate) struct ControlState {
     trust_sources: Arc<Mutex<BTreeMap<String, crate::node::core::authorization::TrustSource>>>,
     max_peers: usize,
     pub(crate) transfer: Option<crate::node::core::transfer::TransferService>,
+    pub(crate) speed: Option<crate::node::core::speed::SpeedService>,
 }
 
 impl ControlState {
@@ -159,6 +160,7 @@ impl ControlState {
     pub(crate) fn new(
         identity: NodeId,
         transfer: Option<crate::node::core::transfer::TransferService>,
+        speed: Option<crate::node::core::speed::SpeedService>,
         max_peers: usize,
     ) -> Self {
         let (events, _) = broadcast::channel(256);
@@ -172,6 +174,7 @@ impl ControlState {
             trust_sources: Default::default(),
             max_peers,
             transfer,
+            speed,
         }
     }
 
@@ -473,6 +476,18 @@ impl NodeControl {
             .map(|service| service.ui_snapshot())
             .transpose()
     }
+    pub(crate) fn has_file_service(&self) -> bool {
+        self.control.transfer.is_some()
+    }
+    pub(crate) fn speed_snapshots(
+        &self,
+    ) -> std::collections::HashMap<NodeId, crate::node::core::speed::SpeedSnapshot> {
+        self.control
+            .speed
+            .as_ref()
+            .map(|service| service.snapshots())
+            .unwrap_or_default()
+    }
 }
 
 impl NodeControl {
@@ -539,6 +554,7 @@ mod transport_tests {
         let state = ControlState::new(
             id,
             None,
+            None,
             crate::node::core::network_state::DEFAULT_MAX_PEERS,
         );
         state.snapshot.lock().unwrap().peers.insert(
@@ -592,7 +608,7 @@ mod transport_tests {
     fn peer_snapshot_and_short_id_cache_follow_instance_capacity() {
         let local = Identity::generate().node_id();
         let capacity = 3;
-        let state = ControlState::new(local, None, capacity);
+        let state = ControlState::new(local, None, None, capacity);
         for generation in 1..=capacity as u64 + 1 {
             state.observe(&SessionEvent::PeerState {
                 peer: Identity::generate().node_id(),

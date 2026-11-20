@@ -40,6 +40,127 @@ async fn ipv4_listener(node: &Node) -> std::net::SocketAddr {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage() {
+    use p2p_file::node::core::config::SpeedtestDirection;
+
+    let sandbox = Sandbox::new();
+    let mut client = Node::init(sandbox.0.join("client"));
+    let mut server = Node::init(sandbox.0.join("server"));
+    let client_id = client.id();
+    let server_id = server.id();
+    let target = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let target_addr = target.local_addr().unwrap();
+    let listen = free_tcp();
+    let echo = tokio::spawn(async move {
+        while let Ok((mut stream, _)) = target.accept().await {
+            tokio::spawn(async move {
+                let (mut reader, mut writer) = stream.split();
+                let _ = tokio::io::copy(&mut reader, &mut writer).await;
+            });
+        }
+    });
+    for (node, peer) in [(&client, &server_id), (&server, &client_id)] {
+        let mut settings = ConfigRecord::load(&node.root.join("node.json"))
+            .unwrap()
+            .settings
+            .redacted();
+        settings["enable_files"] = json!(false);
+        settings["enable_speed"] = json!(true);
+        settings["direct"]["lan_discovery"] = json!(false);
+        grant(&mut settings, std::slice::from_ref(peer));
+        settings["resources"]["peers"][0]["files"] = json!(false);
+        if node.root == client.root {
+            settings["forwards"] = json!([forward("echo", peer, listen)]);
+            settings["service_ids"] = json!({"echo": "echo"});
+        } else {
+            settings["services"] = json!([
+                {"id":"echo","name":"Echo","target":target_addr,"allowed_peers":[peer],"enabled":true}
+            ]);
+        }
+        offline(node, settings);
+    }
+
+    server.start().await;
+    client.start().await;
+    for node in [&client, &server] {
+        node.ok(Api::SetPassword {
+            expected_revision: 1,
+            password: "Test9Speed".into(),
+        })
+        .await;
+    }
+    let endpoint = ipv4_listener(&server).await;
+    cli_ok(
+        &client.root,
+        &["connect-address", &server_id, &endpoint.to_string()],
+    );
+    wait_peer(&client, &server_id).await;
+    wait_peer(&server, &client_id).await;
+    echo_request(listen, b"TCP before speed").await;
+    let rejected = client
+        .response(Api::Send {
+            peer: server_id.clone(),
+            paths: vec![client.root.join("not-a-file")],
+        })
+        .await;
+    assert_eq!(rejected.error.unwrap().code, "capability_disabled");
+    client
+        .ok(Api::StartSpeed {
+            peer: server_id.clone(),
+            direction: SpeedtestDirection::Upload,
+            seconds: 30,
+        })
+        .await;
+    let until = Instant::now() + Duration::from_secs(45);
+    let mut tcp_during_speed = false;
+    loop {
+        let tasks = client.ok(Api::Tasks { offset: 0 }).await;
+        assert_eq!(tasks["tasks"], json!([]));
+        assert!(tasks["queue"].is_null());
+        let speeds = tasks["speeds"].as_array().unwrap();
+        if !tcp_during_speed
+            && speeds
+                .iter()
+                .any(|row| row["peer"] == server_id && row["state"] == "Running")
+        {
+            echo_request(listen, b"TCP during speed").await;
+            tcp_during_speed = true;
+        }
+        if speeds.iter().any(|row| {
+            row["peer"] == server_id
+                && row["state"] == "Completed"
+                && row["bytes"].as_u64().is_some_and(|bytes| bytes > 0)
+        }) {
+            break;
+        }
+        assert!(Instant::now() < until, "speed did not complete: {tasks}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(tcp_during_speed);
+
+    client
+        .ok(Api::Disconnect {
+            peer: server_id.clone(),
+        })
+        .await;
+    cli_ok(
+        &client.root,
+        &["connect-address", &server_id, &endpoint.to_string()],
+    );
+    wait_peer(&client, &server_id).await;
+    echo_request(listen, b"TCP after reconnect").await;
+    client.stop().await;
+    server.stop().await;
+    for node in [&client, &server] {
+        for relative in ["receive", "tasks.json", "tasks.lock"] {
+            assert!(!node.root.join(relative).exists(), "created {relative}");
+        }
+    }
+    echo.abort();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn no_signal_agent_transfers_files_and_tcp_then_enforces_revocation() {
     let sandbox = Sandbox::new();

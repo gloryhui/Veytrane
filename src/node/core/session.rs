@@ -45,6 +45,7 @@ use crate::node::core::network_state::{
     BeginPeerAttempt, DEFAULT_MAX_PEERS, MAX_PEER_CAPACITY, MAX_PENDING_PEERS, NetworkLifecycle,
     PeerLifecycle, PeerRegistry, reconnect_delay, should_initiate_quic,
 };
+use crate::node::core::speed::{DEFAULT_MAX_PEER_BUSINESS_STREAMS, SpeedService};
 
 mod direct;
 #[cfg(test)]
@@ -231,7 +232,7 @@ impl NodeSessionConfig {
             resources: Default::default(),
             trust_sources: HashMap::new(),
             enable_files: true,
-            enable_speed: true,
+            enable_speed: false,
             enable_tcp: true,
             max_peers: DEFAULT_MAX_PEERS,
             signal_server: signal_server.into(),
@@ -770,6 +771,9 @@ impl NodeSessionHandle {
         direction: crate::node::core::config::SpeedtestDirection,
         seconds: u16,
     ) -> std::result::Result<(), String> {
+        if self.control.speed.is_none() {
+            return Err("capability_disabled: 测速服务未启用".into());
+        }
         self.commands
             .try_send(SessionCommand::StartSpeed {
                 peer,
@@ -784,6 +788,9 @@ impl NodeSessionHandle {
         peer: NodeId,
         id: crate::node::core::task_model::TaskId,
     ) -> std::result::Result<(), String> {
+        if self.control.speed.is_none() {
+            return Err("capability_disabled: 测速服务未启用".into());
+        }
         self.commands
             .try_send(SessionCommand::CancelSpeed { peer, id })
             .map_err(|_| "测速命令队列已满或会话已关闭".into())
@@ -1228,9 +1235,24 @@ pub fn spawn(
     crate::node::core::trusted_devices::validate(&config.trusted_devices)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let max_peers = config.max_peers;
+    let speed = config.enable_speed.then(|| {
+        let (activity, changed, frame_budget) = config.transfer.as_ref().map_or_else(
+            || {
+                let (changed, _) = watch::channel(0);
+                (
+                    crate::node::core::activity::Activity::new(changed.clone()),
+                    changed,
+                    crate::node::core::frame_budget::FrameBudget::default(),
+                )
+            },
+            |service| service.shared_parts(),
+        );
+        SpeedService::new(activity, changed, frame_budget)
+    });
     let control = crate::node::core::control::ControlState::new(
         identity.node_id(),
         config.transfer.clone(),
+        speed,
         max_peers,
     );
     control.set_trust_sources(&config.trust_sources);
@@ -1327,6 +1349,7 @@ async fn run_session(
         resources: resource_policy,
     } = policies;
     let max_peers = config.max_peers;
+    let speed_service = events.control.speed.clone();
     let _ = events
         .send(SessionEvent::SignalSecurity {
             tls: config.signal_tls.is_some(),
@@ -1399,7 +1422,7 @@ async fn run_session(
     let forward_streams = Arc::new(crate::tunnel::ForwardStreamOwner::new(256));
     let local_capabilities = crate::node::core::wire::capabilities(
         config.transfer.is_some() && config.enable_files,
-        config.transfer.is_some() && config.enable_speed,
+        speed_service.is_some(),
         config.enable_tcp,
     );
     let mut nearby = crate::node::core::connectivity::NearbyCache::new(identity.node_id());
@@ -2053,6 +2076,9 @@ async fn run_session(
                 } else {
                     Ok(())
                 };
+                if let Some(service) = &speed_service {
+                    service.revoke_authorization(peer, RemoteAuthorization::default());
+                }
                 if let Some(generation) = peers.generation(peer) {
                     peers.transition(peer, generation, PeerLifecycle::Disconnected);
                     emit_peer_state(&events, peer, generation, PeerLifecycle::Disconnected).await;
@@ -2271,6 +2297,9 @@ async fn run_session(
                     PeerLifecycle::Connected(authorization),
                 )
                 .await;
+                if let Some(service) = &speed_service {
+                    service.revoke_authorization(peer, authorization);
+                }
                 if let Some(service) = &config.transfer
                     && let Err(error) = service.revoke_authorization(peer, authorization).await
                 {
@@ -2347,7 +2376,7 @@ async fn run_session(
                 direction,
                 seconds,
             })) => {
-                if let Some(service) = config.transfer.clone() {
+                if let Some(service) = speed_service.clone() {
                     let live = authorizations[&peer].2.live();
                     let events = events.clone();
                     peer_tasks.spawn(async move {
@@ -2356,7 +2385,7 @@ async fn run_session(
                                 match direction {
                                     crate::node::core::config::SpeedtestDirection::Both => {
                                         match service
-                                            .start_speed(
+                                            .start(
                                                 peer,
                                                 crate::node::core::protocol::SpeedDirection::Upload,
                                                 seconds,
@@ -2371,7 +2400,7 @@ async fn run_session(
                                                     })
                                                     .await;
                                                 let download = service
-                                                    .start_speed(
+                                                    .start(
                                                         peer,
                                                         crate::node::core::protocol::SpeedDirection::Download,
                                                         seconds,
@@ -2404,7 +2433,7 @@ async fn run_session(
                                             }
                                         };
                                         let result = service
-                                            .start_speed(peer, wire_direction, seconds)
+                                            .start(peer, wire_direction, seconds)
                                             .await;
                                         if let Ok(snapshot) = &result {
                                             let _ = events
@@ -2429,8 +2458,8 @@ async fn run_session(
                 }
             }
             Wake::Command(Some(SessionCommand::CancelSpeed { peer, id })) => {
-                if let Some(service) = config.transfer.as_ref()
-                    && let Err(error) = service.cancel_speed(peer, &id)
+                if let Some(service) = &speed_service
+                    && let Err(error) = service.cancel(peer, &id)
                 {
                     let _ = events
                         .send(SessionEvent::Diagnostic(error.to_string()))
@@ -4469,6 +4498,9 @@ async fn run_session(
                     }
                 }
                 let transfer = config.transfer.clone();
+                let negotiated_speed = speed_service.clone().filter(|_| {
+                    capabilities & crate::node::core::protocol::CAP_SPEED_EXECUTION != 0
+                });
                 let business_connection = connection.clone();
                 let allowed_targets = allowed_forward_targets.subscribe();
                 let resources = resource_policy.subscribe();
@@ -4484,48 +4516,60 @@ async fn run_session(
                         services,
                         speed,
                     } = incoming;
-                    if let Some(service) = transfer {
-                        let inlets = crate::node::core::transfer::FileInlets::new(
-                            files,
-                            speed,
-                            resources.clone(),
-                        );
-                        let (file_result, service_result) = tokio::join!(
-                            service.serve_dispatched(
-                                business_connection,
-                                peer,
-                                local_node,
-                                live.clone(),
-                                inlets
-                            ),
-                            crate::node::core::services::serve(
-                                peer,
-                                live,
-                                allowed_targets,
-                                resources,
-                                services,
-                                service_tcp_streams
-                            ),
-                        );
-                        if file_result.is_err() || service_result.is_err() {
-                            let _ = business_events
-                                .send(SessionEvent::Diagnostic(
-                                    "节点业务会话已结束；任务状态以持久记录为准".into(),
-                                ))
-                                .await;
+                    let business_budget =
+                        Arc::new(Semaphore::new(DEFAULT_MAX_PEER_BUSINESS_STREAMS));
+                    let handle_speed = async {
+                        if let Some(service) = negotiated_speed {
+                            service
+                                .serve_peer(
+                                    business_connection.clone(),
+                                    peer,
+                                    local_node,
+                                    live.clone(),
+                                    resources.clone(),
+                                    business_budget.clone(),
+                                    speed,
+                                )
+                                .await
+                        } else {
+                            drop(speed);
+                            Ok(())
                         }
-                    } else {
-                        drop(files);
-                        drop(speed);
-                        let _ = crate::node::core::services::serve(
+                    };
+                    let handle_file = async {
+                        if let Some(service) = transfer {
+                            service
+                                .serve_files_dispatched(
+                                    business_connection.clone(),
+                                    peer,
+                                    live.clone(),
+                                    files,
+                                    resources.clone(),
+                                    business_budget.clone(),
+                                )
+                                .await
+                        } else {
+                            drop(files);
+                            Ok(())
+                        }
+                    };
+                    let (speed_result, file_result, _tcp_result) = tokio::join!(
+                        biased;
+                        handle_speed,
+                        handle_file,
+                        crate::node::core::services::serve(
                             peer,
-                            live,
+                            live.clone(),
                             allowed_targets,
-                            resources,
+                            resources.clone(),
                             services,
-                            service_tcp_streams,
-                        )
-                        .await;
+                            service_tcp_streams
+                        ),
+                    );
+                    if speed_result.is_err() || file_result.is_err() {
+                        let _ = business_events
+                            .send(SessionEvent::Diagnostic("节点业务流处理已结束".into()))
+                            .await;
                     }
                 });
                 let closed_inputs = input_tx.clone();
@@ -4715,6 +4759,9 @@ async fn run_session(
                     connections.remove(&peer);
                     if let Some((_, _, rights)) = authorizations.remove(&peer) {
                         rights.send_replace(RemoteAuthorization::default());
+                    }
+                    if let Some(service) = &speed_service {
+                        service.revoke_authorization(peer, RemoteAuthorization::default());
                     }
                     if !network_interruption && let Some(service) = &config.transfer {
                         let _ = service

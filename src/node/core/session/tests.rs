@@ -1703,9 +1703,11 @@ async fn directional_business_fixture(relay_enabled: bool) {
         .unwrap()
         .unwrap();
     assert!(!service_a.test_speed_idle(b.node_id()));
+    let speed_a = ha.control.speed.as_ref().unwrap();
+    let speed_b = hb.control.speed.as_ref().unwrap();
     assert!(
-        service_a
-            .start_speed(
+        speed_a
+            .start(
                 b.node_id(),
                 crate::node::core::protocol::SpeedDirection::Upload,
                 30
@@ -1719,8 +1721,8 @@ async fn directional_business_fixture(relay_enabled: bool) {
     time::timeout(Duration::from_secs(5), async {
         while !(service_a.test_speed_idle(b.node_id())
             && service_b.test_speed_idle(a.node_id())
-            && service_a.set_test_speed_duration(b.node_id(), Duration::from_millis(100))
-            && service_b.set_test_speed_duration(a.node_id(), Duration::from_millis(100)))
+            && speed_a.set_test_duration(b.node_id(), Duration::from_millis(100))
+            && speed_b.set_test_duration(a.node_id(), Duration::from_millis(100)))
         {
             time::sleep(Duration::from_millis(10)).await;
         }
@@ -2233,6 +2235,7 @@ async fn start_local_server_with(config: SignalServerConfig) -> (SocketAddr, Joi
 
 fn local_config(signal_server: SocketAddr) -> NodeSessionConfig {
     NodeSessionConfig {
+        enable_speed: true,
         signal_server: signal_server.to_string(),
         signal_tls: None,
         remote_auth: Some(test_verifier()),

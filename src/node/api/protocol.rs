@@ -224,7 +224,7 @@ mod tests {
         for command in [
             json!({"method": "tasks", "offset": 128}),
             json!({"method": "resume", "peer": peer, "task": task}),
-            json!({"method": "start_speed", "peer": peer, "direction": "both", "seconds": 10}),
+            json!({"method": "start_speed", "peer": peer, "direction": "both", "seconds": 30}),
             json!({"method": "stop_speed", "peer": peer, "task": task}),
         ] {
             let value = json!({

@@ -51,6 +51,22 @@ impl Agent {
         {
             return Err("restart_required: 节点已提交重启配置，请停止后重新启动".into());
         }
+        if matches!(
+            &command,
+            Command::Send { .. }
+                | Command::PreviewDirectory { .. }
+                | Command::Pause { .. }
+                | Command::Resume { .. }
+                | Command::Cancel { .. }
+                | Command::RemoveHistory { .. }
+                | Command::DeleteReceivedFile { .. }
+                | Command::TaskLocation { .. }
+                | Command::ConfirmDirectory { .. }
+                | Command::CancelDirectory { .. }
+        ) && !self.control.has_file_service()
+        {
+            return Err("capability_disabled: 文件服务未启用".into());
+        }
         match command {
             Command::Status => {
                 // Never retain temporary mutex guards across another lock in
@@ -101,7 +117,7 @@ impl Agent {
                 let mut previews = self.previews.lock().await;
                 previews.retain(|(created, _)| created.elapsed() < Duration::from_secs(300));
                 let total = snapshot.as_ref().map_or(0, |s| s.tasks.len());
-                let speeds=snapshot.as_ref().map(|s|s.speeds.iter().map(|(peer,s)|json!({"peer":peer.to_hex(),"id":s.test_id,"direction":s.direction,"state":format!("{:?}",s.status),"bytes":s.bytes,"bytes_per_second":s.bytes_per_second,"elapsed_ms":s.elapsed.as_millis(),"rtt_ms":s.rtt.as_millis()})).collect::<Vec<_>>()).unwrap_or_default();
+                let speeds=self.control.speed_snapshots().iter().map(|(peer,s)|json!({"peer":peer.to_hex(),"id":s.test_id,"direction":s.direction,"state":format!("{:?}",s.status),"bytes":s.bytes,"bytes_per_second":s.bytes_per_second,"elapsed_ms":s.elapsed.as_millis(),"rtt_ms":s.rtt.as_millis()})).collect::<Vec<_>>();
                 let queue = snapshot.as_ref().map(|s| json!({"pending":s.queue.pending,"active_files":s.queue.active_files,"limit":s.queue.limit,"converging":s.queue.converging}));
                 Ok(
                     json!({"tasks":tasks,"queue":queue,"offset":offset,"next_offset":if offset.saturating_add(128)<total{Some(offset.saturating_add(128))}else{None},"total":total,"truncated":offset.saturating_add(128)<total,"directory_previews":previews.iter().map(|(_,preview)|{let mut value=serde_json::to_value(preview).expect("preview DTO");value["peer"]=json!(preview.peer.to_hex());value.as_object_mut().unwrap().remove("source");value["name"]=json!(preview.source.file_name().unwrap_or_default().to_string_lossy().chars().take(128).collect::<String>());value}).collect::<Vec<_>>(),"speeds":speeds}),
@@ -379,7 +395,7 @@ impl Agent {
             .await
             {
                 Ok(Ok(value)) => Response::ok(&request.request_id, value),
-                Ok(Err(error)) => Response::error(&request.request_id, "command_failed", error),
+                Ok(Err(error)) => Response::error(&request.request_id, error_code(&error), error),
                 Err(_) => Response::error(&request.request_id, "timeout", "查询超时"),
             };
         }
@@ -550,28 +566,33 @@ async fn run_with_recovery(
     let record = ConfigRecord::load(&paths.config()).map_err(io::Error::other)?;
     let identity = Identity::load(&paths.identity()).map_err(io::Error::other)?;
     let _identity_lock = AgentPaths::identity_lock(identity.node_id())?;
-    crate::storage::permissions::ensure_directory(&record.settings.receive_root)?;
     let mut session = record.settings.session().map_err(io::Error::other)?;
     session.tunnel_rules.clear();
-    let (control, mut raw) = control::spawn_with_storage(
-        identity,
-        session,
-        &paths.tasks(),
-        record.settings.receive_root.clone(),
-    )
-    .map_err(io::Error::other)?;
-    control
-        .set_auto_resume(record.settings.auto_resume)
+    let (control, mut raw) = if session.enable_files {
+        crate::storage::permissions::ensure_directory(&record.settings.receive_root)?;
+        let (control, events) = control::spawn_with_storage(
+            identity,
+            session,
+            &paths.tasks(),
+            record.settings.receive_root.clone(),
+        )
         .map_err(io::Error::other)?;
-    control
-        .set_send_limit(record.settings.send_concurrency)
-        .map_err(io::Error::other)?;
-    control
-        .set_file_limits(record.settings.file_limits)
-        .map_err(io::Error::other)?;
-    control
-        .set_receive_safety_mib(record.settings.receive_safety_mib)
-        .map_err(io::Error::other)?;
+        control
+            .set_auto_resume(record.settings.auto_resume)
+            .map_err(io::Error::other)?;
+        control
+            .set_send_limit(record.settings.send_concurrency)
+            .map_err(io::Error::other)?;
+        control
+            .set_file_limits(record.settings.file_limits)
+            .map_err(io::Error::other)?;
+        control
+            .set_receive_safety_mib(record.settings.receive_safety_mib)
+            .map_err(io::Error::other)?;
+        (control, events)
+    } else {
+        control::spawn(identity, session)?
+    };
     control
         .configuration_committed(record.revision)
         .map_err(io::Error::other)?;
@@ -766,7 +787,12 @@ fn read_candidate(path: &std::path::Path) -> io::Result<Request> {
 }
 
 fn error_code(message: &str) -> &'static str {
-    for code in ["revision_conflict", "restart_required", "recovery_required"] {
+    for code in [
+        "revision_conflict",
+        "restart_required",
+        "recovery_required",
+        "capability_disabled",
+    ] {
         if message.starts_with(code) {
             return code;
         }

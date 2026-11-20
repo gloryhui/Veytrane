@@ -129,6 +129,12 @@ Veytrane 的核心是可信节点之间建立、维持和恢复连接的机制�
 - `ipc_v1_file_and_speed_requests_keep_their_wire_shape` 固定 `tasks`、`resume`、`start_speed`、`stop_speed` 的合成 JSON 请求。配置复用已存在的 schema 1 校验；任务用暂停重启恢复用例，分片用从持久化 checkpoint 恢复用例。进程级 IPC 响应、授权、网络和跨平台场景留给受影响的实施阶段验证。
 - `tests/node_agent_process.rs`、`tests/signaling_tls_cli.rs`、`scripts/node_smoke.py`、`scripts/e2e.sh`、`scripts/live-local-smoke.py` 和 `packaging/RUNNING.md` 均依赖现有 `p2p_file signal-server` 入口。`tests/ipv6_cli_send.rs` 依赖独立收发入口。包拆分时先保证这些消费者还能启动原命令。
 
+### S1–S2 实施记录（2026-11-20）
+
+- `f123e91` 将设备容量改为实例参数。定向用例覆盖 16/128 接纳、恢复与快照。开启 `sub2api-gateway` feature 构建后，通用 Agent 真实进程仍报告 16。128 个真实远端同时接入留待专项验收。
+- `4d0cefb` 提取共享/独占许可，`b5b9b31` 延迟创建接收目录和任务锁。独立测速由节点会话装配，Agent 从它读取 `Tasks.speeds`。文件关闭时，文件变更请求返回 `capability_disabled`。
+- `file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage` 在 macOS 隔离目录启动两个真实 Agent，验证了授权 TCP、测速期间并发转发、测速完成、断开重连，及停止后不存在 `receive`、`tasks.json`、`tasks.lock`。这一结果覆盖运行时停用，编译时依赖裁剪仍属于 S3–S6。
+
 ## 7. 新增或移除业务时的操作示例
 
 **新增一个使用既有 TCP 的产品**：在 `apps/<产品>` 内确定对端、服务 ID、目标与可见目录；使用 node 和 TCP 的公开接口组装；在产品自己的 UI 或 CLI 接入管理命令；测试未授权访问、撤销、重连和关闭。Live 是这种模式的现有实例。

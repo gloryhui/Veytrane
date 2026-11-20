@@ -7,10 +7,82 @@ use crate::{
     },
 };
 use std::fs;
+
+fn spawn_peer(
+    tasks: &mut JoinSet<Result<()>>,
+    service: TransferService,
+    speed: Option<crate::node::core::speed::SpeedService>,
+    connection: Connection,
+    local: NodeId,
+    peer: NodeId,
+) {
+    let (dispatcher, incoming) = crate::node::core::dispatch::Dispatcher::start(
+        connection.clone(),
+        crate::node::core::wire::capabilities(true, true, false),
+    );
+    let (_, resources) = watch::channel(crate::node::core::authorization::ResourcePolicy {
+        peers: vec![crate::node::core::authorization::PeerResources {
+            node_id: peer.to_hex(),
+            files: true,
+            speed: true,
+            disabled: false,
+        }],
+    });
+    let budget = std::sync::Arc::new(tokio::sync::Semaphore::new(
+        crate::node::core::speed::DEFAULT_MAX_PEER_BUSINESS_STREAMS,
+    ));
+    let authorization: crate::node::core::remote_auth::LiveAuthorization =
+        crate::node::core::remote_auth::RemoteAuthorization::BOTH.into();
+    let crate::node::core::dispatch::Incoming {
+        files,
+        speed: speed_rx,
+        ..
+    } = incoming;
+    tasks.spawn(async move {
+        let _dispatcher = dispatcher;
+        if let Some(speed) = speed {
+            let speed_task = tokio::spawn({
+                let connection = connection.clone();
+                let authorization = authorization.clone();
+                let resources = resources.clone();
+                let budget = budget.clone();
+                async move {
+                    speed
+                        .serve_peer(
+                            connection,
+                            peer,
+                            local,
+                            authorization,
+                            resources,
+                            budget,
+                            speed_rx,
+                        )
+                        .await
+                }
+            });
+            let file_result = service
+                .serve_files_dispatched(connection, peer, authorization, files, resources, budget)
+                .await;
+            speed_task.abort();
+            if let Ok(Err(error)) = speed_task.await {
+                tracing::warn!(%error, "测速服务结束");
+            }
+            file_result
+        } else {
+            drop(speed_rx);
+            service
+                .serve_files_dispatched(connection, peer, authorization, files, resources, budget)
+                .await
+        }
+    });
+}
+
 struct Pair {
     root: PathBuf,
     a: TransferService,
     b: TransferService,
+    speed_a: crate::node::core::speed::SpeedService,
+    speed_b: crate::node::core::speed::SpeedService,
     ca: Connection,
     cb: Connection,
     ia: NodeId,
@@ -19,6 +91,7 @@ struct Pair {
     key_b: Identity,
     ea: quinn::Endpoint,
     eb: quinn::Endpoint,
+    speed_enabled: bool,
     tasks: JoinSet<Result<()>>,
 }
 impl Pair {
@@ -36,6 +109,12 @@ impl Pair {
         let (store_b, _) = TaskStore::open(&root.join("b-state/tasks.json")).unwrap();
         let a = TransferService::new(store_a, root.join("a-receive"));
         let b = TransferService::new(store_b, root.join("b-receive"));
+        let (activity_a, changed_a, frame_budget_a) = a.shared_parts();
+        let (activity_b, changed_b, frame_budget_b) = b.shared_parts();
+        let speed_a =
+            crate::node::core::speed::SpeedService::new(activity_a, changed_a, frame_budget_a);
+        let speed_b =
+            crate::node::core::speed::SpeedService::new(activity_b, changed_b, frame_budget_b);
         let identity_a = Identity::generate();
         let identity_b = Identity::generate();
         let key_a = identity_a.clone();
@@ -86,30 +165,26 @@ impl Pair {
         .unwrap();
         let cb = remote.await.unwrap();
         let mut tasks = JoinSet::new();
-        let service = a.clone();
-        let conn = ca.clone();
-        tasks.spawn(async move {
-            if speed {
-                service.serve_peer_with_speed(conn, ib, ia).await
-            } else {
-                service.serve_peer(conn, ib).await
-            }
-        });
-        let service = b.clone();
-        let conn = cb.clone();
-        tasks.spawn(async move {
-            if speed {
-                service.serve_peer_with_speed(conn, ia, ib).await
-            } else {
-                service.serve_peer(conn, ia).await
-            }
-        });
+        spawn_peer(
+            &mut tasks,
+            a.clone(),
+            speed.then(|| speed_a.clone()),
+            ca.clone(),
+            ia,
+            ib,
+        );
+        spawn_peer(
+            &mut tasks,
+            b.clone(),
+            speed.then(|| speed_b.clone()),
+            cb.clone(),
+            ib,
+            ia,
+        );
         if speed {
             tokio::time::timeout(Duration::from_secs(5), async {
                 loop {
-                    if a.speed_peers.lock().unwrap().contains_key(&ib)
-                        && b.speed_peers.lock().unwrap().contains_key(&ia)
-                    {
+                    if speed_a.peer(ib).is_some() && speed_b.peer(ia).is_some() {
                         break;
                     }
                     tokio::task::yield_now().await;
@@ -117,13 +192,15 @@ impl Pair {
             })
             .await
             .unwrap();
-            a.speed_peers.lock().unwrap()[&ib].set_test_duration(Duration::from_millis(80));
-            b.speed_peers.lock().unwrap()[&ia].set_test_duration(Duration::from_millis(80));
+            speed_a.set_test_duration(ib, Duration::from_millis(80));
+            speed_b.set_test_duration(ia, Duration::from_millis(80));
         }
         Self {
             root,
             a,
             b,
+            speed_a,
+            speed_b,
             ca,
             cb,
             ia,
@@ -132,6 +209,7 @@ impl Pair {
             key_b,
             ea,
             eb,
+            speed_enabled: speed,
             tasks,
         }
     }
@@ -186,13 +264,39 @@ impl Pair {
         .await
         .unwrap();
         self.cb = accept.await.unwrap();
-        for (service, connection, peer) in [
-            (self.a.clone(), self.ca.clone(), self.ib),
-            (self.b.clone(), self.cb.clone(), self.ia),
-        ] {
-            self.tasks
-                .spawn(async move { service.serve_peer(connection, peer).await });
+        let speed_enabled = self.speed_enabled;
+        let peers = [
+            (
+                self.a.clone(),
+                Some(self.speed_a.clone()),
+                self.ca.clone(),
+                self.ib,
+                self.ia,
+            ),
+            (
+                self.b.clone(),
+                Some(self.speed_b.clone()),
+                self.cb.clone(),
+                self.ia,
+                self.ib,
+            ),
+        ];
+        for (service, speed, connection, peer, local) in peers {
+            spawn_peer(
+                &mut self.tasks,
+                service,
+                if speed_enabled { speed } else { None },
+                connection,
+                local,
+                peer,
+            );
         }
+    }
+    fn speed_a(&self) -> &crate::node::core::speed::SpeedService {
+        &self.speed_a
+    }
+    fn speed_b(&self) -> &crate::node::core::speed::SpeedService {
+        &self.speed_b
     }
     async fn select(&self, length: usize) -> (TaskId, Vec<u8>) {
         let bytes = (0..length).map(|i| (i % 251) as u8).collect::<Vec<_>>();
@@ -1285,7 +1389,16 @@ fn process_worker_entry() {
                 }
                 connection.close(0u32.into(), b"sender done");
             } else {
-                let _ = service.serve_peer(connection.clone(), peer).await;
+                let mut file_tasks = JoinSet::new();
+                spawn_peer(
+                    &mut file_tasks,
+                    service.clone(),
+                    None,
+                    connection.clone(),
+                    peer,
+                    peer,
+                );
+                let _ = file_tasks.join_next().await;
                 if mode == "resume" {
                     let id =
                         TaskId::parse(&fs::read_to_string(root.join("task-id")).unwrap()).unwrap();
@@ -2769,14 +2882,14 @@ async fn speed_uses_authenticated_connection_receiver_result_and_never_creates_f
     use crate::node::core::speed::SpeedStatus;
     let pair = Pair::new_inner(true).await;
     for direction in [SpeedDirection::Upload, SpeedDirection::Download] {
-        let report = pair.a.start_speed(pair.ib, direction, 600).await.unwrap();
+        let report = pair.speed_a().start(pair.ib, direction, 600).await.unwrap();
         assert_eq!(report.status, SpeedStatus::Completed);
         assert!(report.bytes > 0);
         assert!(report.elapsed > Duration::ZERO);
         let mut changed = pair.b.subscribe();
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                if pair.b.speed_snapshots().get(&pair.ia).is_some_and(|s| {
+                if pair.speed_b().snapshots().get(&pair.ia).is_some_and(|s| {
                     s.test_id == report.test_id && s.status == SpeedStatus::Completed
                 }) {
                     break;
@@ -2786,7 +2899,7 @@ async fn speed_uses_authenticated_connection_receiver_result_and_never_creates_f
         })
         .await
         .unwrap();
-        let other = pair.b.speed_snapshots()[&pair.ia].clone();
+        let other = pair.speed_b().snapshots()[&pair.ia].clone();
         assert_eq!(other.test_id, report.test_id);
         assert_eq!(other.bytes, report.bytes);
         assert_eq!(other.elapsed, report.elapsed);
@@ -2803,8 +2916,8 @@ async fn speed_uses_authenticated_connection_receiver_result_and_never_creates_f
         );
     }
     assert!(
-        pair.a
-            .start_speed(pair.ib, SpeedDirection::Upload, 3000)
+        pair.speed_a()
+            .start(pair.ib, SpeedDirection::Upload, 3000)
             .await
             .is_err()
     );
@@ -2815,8 +2928,8 @@ async fn speed_simultaneous_requests_have_one_grant_and_one_busy() {
     use crate::node::core::protocol::SpeedDirection;
     let pair = Pair::new_inner(true).await;
     let (a, b) = tokio::join!(
-        pair.a.start_speed(pair.ib, SpeedDirection::Upload, 30),
-        pair.b.start_speed(pair.ia, SpeedDirection::Download, 30)
+        pair.speed_a().start(pair.ib, SpeedDirection::Upload, 30),
+        pair.speed_b().start(pair.ia, SpeedDirection::Download, 30)
     );
     assert_eq!(
         usize::from(a.is_ok()) + usize::from(b.is_ok()),
@@ -2827,8 +2940,8 @@ async fn speed_simultaneous_requests_have_one_grant_and_one_busy() {
     assert!(error.contains("进行"), "{error}");
     assert!(pair.ca.close_reason().is_none());
     assert!(pair.cb.close_reason().is_none());
-    pair.a
-        .start_speed(pair.ib, SpeedDirection::Download, 60)
+    pair.speed_a()
+        .start(pair.ib, SpeedDirection::Download, 60)
         .await
         .unwrap();
     pair.shutdown().await;
@@ -2841,8 +2954,8 @@ async fn speed_and_file_activity_exclude_each_other_without_silent_pause() {
     let connections = HashMap::from([(pair.ib, pair.ca.clone())]);
     let scheduled = pair.a.dispatch_ready(&connections).pop().unwrap();
     let error = pair
-        .a
-        .start_speed(pair.ib, SpeedDirection::Upload, 30)
+        .speed_a()
+        .start(pair.ib, SpeedDirection::Upload, 30)
         .await
         .unwrap_err()
         .to_string();
@@ -2854,11 +2967,11 @@ async fn speed_and_file_activity_exclude_each_other_without_silent_pause() {
     assert_eq!(pair.a.queue_metrics().active_files, 1);
     pair.a.pause_task(id.clone()).await.unwrap();
     drop(scheduled);
-    pair.a.speed_peers.lock().unwrap()[&pair.ib].set_test_duration(Duration::from_secs(2));
-    let service = pair.a.clone();
+    pair.speed_a()
+        .set_test_duration(pair.ib, Duration::from_secs(2));
+    let service = pair.speed_a().clone();
     let peer = pair.ib;
-    let job =
-        tokio::spawn(async move { service.start_speed(peer, SpeedDirection::Upload, 30).await });
+    let job = tokio::spawn(async move { service.start(peer, SpeedDirection::Upload, 30).await });
     let mut changes = pair.a.subscribe();
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
@@ -2885,8 +2998,8 @@ async fn speed_and_file_activity_exclude_each_other_without_silent_pause() {
     assert_eq!(pair.a.snapshot().await.unwrap().len(), count);
     assert!(pair.a.dispatch_ready(&connections).is_empty());
     assert_eq!(pair.a.task(id).await.unwrap().state(), TaskState::Paused);
-    let test = pair.a.speed_snapshots()[&pair.ib].test_id.clone();
-    pair.a.cancel_speed(pair.ib, &test).unwrap();
+    let test = pair.speed_a().snapshots()[&pair.ib].test_id.clone();
+    pair.speed_a().cancel(pair.ib, &test).unwrap();
     assert!(job.await.unwrap().is_err());
     tokio::time::timeout(Duration::from_secs(5), async {
         while pair.b.activity.lock().exclusive_active(pair.ia) {
@@ -2907,17 +3020,19 @@ async fn speed_cancel_and_stale_uni_token_do_not_pollute_next_test_or_file_trans
         (SpeedDirection::Download, true),
     ] {
         let pair = Pair::new_inner(true).await;
-        pair.a.speed_peers.lock().unwrap()[&pair.ib].set_test_duration(Duration::from_secs(2));
-        pair.b.speed_peers.lock().unwrap()[&pair.ia].set_test_duration(Duration::from_secs(2));
-        let service = pair.a.clone();
+        pair.speed_a()
+            .set_test_duration(pair.ib, Duration::from_secs(2));
+        pair.speed_b()
+            .set_test_duration(pair.ia, Duration::from_secs(2));
+        let service = pair.speed_a().clone();
         let peer = pair.ib;
-        let job = tokio::spawn(async move { service.start_speed(peer, direction, 600).await });
+        let job = tokio::spawn(async move { service.start(peer, direction, 600).await });
         let mut changes = pair.a.subscribe();
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if pair
-                    .a
-                    .speed_snapshots()
+                    .speed_a()
+                    .snapshots()
                     .get(&pair.ib)
                     .is_some_and(|s| s.bytes > 0)
                 {
@@ -2928,13 +3043,11 @@ async fn speed_cancel_and_stale_uni_token_do_not_pollute_next_test_or_file_trans
         })
         .await
         .unwrap();
-        let old = pair.a.speed_peers.lock().unwrap()[&pair.ib]
-            .test_lease()
-            .unwrap();
+        let old = pair.speed_a().peer(pair.ib).unwrap().test_lease().unwrap();
         if remote_cancel {
-            pair.b.cancel_speed(pair.ia, &old.test_id).unwrap();
+            pair.speed_b().cancel(pair.ia, &old.test_id).unwrap();
         } else {
-            pair.a.cancel_speed(pair.ib, &old.test_id).unwrap();
+            pair.speed_a().cancel(pair.ib, &old.test_id).unwrap();
         }
         assert!(
             job.await
@@ -2956,23 +3069,23 @@ async fn speed_cancel_and_stale_uni_token_do_not_pollute_next_test_or_file_trans
         .await
         .unwrap();
         assert_eq!(
-            pair.a.speed_snapshots()[&pair.ib].status,
+            pair.speed_a().snapshots()[&pair.ib].status,
             SpeedStatus::Cancelled
         );
-        assert_eq!(pair.a.speed_snapshots()[&pair.ib].bytes_per_second, 0.0);
-        pair.a.speed_peers.lock().unwrap()[&pair.ib].set_test_duration(Duration::from_millis(200));
-        pair.b.speed_peers.lock().unwrap()[&pair.ia].set_test_duration(Duration::from_millis(200));
-        let service = pair.a.clone();
+        assert_eq!(pair.speed_a().snapshots()[&pair.ib].bytes_per_second, 0.0);
+        pair.speed_a()
+            .set_test_duration(pair.ib, Duration::from_millis(200));
+        pair.speed_b()
+            .set_test_duration(pair.ia, Duration::from_millis(200));
+        let service = pair.speed_a().clone();
         let peer = pair.ib;
         let next =
-            tokio::spawn(
-                async move { service.start_speed(peer, SpeedDirection::Upload, 30).await },
-            );
+            tokio::spawn(async move { service.start(peer, SpeedDirection::Upload, 30).await });
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if pair
-                    .b
-                    .speed_snapshots()
+                    .speed_b()
+                    .snapshots()
                     .get(&pair.ia)
                     .is_some_and(|s| s.test_id != old.test_id && s.status == SpeedStatus::Running)
                 {
@@ -3027,8 +3140,8 @@ async fn speed_remote_busy_and_invalid_uni_headers_preserve_connection_and_next_
     let pair = Pair::new_inner(true).await;
     let peer_file = pair.b.activity.shared(pair.ia).unwrap();
     let error = pair
-        .a
-        .start_speed(pair.ib, SpeedDirection::Upload, 30)
+        .speed_a()
+        .start(pair.ib, SpeedDirection::Upload, 30)
         .await
         .unwrap_err()
         .to_string();
@@ -3041,18 +3154,16 @@ async fn speed_remote_busy_and_invalid_uni_headers_preserve_connection_and_next_
     })
     .await
     .unwrap();
-    pair.a.speed_peers.lock().unwrap()[&pair.ib].set_test_duration(Duration::from_millis(300));
-    pair.b.speed_peers.lock().unwrap()[&pair.ia].set_test_duration(Duration::from_millis(300));
-    let (data_reached, data_release) = pair.a.speed_peers.lock().unwrap()[&pair.ib].gate_data();
-    let service = pair.a.clone();
+    pair.speed_a()
+        .set_test_duration(pair.ib, Duration::from_millis(300));
+    pair.speed_b()
+        .set_test_duration(pair.ia, Duration::from_millis(300));
+    let (data_reached, data_release) = pair.speed_a().peer(pair.ib).unwrap().gate_data();
+    let service = pair.speed_a().clone();
     let peer = pair.ib;
-    let job =
-        tokio::spawn(async move { service.start_speed(peer, SpeedDirection::Upload, 60).await });
+    let job = tokio::spawn(async move { service.start(peer, SpeedDirection::Upload, 60).await });
     tokio::time::timeout(Duration::from_secs(5), async {
-        while pair.b.speed_peers.lock().unwrap()[&pair.ia]
-            .test_lease()
-            .is_none()
-        {
+        while pair.speed_b().peer(pair.ia).unwrap().test_lease().is_none() {
             tokio::task::yield_now().await;
         }
     })
@@ -3062,9 +3173,7 @@ async fn speed_remote_busy_and_invalid_uni_headers_preserve_connection_and_next_
         .await
         .unwrap()
         .unwrap();
-    let mut forged = pair.b.speed_peers.lock().unwrap()[&pair.ia]
-        .test_lease()
-        .unwrap();
+    let mut forged = pair.speed_b().peer(pair.ia).unwrap().test_lease().unwrap();
     forged.stream_token[0] ^= 1;
     let mut bad = pair.ca.open_uni().await.unwrap();
     protocol::write(
@@ -3102,8 +3211,8 @@ async fn speed_remote_busy_and_invalid_uni_headers_preserve_connection_and_next_
     })
     .await
     .unwrap();
-    pair.a
-        .start_speed(pair.ib, SpeedDirection::Download, 30)
+    pair.speed_a()
+        .start(pair.ib, SpeedDirection::Download, 30)
         .await
         .unwrap();
     assert!(pair.a.snapshot().await.unwrap().is_empty());
@@ -3114,11 +3223,10 @@ async fn speed_remote_busy_and_invalid_uni_headers_preserve_connection_and_next_
 async fn next_speed_request_waits_for_completed_peer_lease_cleanup() {
     use crate::node::core::protocol::SpeedDirection;
     let pair = Pair::new_inner(true).await;
-    let (cleanup_reached, cleanup_release) =
-        pair.b.speed_peers.lock().unwrap()[&pair.ia].gate_cleanup();
+    let (cleanup_reached, cleanup_release) = pair.speed_b().peer(pair.ia).unwrap().gate_cleanup();
     let first = pair
-        .a
-        .start_speed(pair.ib, SpeedDirection::Upload, 30)
+        .speed_a()
+        .start(pair.ib, SpeedDirection::Upload, 30)
         .await
         .unwrap();
     tokio::time::timeout(Duration::from_secs(5), cleanup_reached)
@@ -3126,14 +3234,11 @@ async fn next_speed_request_waits_for_completed_peer_lease_cleanup() {
         .unwrap()
         .unwrap();
     assert!(pair.b.activity.lock().exclusive_active(pair.ia));
-    let waiting = pair.b.speed_peers.lock().unwrap()[&pair.ia].gate_wait();
-    let service = pair.a.clone();
+    let waiting = pair.speed_b().peer(pair.ia).unwrap().gate_wait();
+    let service = pair.speed_a().clone();
     let peer = pair.ib;
-    let mut next = tokio::spawn(async move {
-        service
-            .start_speed(peer, SpeedDirection::Download, 60)
-            .await
-    });
+    let mut next =
+        tokio::spawn(async move { service.start(peer, SpeedDirection::Download, 60).await });
     tokio::time::timeout(Duration::from_secs(5), async {
         tokio::select! {
             result=&mut next=>panic!("new request lost behind completed old lease: {result:?}"),
@@ -3351,15 +3456,15 @@ async fn speed_revocation_uses_lease_owner_and_preserves_reverse_password_right(
     use crate::node::core::speed::SpeedStatus;
     for revoke_request_direction in [false, true] {
         let pair = Pair::new_inner(true).await;
-        pair.a.speed_peers.lock().unwrap()[&pair.ib].set_test_duration(Duration::from_millis(300));
-        pair.b.speed_peers.lock().unwrap()[&pair.ia].set_test_duration(Duration::from_millis(300));
-        let (reached, release) = pair.a.speed_peers.lock().unwrap()[&pair.ib].gate_data();
-        let service = pair.a.clone();
+        pair.speed_a()
+            .set_test_duration(pair.ib, Duration::from_millis(300));
+        pair.speed_b()
+            .set_test_duration(pair.ia, Duration::from_millis(300));
+        let (reached, release) = pair.speed_a().peer(pair.ib).unwrap().gate_data();
+        let service = pair.speed_a().clone();
         let peer = pair.ib;
         let job =
-            tokio::spawn(
-                async move { service.start_speed(peer, SpeedDirection::Upload, 30).await },
-            );
+            tokio::spawn(async move { service.start(peer, SpeedDirection::Upload, 30).await });
         tokio::time::timeout(Duration::from_secs(5), reached)
             .await
             .unwrap()
@@ -3368,7 +3473,7 @@ async fn speed_revocation_uses_lease_owner_and_preserves_reverse_password_right(
             inbound: AuthorizationGrant::password(!revoke_request_direction),
             outbound: AuthorizationGrant::password(true),
         };
-        pair.b.revoke_authorization(pair.ia, rights).await.unwrap();
+        pair.speed_b().revoke_authorization(pair.ia, rights);
         if revoke_request_direction {
             // Cancellation can already have dropped the gated data future.
             let _ = release.send(());
