@@ -4438,7 +4438,6 @@ dependencies = [
  "socket2",
  "thiserror 2.0.20",
  "tokio",
- "tokio-rustls",
  "tower",
  "tracing",
  "tracing-subscriber",
@@ -4453,7 +4452,6 @@ dependencies = [
  "veytrane-tcp",
  "veytrane-transport",
  "veytrane-web-management",
- "webpki-roots",
  "windows-sys 0.59.0",
  "x11rb",
  "zeroize",
@@ -7225,8 +7223,11 @@ dependencies = [
  "socket2",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-rustls",
  "tracing",
+ "webpki-roots",
  "windows-sys 0.59.0",
+ "zeroize",
 ]
 
 [[package]]

@@ -8,6 +8,8 @@ publish = false
 [features]
 private-storage = ["dep:rustix", "dep:windows-sys"]
 quic = ["dep:quinn", "dep:rcgen", "dep:socket2", "dep:tracing", "tokio/macros", "tokio/net", "tokio/sync", "tokio/time"]
+signal-tls = ["quic", "dep:tokio-rustls", "dep:webpki-roots", "dep:zeroize"]
+signal-tls-server = ["signal-tls"]
 test-support = []
 
 [dependencies]
@@ -23,7 +25,10 @@ serde_json = "=1.0.151"
 socket2 = { version = "0.6.5", optional = true }
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["io-util"] }
+tokio-rustls = { version = "=0.26.5", default-features = false, features = ["ring", "tls12", "logging"], optional = true }
 tracing = { version = "0.1.44", optional = true }
+webpki-roots = { version = "=1.0.9", optional = true }
+zeroize = { version = "1.8", features = ["derive"], optional = true }
 
 [target."cfg(unix)".dependencies]
 rustix = { version = "=1.1.5", features = ["process"], optional = true }

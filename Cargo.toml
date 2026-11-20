@@ -56,7 +56,7 @@ standalone = [
     "dep:axum",
     "signaling-server",
 ]
-signaling-server = ["dep:rusqlite"]
+signaling-server = ["dep:rusqlite", "veytrane-transport/signal-tls-server"]
 gui = ["node", "desktop-client"]
 desktop-client = [
     "dep:veytrane-file-policy",
@@ -80,14 +80,12 @@ veytrane-management = { path = "crates/veytrane-management", optional = true }
 veytrane-node = { path = "crates/veytrane-node", optional = true }
 veytrane-speed = { path = "crates/veytrane-speed", default-features = false, optional = true }
 veytrane-tcp = { path = "crates/veytrane-tcp", optional = true }
-veytrane-transport = { path = "crates/veytrane-transport", features = ["quic"] }
+veytrane-transport = { path = "crates/veytrane-transport", features = ["signal-tls"] }
 veytrane-web-management = { path = "apps/web-management", optional = true }
 socket2 = "0.6.5"
 rusqlite = { version = "=0.37.0", features = ["bundled"], optional = true }
 sha2 = { version = "=0.10.9", optional = true }
 zeroize = { version = "1.8", features = ["derive"] }
-tokio-rustls = { version = "=0.26.5", default-features = false, features = ["ring", "tls12", "logging"] }
-webpki-roots = "=1.0.9"
 blake3 = "1.8.7"
 clap = { version = "4.6.7", features = ["derive"] }
 ed25519-dalek = "3.0.0"
@@ -120,7 +118,7 @@ tower = { version = "=0.5.3", features = ["util"] }
 veytrane-files = { path = "crates/veytrane-files", features = ["test-support"] }
 veytrane-node = { path = "crates/veytrane-node", features = ["test-support"] }
 veytrane-speed = { path = "crates/veytrane-speed", default-features = false, features = ["test-support"] }
-veytrane-transport = { path = "crates/veytrane-transport", features = ["test-support"] }
+veytrane-transport = { path = "crates/veytrane-transport", features = ["test-support", "signal-tls-server"] }
 
 [[bin]]
 name = "p2p-desktop"
