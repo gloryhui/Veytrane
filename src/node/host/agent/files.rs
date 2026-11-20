@@ -57,10 +57,7 @@ impl Agent {
                 Ok(json!({"deleted":true}))
             }
             Command::TaskLocation { task } => {
-                let path = self
-                    .control
-                    .reveal_task(&crate::node::core::task_details::Selection::Task(task))
-                    .map_err(|e| e.to_string())?;
+                let path = self.control.reveal_task(&task).map_err(|e| e.to_string())?;
                 Ok(json!({"path":path}))
             }
             Command::ConfirmDirectory { peer, request } => {

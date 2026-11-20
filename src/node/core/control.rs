@@ -560,11 +560,10 @@ impl NodeControl {
         self.file_service()?.delete_completed_receive_file(task)
     }
     #[cfg(feature = "agent-files")]
-    pub fn reveal_task(
-        &self,
-        selection: &crate::node::core::task_details::Selection,
-    ) -> Result<PathBuf> {
-        self.file_service()?.reveal_task(selection)
+    pub fn reveal_task(&self, task: &TaskId) -> Result<PathBuf> {
+        self.file_service()?.reveal_task(
+            &veytrane_files::task_location::Selection::Task(task.clone()),
+        )
     }
 }
 
