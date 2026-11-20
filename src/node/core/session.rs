@@ -213,6 +213,7 @@ pub struct NodeSessionConfig {
     pub signal_tls: Option<crate::discovery::signal_tls::SignalTlsClient>,
     pub remote_auth: Option<RemoteVerifier>,
     pub trusted_devices: Vec<crate::node::core::trusted_devices::TrustedDevice>,
+    #[cfg(test)]
     pub config_path: Option<std::path::PathBuf>,
     #[cfg(test)]
     pub test_outgoing_password: Option<SecretPassword>,
@@ -243,6 +244,7 @@ impl NodeSessionConfig {
             signal_tls: None,
             remote_auth: None,
             trusted_devices: Vec::new(),
+            #[cfg(test)]
             config_path: None,
             #[cfg(test)]
             test_outgoing_password: None,
@@ -325,6 +327,7 @@ pub enum SessionEvent {
         generation: u64,
         detail: String,
     },
+    #[cfg(test)]
     TrustedDevicesChanged(Vec<crate::node::core::trusted_devices::TrustedDevice>),
     Lifecycle(NetworkLifecycle),
     PeerState {
@@ -603,6 +606,7 @@ impl NodeSessionHandle {
             })
             .map_err(|_| "短 ID 查询队列不可用".into())
     }
+    #[cfg(test)]
     pub async fn change_trusted_device(
         &self,
         change: TrustedDeviceChange,
@@ -862,6 +866,7 @@ impl NodeSessionHandle {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone)]
 pub enum TrustedDeviceChange {
     Trust {
@@ -880,6 +885,7 @@ pub enum TrustedDeviceChange {
 
 /// Shell mutations use a live actor for runtime revocation, or the latest
 /// durable configuration after the command channel has closed. Trust is live-only.
+#[cfg(test)]
 pub async fn change_trusted_device(
     session: Option<&NodeSessionHandle>,
     path: &std::path::Path,
@@ -940,6 +946,7 @@ enum SessionCommand {
         candidates: Vec<Candidate>,
         token: PunchToken,
     },
+    #[cfg(test)]
     ChangeTrustedDevice {
         change: TrustedDeviceChange,
         done: oneshot::Sender<
@@ -1145,6 +1152,7 @@ fn recovery_preparation_invalidated(command: &SessionCommand, peer: NodeId) -> b
         | SessionCommand::ConnectAuthenticated { peer: changed, .. }
         | SessionCommand::ConnectAddress { peer: changed, .. }
         | SessionCommand::ConnectTrusted(changed) => *changed == peer,
+        #[cfg(test)]
         SessionCommand::ChangeTrustedDevice {
             change: TrustedDeviceChange::Revoke { peer: changed },
             ..
@@ -2185,6 +2193,7 @@ async fn run_session(
                 }
                 let _ = done.send(());
             }
+            #[cfg(test)]
             Wake::Command(Some(SessionCommand::ChangeTrustedDevice { change, done })) => {
                 let verified_trust = match &change {
                     TrustedDeviceChange::Trust { peer, .. } => Some(*peer),
@@ -4325,6 +4334,7 @@ async fn run_session(
                     connection.close(0u32.into(), b"stale peer generation");
                     continue;
                 }
+                #[cfg(test)]
                 if let Some(short) = resolved_short_ids.get(&peer) {
                     let mut updated = trusted_devices.clone();
                     if let Some(device) = updated.iter_mut().find(|d| {

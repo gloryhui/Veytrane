@@ -1,7 +1,8 @@
-#[cfg(unix)]
+#[cfg(test)]
+use std::collections::HashSet;
+#[cfg(all(unix, test))]
 use std::fs::File;
 use std::{
-    collections::HashSet,
     fs::{self, OpenOptions},
     io::{self, Write},
     net::IpAddr,
@@ -11,7 +12,9 @@ use std::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+#[cfg(test)]
 const CONFIG_SCHEMA_VERSION: u32 = 11;
+#[cfg(test)]
 static CONFIG_MUTATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Debug, Error)]
@@ -199,6 +202,7 @@ impl SettingsDraft {
     }
 }
 
+#[cfg(test)]
 impl DesktopConfig {
     fn write_atomic(&self, path: &Path) -> Result<(), ConfigError> {
         self.validate()?;
@@ -231,6 +235,7 @@ impl DesktopConfig {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
+#[cfg(test)]
 pub struct DesktopConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     signal_tls: Option<crate::discovery::signal_tls::SignalTlsClient>,
@@ -260,11 +265,13 @@ pub struct DesktopConfig {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
+#[cfg(test)]
 struct SignalConfig {
     host: String,
     port: u16,
 }
 
+#[cfg(test)]
 impl DesktopConfig {
     pub fn has_network_config(&self) -> bool {
         self.signal.is_some()
@@ -555,6 +562,7 @@ pub fn validate_speedtest_seconds(value: u16) -> Result<(), ConfigError> {
     }
 }
 
+#[cfg(test)]
 fn validate_rule_id(id: &str) -> Result<(), ConfigError> {
     if id.is_empty()
         || id.len() > 64
@@ -567,6 +575,7 @@ fn validate_rule_id(id: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_rule_name(name: &str) -> Result<(), ConfigError> {
     let name = name.trim();
     if name.is_empty() || name.len() > 128 || name.chars().any(char::is_control) {
@@ -577,6 +586,7 @@ fn validate_rule_name(name: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_forward_target(target: std::net::SocketAddr) -> Result<(), ConfigError> {
     if target.port() == 0 || target.ip().is_unspecified() || target.ip().is_multicast() {
         return Err(ConfigError::Invalid(format!(
@@ -586,6 +596,7 @@ fn validate_forward_target(target: std::net::SocketAddr) -> Result<(), ConfigErr
     Ok(())
 }
 
+#[cfg(test)]
 fn validate_forward_configuration(
     allowed: &[AllowedForwardTarget],
     rules: &[TunnelRule],
@@ -756,6 +767,7 @@ impl Drop for ProbeFileCleanup {
 
 pub use crate::storage::permissions::ensure_private_app_dir;
 
+#[cfg(test)]
 fn write_config_temp(target: &Path, parent: &Path, bytes: &[u8]) -> Result<PathBuf, ConfigError> {
     if target.file_name().is_none() {
         return Err(ConfigError::Invalid("配置路径没有文件名".into()));
@@ -786,6 +798,7 @@ fn write_config_temp(target: &Path, parent: &Path, bytes: &[u8]) -> Result<PathB
     )))
 }
 
+#[cfg(test)]
 fn sync_parent_dir(path: &Path) -> Result<(), ConfigError> {
     #[cfg(unix)]
     File::open(path)?.sync_all()?;
@@ -794,6 +807,7 @@ fn sync_parent_dir(path: &Path) -> Result<(), ConfigError> {
     Ok(())
 }
 
+#[cfg(test)]
 fn config_mutation_lock() -> Result<std::sync::MutexGuard<'static, ()>, ConfigError> {
     CONFIG_MUTATION
         .lock()

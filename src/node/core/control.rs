@@ -13,12 +13,14 @@ use crate::identity::{Identity, NodeId};
 #[cfg(feature = "agent-files")]
 pub use crate::node::core::drop_send::Admission as PathAdmission;
 use crate::node::core::remote_auth::SecretPassword;
-pub use crate::node::core::session::{SessionEvent, change_trusted_device};
+pub use crate::node::core::session::SessionEvent;
+#[cfg(test)]
+pub use crate::node::core::session::change_trusted_device;
 use veytrane_node::operation_id::TaskId;
 
-pub use crate::node::core::session::{
-    NodeSessionConfig, NodeSessionHandle as NodeControl, TrustedDeviceChange,
-};
+#[cfg(test)]
+pub use crate::node::core::session::TrustedDeviceChange;
+pub use crate::node::core::session::{NodeSessionConfig, NodeSessionHandle as NodeControl};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct TransportSnapshot {
@@ -143,6 +145,7 @@ impl ControlState {
                 .collect();
         }
     }
+    #[cfg(test)]
     pub(crate) fn record_trust_source(
         &self,
         peer: NodeId,
@@ -152,6 +155,7 @@ impl ControlState {
             current.insert(peer.to_hex(), source);
         }
     }
+    #[cfg(test)]
     pub(crate) fn retain_trust_sources(
         &self,
         devices: &[crate::node::core::trusted_devices::TrustedDevice],
