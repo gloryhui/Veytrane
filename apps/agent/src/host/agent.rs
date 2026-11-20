@@ -1,17 +1,20 @@
 //! Single local owner for identity, network, files and management state.
 use crate::identity::{Identity, NodeId};
-use crate::node::api::protocol::{self as ipc, Command, Request, Response};
 use crate::node::composition::forwarding::{self, ForwardManager};
 use crate::node::composition::runtime;
 use crate::node::composition::settings::ConfigRecord;
 use crate::node::core::control::{self, NodeControl, SequencedEvent};
-use crate::node::local::paths::AgentPaths;
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, VecDeque},
     io,
     sync::Arc,
     time::{Duration, Instant},
+};
+use veytrane_management::{
+    paths::AgentPaths,
+    protocol::{self as ipc, Command, Request, Response},
+    transport::Listener,
 };
 
 #[cfg(feature = "agent-files")]
@@ -597,7 +600,7 @@ async fn run_with_recovery(
         last_error: Mutex::new(None),
         forwards: Mutex::new(ForwardManager::default()),
     });
-    let mut listener = crate::node::local::transport::Listener::bind(&paths)?;
+    let mut listener = Listener::bind(&paths)?;
     {
         let record = agent.config.lock().await;
         let mut forwards = agent.forwards.lock().await;

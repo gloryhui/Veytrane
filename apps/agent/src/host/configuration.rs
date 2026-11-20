@@ -1,14 +1,13 @@
 //! One revision coordinator for every management entry point.
-use crate::node::api::protocol as ipc;
 use crate::node::composition::forwarding;
 use crate::node::composition::settings::{ConfigRecord, NodeSettings};
 use crate::node::host::agent::Agent;
-use crate::node::local::paths::AgentPaths;
 use serde_json::{Value, json};
 use std::{
     io::{self, Read},
     path::Path,
 };
+use veytrane_management::{paths::AgentPaths, protocol as ipc};
 
 use crate::node::core::session::CommitOptions;
 
