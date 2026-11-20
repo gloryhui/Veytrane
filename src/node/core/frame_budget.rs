@@ -36,6 +36,10 @@ pub struct BufferedFrame {
     pub frame: Frame,
     pub _lease: FrameLease,
 }
+pub struct BufferedBytes {
+    pub bytes: Vec<u8>,
+    pub _lease: FrameLease,
+}
 impl FrameBudget {
     pub fn task_limit() -> Arc<Semaphore> {
         Arc::new(Semaphore::new(TASK_BYTES / UNIT))
@@ -75,15 +79,29 @@ impl FrameBudget {
             _task: task,
         })
     }
+    pub async fn read_raw<R: AsyncRead + Unpin>(
+        &self,
+        reader: &mut R,
+        task: Option<Arc<Semaphore>>,
+    ) -> Result<BufferedBytes> {
+        let length = reader.read_u32_le().await? as usize;
+        let lease = self.reserve(length, task).await?;
+        let mut bytes = vec![0; length];
+        reader.read_exact(&mut bytes).await?;
+        Ok(BufferedBytes {
+            bytes,
+            _lease: lease,
+        })
+    }
     pub async fn read<R: AsyncRead + Unpin>(
         &self,
         reader: &mut R,
         task: Option<Arc<Semaphore>>,
     ) -> Result<BufferedFrame> {
-        let length = reader.read_u32_le().await? as usize;
-        let lease = self.reserve(length, task).await?;
-        let mut bytes = vec![0; length];
-        reader.read_exact(&mut bytes).await?;
+        let BufferedBytes {
+            bytes,
+            _lease: lease,
+        } = self.read_raw(reader, task).await?;
         let frame = Frame::decode(&bytes)?;
         Ok(BufferedFrame {
             frame,
@@ -197,5 +215,37 @@ mod tests {
             budget.read(&mut reader, Some(task)).await.unwrap().frame,
             frame
         );
+    }
+
+    #[tokio::test]
+    async fn raw_speed_budget_holds_lease_until_the_frame_is_dropped() {
+        use crate::node::core::protocol::SpeedControl;
+        use crate::node::core::speed_wire::SpeedFrame;
+        use crate::node::core::task_model::TaskId;
+
+        let budget = FrameBudget::default();
+        let task = FrameBudget::task_limit();
+        let frame = SpeedFrame {
+            request_id: 1,
+            control: SpeedControl::Busy {
+                test_id: TaskId::parse("00112233445566778899aabbccddeeff").unwrap(),
+            },
+        };
+        let encoded = frame.encode().unwrap();
+        let units = (encoded.len() * 2).div_ceil(UNIT);
+        let mut wire = (encoded.len() as u32).to_le_bytes().to_vec();
+        wire.extend_from_slice(&encoded);
+
+        let buffered = budget
+            .read_raw(&mut &wire[..], Some(task.clone()))
+            .await
+            .unwrap();
+        assert_eq!(buffered.bytes, encoded);
+        assert_eq!(SpeedFrame::decode(&buffered.bytes).unwrap(), frame);
+        assert_eq!(task.available_permits(), TASK_BYTES / UNIT - units);
+        assert_eq!(budget.all.available_permits(), GLOBAL_BYTES / UNIT - units);
+        drop(buffered);
+        assert_eq!(task.available_permits(), TASK_BYTES / UNIT);
+        assert_eq!(budget.all.available_permits(), GLOBAL_BYTES / UNIT);
     }
 }

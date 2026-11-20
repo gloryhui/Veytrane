@@ -3,12 +3,14 @@
 use crate::node::core::activity::{Activity, ExclusivePermit};
 use crate::node::core::authorization::ResourcePolicy;
 use crate::node::core::dispatch::{BiStream, RESET_INVALID, RESET_UNAUTHORIZED};
-use crate::node::core::frame_budget::{BufferedFrame, FrameBudget};
+use crate::node::core::frame_budget::{BufferedBytes, FrameBudget};
 use crate::node::core::protocol::{
-    self, Frame, Message, SpeedArbiter, SpeedControl, SpeedDirection, SpeedLease,
+    MAX_FRAME_BYTES, SpeedArbiter, SpeedControl, SpeedDirection, SpeedLease,
 };
 use crate::node::core::remote_auth::{LiveAuthorization, RemoteAuthorization};
+use crate::node::core::speed_wire::SpeedFrame;
 use crate::node::core::task_model::TaskId;
+use crate::protocol::raw_frame::{read_raw_frame_limited, write_raw_frame_limited};
 use crate::{
     error::{Error, Result},
     identity::NodeId,
@@ -214,16 +216,20 @@ impl SpeedService {
                         let result = authorization.guard(true, async {
                             let buffered = tokio::time::timeout(
                                 Duration::from_secs(5),
-                                service.frame_budget.read(&mut recv, None),
+                                service.frame_budget.read_raw(&mut recv, None),
                             )
                             .await
                             .map_err(|_| failure("测速流首帧超时"))??;
-                            let BufferedFrame { frame: first, _lease } = buffered;
-                            if !matches!(&first.message, Message::Speed(_)) {
-                                let _ = send.reset(RESET_INVALID.into());
-                                let _ = recv.stop(RESET_INVALID.into());
-                                return Err(failure("节点测速流类型不符"));
-                            }
+                            let BufferedBytes { bytes, _lease } = buffered;
+                            let first = match SpeedFrame::decode(&bytes) {
+                                Ok(first) => first,
+                                Err(_) => {
+                                    let _ = send.reset(RESET_INVALID.into());
+                                    let _ = recv.stop(RESET_INVALID.into());
+                                    return Err(failure("节点测速流类型不符"));
+                                }
+                            };
+                            drop(bytes);
                             let allowed = resources.borrow().for_peer(peer);
                             if allowed.disabled || !allowed.speed {
                                 let _ = send.reset(RESET_UNAUTHORIZED.into());
@@ -577,9 +583,9 @@ impl SpeedPeer {
             direction,
             seconds,
         };
-        Frame {
+        SpeedFrame {
             request_id: 1,
-            message: Message::Speed(request.clone()),
+            control: request.clone(),
         }
         .encode()?;
         let crate::node::core::dispatch::BiStream { mut send, mut recv } = tokio::time::timeout(
@@ -633,14 +639,12 @@ impl SpeedPeer {
         &self,
         mut send: SendStream,
         recv: RecvStream,
-        first: Frame,
+        first: SpeedFrame,
     ) -> Result<()> {
         if first.request_id != 1 {
             return Err(failure("测速首帧编号非法"));
         }
-        let Message::Speed(control) = first.message else {
-            return Err(failure("需要测速控制首帧"));
-        };
+        let control = first.control;
         let (id, direction, seconds, grant) = match control {
             SpeedControl::Request {
                 test_id,
@@ -950,16 +954,13 @@ async fn write<W: tokio::io::AsyncWrite + Unpin>(
     sequence: u64,
     control: SpeedControl,
 ) -> Result<()> {
-    tokio::time::timeout(
-        CONTROL_TIMEOUT,
-        protocol::write(
-            send,
-            &Frame {
-                request_id: sequence,
-                message: Message::Speed(control),
-            },
-        ),
-    )
+    let frame = SpeedFrame {
+        request_id: sequence,
+        control,
+    };
+    tokio::time::timeout(CONTROL_TIMEOUT, async {
+        write_raw_frame_limited(send, &frame.encode()?, MAX_FRAME_BYTES).await
+    })
     .await
     .map_err(|_| failure("测速控制消息发送超时"))?
 }
@@ -974,19 +975,13 @@ async fn read_for<R: tokio::io::AsyncRead + Unpin>(
     sequence: u64,
     timeout: Duration,
 ) -> Result<SpeedControl> {
-    let bytes = tokio::time::timeout(
-        timeout,
-        crate::protocol::frame::read_raw_frame_limited(recv, HEADER_LIMIT),
-    )
-    .await
-    .map_err(|_| failure("测速控制消息读取超时"))??
-    .ok_or_else(|| failure("测速控制流提前关闭"))?;
-    let frame = Frame::decode(&bytes)?;
+    let bytes = tokio::time::timeout(timeout, read_raw_frame_limited(recv, HEADER_LIMIT))
+        .await
+        .map_err(|_| failure("测速控制消息读取超时"))??
+        .ok_or_else(|| failure("测速控制流提前关闭"))?;
+    let frame = SpeedFrame::decode(&bytes)?;
     if frame.request_id != sequence {
         return Err(failure("测速控制编号不符"));
     }
-    match frame.message {
-        Message::Speed(control) => Ok(control),
-        _ => Err(Error::Protocol("非法测速控制消息".into())),
-    }
+    Ok(frame.control)
 }

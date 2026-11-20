@@ -28,7 +28,8 @@ pub const CAP_INCREMENTAL_DIRECTORY: u64 = 1 << 12;
 pub const MAX_FRAME_BYTES: u32 = 4 * 1024 * 1024;
 pub const MAX_CHUNKS: usize = 65_536;
 pub const MAX_TASKS_PER_PEER: usize = 128;
-const MAGIC: &[u8; 5] = b"P2PF\x01";
+/// Shared P2PF file/speed envelope magic.
+pub(crate) const MAGIC: &[u8; 5] = b"P2PF\x01";
 
 fn invalid(message: &str) -> Error {
     Error::Protocol(message.into())
@@ -680,7 +681,7 @@ impl SpeedControl {
             | Self::Result { lease, .. } => &lease.test_id,
         }
     }
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         let seconds = match self {
             Self::Request { seconds, .. } => *seconds,
             Self::Granted(lease)
