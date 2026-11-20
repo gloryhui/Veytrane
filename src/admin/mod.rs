@@ -432,14 +432,6 @@ fn authorize(state: &AdminState, headers: &HeaderMap) -> std::result::Result<(),
         details: Vec::new(),
     })
 }
-#[cfg(feature = "node")]
-pub(crate) fn authorize_management(
-    headers: &HeaderMap,
-    token: &str,
-) -> std::result::Result<(), Box<Response>> {
-    authorize_token(headers, token).map_err(|error| Box::new(error.into_response()))
-}
-
 fn write_json_atomic<T: Serialize>(
     path: &Path,
     value: &T,

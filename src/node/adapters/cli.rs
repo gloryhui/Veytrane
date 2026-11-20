@@ -151,7 +151,7 @@ pub async fn run(args: Args) -> io::Result<Response> {
             return Ok(Response::ok("ownership_status", ownership_status(&paths)?));
         }
         Action::Web { listen } => {
-            crate::node::adapters::web::run(paths, listen).await?;
+            veytrane_web_management::web::run(paths, listen).await?;
             return Ok(Response::ok("web", json!({"stopped":true})));
         }
         Action::Init => return Ok(Response::ok("init", initialize(&paths)?)),

@@ -103,7 +103,7 @@ async fn run_with_navigation(
     let (shutdown, shutdown_rx) = tokio::sync::watch::channel(false);
     let web_paths = paths.clone();
     let web = tokio::spawn(async move {
-        if let Err(error) = p2p_file::node::adapters::navigation::serve(
+        if let Err(error) = veytrane_web_management::navigation::serve(
             web_paths,
             &configuration,
             restart,

@@ -1,7 +1,4 @@
 //! Optional loopback gateway. Owns only an IPC client and an HTTP token.
-use crate::node::api::client::AgentClient;
-use crate::node::api::protocol as ipc;
-use crate::node::local::paths::AgentPaths;
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Request, State},
@@ -12,6 +9,9 @@ use axum::{
 };
 use std::{io, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
+use veytrane_http_auth::{authorize_token, load_or_create_token};
+use veytrane_management::{client::AgentClient, paths::AgentPaths, protocol as ipc};
+use veytrane_transport::atomic::regular_file;
 
 #[derive(Clone)]
 struct Gateway {
@@ -25,7 +25,7 @@ pub async fn run(paths: AgentPaths, listen: SocketAddr) -> io::Result<()> {
     }
     let token_path = paths.root.join("admin.token");
     if let Ok(metadata) = std::fs::symlink_metadata(&token_path) {
-        if !crate::storage::atomic::regular_file(&metadata) || metadata.len() > 4096 {
+        if !regular_file(&metadata) || metadata.len() > 4096 {
             return Err(io::Error::other("token必须是私有普通文件"));
         }
         #[cfg(unix)]
@@ -38,7 +38,7 @@ pub async fn run(paths: AgentPaths, listen: SocketAddr) -> io::Result<()> {
             }
         }
     }
-    let token = crate::admin::load_or_create_token(&token_path).map_err(io::Error::other)?;
+    let token = load_or_create_token(&token_path).map_err(io::Error::other)?;
     let state = Gateway {
         client: AgentClient::new(paths),
         token: Arc::new(zeroize::Zeroizing::new(token)),
@@ -67,9 +67,9 @@ async fn boundary(State(state): State<Gateway>, request: Request, next: Next) ->
         return (StatusCode::TOO_MANY_REQUESTS, "管理请求并发已满").into_response();
     };
     if request.uri().path().starts_with("/api/")
-        && let Err(response) = crate::admin::authorize_management(request.headers(), &state.token)
+        && let Err(error) = authorize_token(request.headers(), &state.token)
     {
-        return *response;
+        return error.into_response();
     }
     match tokio::time::timeout(Duration::from_secs(35), next.run(request)).await {
         Ok(response) => response,

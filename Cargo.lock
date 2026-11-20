@@ -4432,7 +4432,6 @@ dependencies = [
  "rcgen",
  "reqwest",
  "rusqlite",
- "rustix 1.1.5",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -4453,6 +4452,7 @@ dependencies = [
  "veytrane-speed",
  "veytrane-tcp",
  "veytrane-transport",
+ "veytrane-web-management",
  "webpki-roots",
  "windows-sys 0.59.0",
  "x11rb",
@@ -7226,6 +7226,27 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "veytrane-web-management"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "dirs 5.0.1",
+ "hex",
+ "rand 0.10.3",
+ "rustix 1.1.5",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tokio-rustls",
+ "tower",
+ "tracing",
+ "veytrane-http-auth",
+ "veytrane-management",
+ "veytrane-transport",
+ "zeroize",
 ]
 
 [[package]]

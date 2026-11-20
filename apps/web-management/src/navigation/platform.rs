@@ -5,9 +5,6 @@
 //! Python helper; this module never starts another local core or Python server.
 
 use super::{Backend, Call, Problem, Result};
-use crate::node::api::client::AgentClient;
-use crate::node::api::protocol::{self as ipc, Command, Request};
-use crate::node::local::paths::AgentPaths;
 use serde_json::{Value, json};
 use std::{
     io,
@@ -16,6 +13,9 @@ use std::{
     time::Duration,
 };
 use tokio::{io::AsyncWriteExt, process::Command as ProcessCommand, sync::watch};
+use veytrane_management::client::AgentClient;
+use veytrane_management::paths::AgentPaths;
+use veytrane_management::protocol::{self as ipc, Command, Request};
 
 const CONFIG_SCHEMA: u64 = 1;
 const PRIVATE_FILE_LIMIT: u64 = 1024 * 1024;
@@ -138,7 +138,7 @@ pub fn load_config(path: &Path) -> Result<Value> {
 
     let source = match std::fs::symlink_metadata(&config_path) {
         Ok(metadata) => {
-            if !crate::storage::atomic::regular_file(&metadata)
+            if !veytrane_transport::atomic::regular_file(&metadata)
                 || metadata.len() > PRIVATE_FILE_LIMIT
             {
                 return Err(Problem::new("导航配置必须是最大 1 MiB 的普通文件。"));
@@ -619,7 +619,7 @@ fn read_installed(config: &Value) -> Result<Option<(PathBuf, PathBuf)>> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
-    if !crate::storage::atomic::regular_file(&metadata) || metadata.len() > PRIVATE_FILE_LIMIT {
+    if !veytrane_transport::atomic::regular_file(&metadata) || metadata.len() > PRIVATE_FILE_LIMIT {
         return Err(Problem::code(
             "installed.json 必须是最大 1 MiB 的私有普通文件。",
             "agent_host_mismatch",

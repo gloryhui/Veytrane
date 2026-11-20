@@ -1,5 +1,4 @@
 use super::{Backend, Problem, id, manager::Manager, platform};
-use crate::node::local::paths::AgentPaths;
 use axum::{
     Json, Router,
     extract::{ConnectInfo, DefaultBodyLimit, Request, State},
@@ -11,6 +10,7 @@ use axum::{
 use serde_json::{Value, json};
 use std::{collections::HashSet, io, net::SocketAddr, path::Path, sync::Arc};
 use tokio::sync::{Mutex, Semaphore, watch};
+use veytrane_management::paths::AgentPaths;
 
 #[derive(Clone)]
 struct Gateway {
@@ -64,7 +64,7 @@ fn ensure_page(config: &Value, host: &Value) -> super::Result<()> {
     );
     if page.try_exists()? {
         let metadata = std::fs::symlink_metadata(page)?;
-        if !crate::storage::atomic::regular_file(&metadata) {
+        if !veytrane_transport::atomic::regular_file(&metadata) {
             return Err(Problem::new("导航页必须是普通文件。"));
         }
         #[cfg(unix)]

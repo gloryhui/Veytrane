@@ -112,7 +112,7 @@ pub fn write_private_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| Problem::new("导航文件缺少父目录。"))?;
-    crate::storage::permissions::ensure_directory(parent)?;
-    crate::storage::atomic::write_bytes(path, bytes)?;
+    veytrane_transport::permissions::ensure_directory(parent)?;
+    veytrane_transport::atomic::write_bytes(path, bytes)?;
     Ok(())
 }

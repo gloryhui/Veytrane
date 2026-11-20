@@ -15,6 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_rustls::rustls;
 
 const DATA_OPEN: &str = r#"<script id="navigation-data" type="application/json">"#;
 const DATA_CLOSE: &str = "</script>";
@@ -2038,32 +2039,28 @@ fn python_json_string(value: &str) -> String {
 
 #[derive(Debug)]
 struct InsecureVerifier {
-    provider: Arc<quinn::rustls::crypto::CryptoProvider>,
+    provider: Arc<rustls::crypto::CryptoProvider>,
 }
 
-impl quinn::rustls::client::danger::ServerCertVerifier for InsecureVerifier {
+impl rustls::client::danger::ServerCertVerifier for InsecureVerifier {
     fn verify_server_cert(
         &self,
-        _end_entity: &quinn::rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[quinn::rustls::pki_types::CertificateDer<'_>],
-        _server_name: &quinn::rustls::pki_types::ServerName<'_>,
+        _end_entity: &rustls::pki_types::CertificateDer<'_>,
+        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
         _ocsp_response: &[u8],
-        _now: quinn::rustls::pki_types::UnixTime,
-    ) -> std::result::Result<quinn::rustls::client::danger::ServerCertVerified, quinn::rustls::Error>
-    {
-        Ok(quinn::rustls::client::danger::ServerCertVerified::assertion())
+        _now: rustls::pki_types::UnixTime,
+    ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
 
     fn verify_tls12_signature(
         &self,
         message: &[u8],
-        cert: &quinn::rustls::pki_types::CertificateDer<'_>,
-        dss: &quinn::rustls::DigitallySignedStruct,
-    ) -> std::result::Result<
-        quinn::rustls::client::danger::HandshakeSignatureValid,
-        quinn::rustls::Error,
-    > {
-        quinn::rustls::crypto::verify_tls12_signature(
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(
             message,
             cert,
             dss,
@@ -2074,13 +2071,10 @@ impl quinn::rustls::client::danger::ServerCertVerifier for InsecureVerifier {
     fn verify_tls13_signature(
         &self,
         message: &[u8],
-        cert: &quinn::rustls::pki_types::CertificateDer<'_>,
-        dss: &quinn::rustls::DigitallySignedStruct,
-    ) -> std::result::Result<
-        quinn::rustls::client::danger::HandshakeSignatureValid,
-        quinn::rustls::Error,
-    > {
-        quinn::rustls::crypto::verify_tls13_signature(
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
             message,
             cert,
             dss,
@@ -2088,7 +2082,7 @@ impl quinn::rustls::client::danger::ServerCertVerifier for InsecureVerifier {
         )
     }
 
-    fn supported_verify_schemes(&self) -> Vec<quinn::rustls::SignatureScheme> {
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
         self.provider
             .signature_verification_algorithms
             .supported_schemes()
@@ -2103,17 +2097,16 @@ async fn http_probe(listen: SocketAddr, path: &str, https: bool) -> std::io::Res
     tokio::time::timeout(Duration::from_secs(6), async {
         let mut tcp = tokio::net::TcpStream::connect(listen).await?;
         if https {
-            let provider = Arc::new(quinn::rustls::crypto::ring::default_provider());
-            let config = quinn::rustls::ClientConfig::builder_with_provider(provider.clone())
+            let provider = Arc::new(rustls::crypto::ring::default_provider());
+            let config = rustls::ClientConfig::builder_with_provider(provider.clone())
                 .with_safe_default_protocol_versions()
                 .map_err(std::io::Error::other)?
                 .dangerous()
                 .with_custom_certificate_verifier(Arc::new(InsecureVerifier { provider }))
                 .with_no_client_auth();
             let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
-            let server_name =
-                quinn::rustls::pki_types::ServerName::try_from(listen.ip().to_string())
-                    .map_err(std::io::Error::other)?;
+            let server_name = rustls::pki_types::ServerName::try_from(listen.ip().to_string())
+                .map_err(std::io::Error::other)?;
             let mut tls = connector
                 .connect(server_name, tcp)
                 .await

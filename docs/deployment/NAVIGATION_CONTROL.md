@@ -219,7 +219,7 @@ python3 scripts/update-service-navigation.py --ssh-host ubuntu
 Rust 导航回归与原有 Agent 进程回归：
 
 ```sh
-cargo test --lib navigation
+cargo test --locked -p veytrane-web-management
 cargo test --test node_agent_process \
   agent_process_config_transaction_idempotency_restart_and_ownership
 cargo build --release --bin p2p-agent --bin p2p-node

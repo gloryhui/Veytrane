@@ -2,7 +2,3 @@
 
 #[cfg(feature = "node")]
 pub mod cli;
-#[cfg(feature = "agent-web")]
-pub mod navigation;
-#[cfg(feature = "node")]
-pub mod web;
