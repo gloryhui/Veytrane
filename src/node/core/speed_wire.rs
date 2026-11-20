@@ -30,6 +30,32 @@ mod tests {
         assert!(Frame::decode(&expected).is_err());
     }
 
+    #[tokio::test]
+    async fn raw_speed_budget_holds_lease_until_the_frame_is_dropped() {
+        use veytrane_node::frame_budget::{FrameBudget, TASK_BYTES, UNIT};
+
+        let budget = FrameBudget::default();
+        let limit = FrameBudget::task_limit();
+        let frame = SpeedFrame {
+            request_id: 1,
+            control: SpeedControl::Busy { test_id: task() },
+        };
+        let encoded = frame.encode().unwrap();
+        let units = (encoded.len() * 2).div_ceil(UNIT);
+        let mut wire = (encoded.len() as u32).to_le_bytes().to_vec();
+        wire.extend_from_slice(&encoded);
+
+        let buffered = budget
+            .read_raw(&mut &wire[..], Some(limit.clone()))
+            .await
+            .unwrap();
+        assert_eq!(buffered.bytes, encoded);
+        assert_eq!(SpeedFrame::decode(&buffered.bytes).unwrap(), frame);
+        assert_eq!(limit.available_permits(), TASK_BYTES / UNIT - units);
+        drop(buffered);
+        assert_eq!(limit.available_permits(), TASK_BYTES / UNIT);
+    }
+
     #[test]
     fn leased_speed_control_roundtrips_while_file_protocol_rejects_tag7() {
         let control = SpeedControl::Result {

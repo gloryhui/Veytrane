@@ -4,6 +4,8 @@
 pub mod bandwidth;
 pub mod chunk_bitmap;
 pub mod download;
+#[cfg(feature = "node-tasks")]
+pub mod frame_budget;
 pub mod manifest;
 #[cfg(feature = "node-tasks")]
 pub mod protocol;
@@ -16,11 +18,11 @@ pub mod relative_path;
 pub mod secure_fs;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod space_budget;
-#[cfg(feature = "node-tasks")]
+#[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod task_events;
 #[cfg(feature = "node-tasks")]
 pub mod task_model;
-#[cfg(feature = "node-tasks")]
+#[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod task_recovery;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod task_store;
