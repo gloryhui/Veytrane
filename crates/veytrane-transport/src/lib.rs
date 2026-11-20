@@ -3,6 +3,7 @@
 pub mod atomic;
 pub mod error;
 pub mod identity;
+pub mod identity_wire;
 pub mod instance_lock;
 #[cfg(feature = "private-storage")]
 pub mod permissions;
