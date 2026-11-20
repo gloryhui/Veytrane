@@ -18,7 +18,7 @@ pub(crate) mod frame_budget;
 pub(crate) mod incremental;
 pub(crate) mod network_state;
 pub mod protocol;
-#[cfg(feature = "agent-files")]
+#[cfg(all(test, feature = "agent-files"))]
 pub(crate) mod queue;
 pub mod receive_policy;
 pub mod remote_auth;
@@ -26,7 +26,7 @@ pub mod services;
 pub(crate) mod session;
 #[cfg(test)]
 pub mod snapshot;
-#[cfg(feature = "agent-files")]
+#[cfg(all(test, feature = "agent-files"))]
 pub(crate) mod space_budget;
 pub(crate) mod speed;
 #[cfg(all(test, feature = "agent-files"))]
