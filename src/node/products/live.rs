@@ -1,11 +1,11 @@
 //! WHIP publishing stays local. Only a read-only WHEP proxy and ICE/TCP media
 //! are exported through the existing ID-scoped node TCP forwarding mechanism.
 use super::runtime::{authorized_peers, log_connection_event, stop_control};
+use crate::node::composition::forwarding::{self, ForwardManager};
+use crate::node::composition::settings::NodeSettings;
 use crate::node::core::config::{AllowedForwardTarget, TunnelRule};
 use crate::node::core::control;
-use crate::node::core::forwarding::{self, ForwardManager};
 use crate::node::core::remote_auth::{RemoteVerifier, SecretPassword};
-use crate::node::core::settings::NodeSettings;
 use crate::{
     identity::{Identity, NodeId},
     instance_lock::InstanceLock,
@@ -377,7 +377,7 @@ async fn gateway_loop(
         let started = Instant::now();
         let mut interval = tokio::time::interval(Duration::from_millis(250));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let recovery = crate::node::host::recovery::wait(control.clone());
+        let recovery = super::platform_recovery::wait(control.clone());
         tokio::pin!(recovery);
         let reason = loop {
             tokio::select! {
@@ -461,7 +461,7 @@ pub async fn run_viewer(
         }
         let mut interval = tokio::time::interval(Duration::from_secs(2));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let recovery = crate::node::host::recovery::wait(control.clone());
+        let recovery = super::platform_recovery::wait(control.clone());
         tokio::pin!(recovery);
         let started = Instant::now();
         let mut watchdog = super::recovery::ClientRecovery::default();

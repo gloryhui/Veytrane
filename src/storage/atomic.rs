@@ -1,5 +1,7 @@
 //! Shared atomic local-file replacement.
 
-pub(crate) use veytrane_transport::atomic::{WriteOutcome, write_json};
+#[cfg(feature = "standalone")]
+pub(crate) use veytrane_transport::atomic::WriteOutcome;
+pub(crate) use veytrane_transport::atomic::write_json;
 #[cfg(feature = "agent-base")]
 pub(crate) use veytrane_transport::atomic::{is_reparse, regular_file};

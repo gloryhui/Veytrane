@@ -2,5 +2,3 @@
 
 pub mod agent;
 pub mod configuration;
-#[cfg(feature = "node")]
-pub(crate) mod recovery;

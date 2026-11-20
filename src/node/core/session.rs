@@ -1,6 +1,6 @@
 //! Long-lived headless node network session. One task owns signaling events; Quinn owns all UDP reads.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -451,6 +451,35 @@ struct SessionLifetime {
     thread: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
+#[derive(Clone, Copy, Default)]
+pub(crate) struct CommitOptions {
+    pub verified: Option<(NodeId, u64)>,
+    pub restart: bool,
+}
+
+pub(crate) struct SessionPolicy {
+    pub direct_peers: BTreeMap<String, Vec<SocketAddr>>,
+    pub remote_auth: Option<RemoteVerifier>,
+    pub trusted_devices: Vec<crate::node::core::trusted_devices::TrustedDevice>,
+    pub trust_sources: HashMap<NodeId, crate::node::core::authorization::TrustSource>,
+    pub resources: crate::node::core::authorization::ResourcePolicy,
+    pub services: Vec<veytrane_tcp::rules::AllowedForwardTarget>,
+    #[cfg(feature = "agent-files")]
+    pub files: FilePolicyUpdate,
+}
+
+#[cfg(feature = "agent-files")]
+pub(crate) struct FilePolicyUpdate {
+    pub receive_root: std::path::PathBuf,
+    pub auto_resume: bool,
+    pub send_concurrency: u8,
+    pub file_limits: veytrane_file_policy::bandwidth::FileLimits,
+    pub receive_safety_mib: u16,
+}
+
+type PersistResult = std::result::Result<veytrane_transport::atomic::WriteOutcome, String>;
+type PersistPolicy = Box<dyn FnOnce() -> PersistResult + Send>;
+
 impl Drop for SessionLifetime {
     fn drop(&mut self) {
         let _ = self.stop.send(true);
@@ -487,18 +516,18 @@ impl NodeSessionHandle {
             .map_err(|_| "会话已关闭".to_owned())?;
         result.await.map_err(|_| "会话已关闭".to_owned())?
     }
-    pub(crate) async fn commit_agent_policy(
+    pub(crate) async fn commit_policy(
         &self,
-        record: crate::node::core::settings::ConfigRecord,
-        path: std::path::PathBuf,
-        options: crate::node::core::settings::CommitOptions,
-    ) -> std::result::Result<crate::storage::atomic::WriteOutcome, String> {
+        policy: SessionPolicy,
+        options: CommitOptions,
+        persist: impl FnOnce() -> PersistResult + Send + 'static,
+    ) -> PersistResult {
         let (done, result) = oneshot::channel();
         self.commands
-            .send(SessionCommand::CommitAgentPolicy {
-                record: Box::new(record),
-                path,
+            .send(SessionCommand::CommitPolicy {
+                policy: Box::new(policy),
                 options,
+                persist: Box::new(persist),
                 done,
             })
             .await
@@ -1025,11 +1054,11 @@ enum SessionCommand {
             std::result::Result<watch::Receiver<Option<quinn::Connection>>, String>,
         >,
     },
-    CommitAgentPolicy {
-        record: Box<crate::node::core::settings::ConfigRecord>,
-        path: std::path::PathBuf,
-        options: crate::node::core::settings::CommitOptions,
-        done: oneshot::Sender<std::result::Result<crate::storage::atomic::WriteOutcome, String>>,
+    CommitPolicy {
+        policy: Box<SessionPolicy>,
+        options: CommitOptions,
+        persist: PersistPolicy,
+        done: oneshot::Sender<PersistResult>,
     },
     UpdateTunnelSettings {
         tunnel_rules: Vec<crate::node::core::config::TunnelRule>,
@@ -1168,7 +1197,7 @@ fn recovery_preparation_invalidated(command: &SessionCommand, peer: NodeId) -> b
             ..
         } => *changed == peer,
         SessionCommand::ResourcePolicy { policy, .. } => policy.for_peer(peer).disabled,
-        SessionCommand::CommitAgentPolicy { .. }
+        SessionCommand::CommitPolicy { .. }
         | SessionCommand::UpdateRemoteAuth { .. }
         | SessionCommand::RefreshNetwork(_)
         | SessionCommand::ReconfigureNetwork { .. } => true,
@@ -1925,18 +1954,12 @@ async fn run_session(
                 sender.send_replace(current);
                 let _ = done.send(Ok(sender.subscribe()));
             }
-            Wake::Command(Some(SessionCommand::CommitAgentPolicy {
-                record,
-                path,
+            Wake::Command(Some(SessionCommand::CommitPolicy {
+                policy,
                 options,
+                persist,
                 done,
             })) => {
-                // Bind preparation belongs to Agent. This actor is the single
-                // authorization publisher and persists before exposing grants.
-                if let Err(error) = record.validate() {
-                    let _ = done.send(Err(error.to_string()));
-                    continue;
-                }
                 if let Some((peer, generation)) = options.verified {
                     let valid = connections
                         .get(&peer)
@@ -1951,26 +1974,26 @@ async fn run_session(
                 }
                 #[cfg(feature = "agent-files")]
                 if let Some(service) = &config.transfer
-                    && service.receive_root_path() != record.settings.receive_root
+                    && service.receive_root_path() != policy.files.receive_root
                     && let Err(error) = crate::node::core::config::validate_receive_directory(
-                        &record.settings.receive_root,
+                        &policy.files.receive_root,
                     )
                 {
                     let _ = done.send(Err(error.to_string()));
                     continue;
                 }
-                let outcome = match crate::storage::atomic::write_json(&path, &record) {
+                let outcome = match persist() {
                     Ok(outcome) => outcome,
                     Err(error) => {
-                        let _ = done.send(Err(error.to_string()));
+                        let _ = done.send(Err(error));
                         continue;
                     }
                 };
-                if configured_direct_routes != record.settings.direct.peers {
+                if configured_direct_routes != policy.direct_peers {
                     for peer in configured_direct_routes.keys() {
                         direct_routes.remove(peer);
                     }
-                    configured_direct_routes = record.settings.direct.peers.clone();
+                    configured_direct_routes = policy.direct_peers;
                     // Persisted routes take priority over bounded ephemeral hints.
                     while direct_routes
                         .keys()
@@ -1990,23 +2013,17 @@ async fn run_session(
                     }
                     direct_routes.extend(configured_direct_routes.clone());
                 }
-                let password_changed = remote_verifier != record.settings.remote_auth;
+                let password_changed = remote_verifier != policy.remote_auth;
                 let previous = resource_policy.borrow().clone();
                 let old_trusted = trusted_devices.clone();
-                trusted_devices = record.settings.trusted_devices.clone();
-                remote_verifier = record.settings.remote_auth.clone();
+                trusted_devices = policy.trusted_devices;
+                remote_verifier = policy.remote_auth;
                 auth_context.set_trusted(crate::node::core::trusted_devices::node_ids(
                     &trusted_devices,
                 ));
-                resource_policy.send_replace(record.settings.resources.clone());
-                allowed_forward_targets.send_replace(record.settings.services.clone());
-                let sources = record
-                    .settings
-                    .trust_sources
-                    .iter()
-                    .filter_map(|(id, source)| NodeId::from_hex(id).ok().map(|id| (id, *source)))
-                    .collect();
-                events.control.set_trust_sources(&sources);
+                resource_policy.send_replace(policy.resources.clone());
+                allowed_forward_targets.send_replace(policy.services);
+                events.control.set_trust_sources(&policy.trust_sources);
                 let revoke = connections
                     .keys()
                     .chain(peer_attempts.keys())
@@ -2014,7 +2031,7 @@ async fn run_session(
                     .copied()
                     .filter(|peer| {
                         let old = previous.for_peer(*peer);
-                        let next = record.settings.resources.for_peer(*peer);
+                        let next = policy.resources.for_peer(*peer);
                         password_changed
                             || options.restart
                             || next.disabled
@@ -2071,13 +2088,13 @@ async fn run_session(
                 #[cfg(feature = "agent-files")]
                 if let Some(service) = &config.transfer {
                     // Values have already been validated before persistence.
-                    if service.receive_root_path() != record.settings.receive_root {
-                        service.set_receive_root(record.settings.receive_root.clone());
+                    if service.receive_root_path() != policy.files.receive_root {
+                        service.set_receive_root(policy.files.receive_root);
                     }
-                    service.set_auto_resume(record.settings.auto_resume);
-                    let _ = service.set_send_limit(record.settings.send_concurrency);
-                    let _ = service.set_file_limits(record.settings.file_limits);
-                    let _ = service.set_receive_safety_mib(record.settings.receive_safety_mib);
+                    service.set_auto_resume(policy.files.auto_resume);
+                    let _ = service.set_send_limit(policy.files.send_concurrency);
+                    let _ = service.set_file_limits(policy.files.file_limits);
+                    let _ = service.set_receive_safety_mib(policy.files.receive_safety_mib);
                 }
                 if options.restart {
                     session_shutdown = true;

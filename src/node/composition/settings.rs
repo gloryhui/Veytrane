@@ -181,6 +181,29 @@ impl NodeSettings {
             .remove("remote_auth");
         value
     }
+
+    pub(crate) fn runtime_policy(&self) -> Result<crate::node::core::session::SessionPolicy> {
+        Ok(crate::node::core::session::SessionPolicy {
+            direct_peers: self.direct.peers.clone(),
+            remote_auth: self.remote_auth.clone(),
+            trusted_devices: self.trusted_devices.clone(),
+            trust_sources: self
+                .trust_sources
+                .iter()
+                .map(|(id, source)| Ok((NodeId::from_hex(id)?, *source)))
+                .collect::<Result<_>>()?,
+            resources: self.resources.clone(),
+            services: self.services.clone(),
+            #[cfg(feature = "agent-files")]
+            files: crate::node::core::session::FilePolicyUpdate {
+                receive_root: self.receive_root.clone(),
+                auto_resume: self.auto_resume,
+                send_concurrency: self.send_concurrency,
+                file_limits: self.file_limits,
+                receive_safety_mib: self.receive_safety_mib,
+            },
+        })
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -252,13 +275,6 @@ impl ConfigRecord {
         }
         Ok(record)
     }
-}
-
-/// Policy commit inputs shared by the core actor and its host.
-#[derive(Clone, Copy, Default)]
-pub(crate) struct CommitOptions {
-    pub verified: Option<(crate::identity::NodeId, u64)>,
-    pub restart: bool,
 }
 
 #[cfg(test)]

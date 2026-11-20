@@ -1,9 +1,9 @@
 //! Single local owner for identity, network, files and management state.
 use crate::identity::{Identity, NodeId};
 use crate::node::api::protocol::{self as ipc, Command, Request, Response};
+use crate::node::composition::forwarding::{self, ForwardManager};
+use crate::node::composition::settings::ConfigRecord;
 use crate::node::core::control::{self, NodeControl, SequencedEvent};
-use crate::node::core::forwarding::{self, ForwardManager};
-use crate::node::core::settings::ConfigRecord;
 use crate::node::local::paths::AgentPaths;
 use serde_json::{Value, json};
 use std::{
@@ -308,7 +308,7 @@ impl Agent {
                     settings,
                     id,
                     digest,
-                    crate::node::core::settings::CommitOptions {
+                    crate::node::core::session::CommitOptions {
                         verified: Some((peer, generation)),
                         restart: false,
                     },

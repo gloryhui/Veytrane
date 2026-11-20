@@ -1,7 +1,7 @@
 //! One revision coordinator for every management entry point.
 use crate::node::api::protocol as ipc;
-use crate::node::core::forwarding;
-use crate::node::core::settings::{ConfigRecord, NodeSettings};
+use crate::node::composition::forwarding;
+use crate::node::composition::settings::{ConfigRecord, NodeSettings};
 use crate::node::host::agent::Agent;
 use crate::node::local::paths::AgentPaths;
 use serde_json::{Value, json};
@@ -10,7 +10,7 @@ use std::{
     path::Path,
 };
 
-use crate::node::core::settings::CommitOptions;
+use crate::node::core::session::CommitOptions;
 
 pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> io::Result<T> {
     let mut bytes = zeroize::Zeroizing::new(Vec::new());
@@ -236,11 +236,15 @@ impl Agent {
             last_request: Some((id.into(), digest.into())),
             settings,
         };
-        // The actor writes the commit root, then publishes policy under the
-        // same event-loop turn. No grant is published on disk failure.
+        record.validate().map_err(|e| e.to_string())?;
+        let policy = record.settings.runtime_policy().map_err(|e| e.to_string())?;
+        let path = self.paths.config();
+        let commit_record = record.clone();
         let outcome = match self
             .control
-            .commit_agent_policy(record.clone(), self.paths.config(), options)
+            .commit_policy(policy, options, move || {
+                crate::storage::atomic::write_json(&path, &commit_record).map_err(|e| e.to_string())
+            })
             .await
         {
             Ok(outcome) => outcome,

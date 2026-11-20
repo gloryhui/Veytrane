@@ -2,7 +2,7 @@
 
 use crate::error::{Error, Result};
 use crate::node::core::control::NodeControl;
-use crate::node::core::settings::NodeSettings;
+use super::settings::NodeSettings;
 use veytrane_tcp::forwarding::{PeerConnection, Prepared};
 
 pub(crate) use veytrane_tcp::forwarding::ForwardManager;

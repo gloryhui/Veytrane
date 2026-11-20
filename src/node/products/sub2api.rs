@@ -1,11 +1,11 @@
 //! Distribution mode: per-device identities and a shared, service-scoped secret.
 //! Neither process starts the general Agent, file store, Web UI or IPC server.
 use super::runtime::{authorized_peers, log_connection_event, stop_control};
+use crate::node::composition::forwarding::{self, ForwardManager};
+use crate::node::composition::settings::NodeSettings;
 use crate::node::core::config::{AllowedForwardTarget, TunnelRule};
 use crate::node::core::control;
-use crate::node::core::forwarding::{self, ForwardManager};
 use crate::node::core::remote_auth::{RemoteVerifier, SecretPassword};
-use crate::node::core::settings::NodeSettings;
 use crate::storage::permissions as private_access;
 use crate::{
     identity::{Identity, NodeId},
@@ -161,7 +161,7 @@ pub async fn run_gateway(root: &Path) -> io::Result<()> {
         let mut policy = crate::node::products::recovery::GatewayRecovery::default();
         let mut interval = tokio::time::interval(Duration::from_millis(250));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let host_recovery = crate::node::host::recovery::wait(control.clone());
+        let host_recovery = super::platform_recovery::wait(control.clone());
         tokio::pin!(host_recovery);
         let mut status_tick = Instant::now() - Duration::from_secs(2);
         println!("专用网关网络代次 {generation}：重新收集网络地址并登记信令。");
@@ -244,7 +244,7 @@ pub async fn run_client(embedded_profile: &str) -> io::Result<()> {
         control
             .connect_peer_with_password(peer, password.clone())
             .map_err(error)?;
-        let recovery = crate::node::host::recovery::wait(control.clone());
+        let recovery = super::platform_recovery::wait(control.clone());
         tokio::pin!(recovery);
         let mut interval = tokio::time::interval(Duration::from_secs(3));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);

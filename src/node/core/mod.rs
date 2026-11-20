@@ -10,7 +10,6 @@ pub mod diagnostics;
 pub mod dispatch;
 #[cfg(feature = "agent-files")]
 pub(crate) mod drop_send;
-pub(crate) mod forwarding;
 pub(crate) mod frame_budget;
 #[cfg(feature = "agent-files")]
 pub(crate) mod incremental;
@@ -22,7 +21,6 @@ pub mod receive_policy;
 pub mod remote_auth;
 pub mod services;
 pub(crate) mod session;
-pub mod settings;
 pub mod snapshot;
 #[cfg(feature = "agent-files")]
 pub(crate) mod space_budget;

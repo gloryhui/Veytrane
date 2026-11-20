@@ -5,7 +5,7 @@ use p2p_file::{
     node::{
         api::client::AgentClient,
         api::protocol::{Command as Api, Request, Response},
-        core::settings::ConfigRecord,
+        composition::settings::ConfigRecord,
         local::paths::AgentPaths,
     },
 };

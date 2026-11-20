@@ -10,14 +10,15 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-LAYERS = {"core", "local", "api", "host", "adapters", "products"}
+LAYERS = {"core", "local", "api", "host", "adapters", "composition", "products"}
 ALLOWED = {
     "core": {"core"},
     "local": {"local"},
     "api": {"core", "local", "api"},
-    "host": {"core", "local", "api", "host"},
+    "composition": {"core", "composition"},
+    "host": {"core", "local", "api", "host", "composition"},
     "adapters": {"core", "local", "api", "host", "adapters"},
-    "products": {"core", "local", "api", "host", "products"},
+    "products": {"core", "local", "api", "composition", "products"},
 }
 FOUNDATION = {"storage", "identity.rs", "instance_lock.rs", "nat", "net",
               "transport", "protocol", "discovery", "relay"}
