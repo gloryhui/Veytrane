@@ -188,24 +188,28 @@ fn actor(root: PathBuf) {
                 .as_ref()
                 .unwrap()
                 .0
+                .file_commands()
                 .send_file(peer(&v), PathBuf::from(str_field(&v, "path")))
                 .map(|_| json!(true)),
             "directory" => network
                 .as_ref()
                 .unwrap()
                 .0
+                .file_commands()
                 .send_directory(peer(&v), PathBuf::from(str_field(&v, "path")))
                 .map(|_| json!(true)),
             "pause" => network
                 .as_ref()
                 .unwrap()
                 .0
+                .file_commands()
                 .pause_task(id(&v))
                 .map(|_| json!(true)),
             "resume" => network
                 .as_ref()
                 .unwrap()
                 .0
+                .file_commands()
                 .resume_task(peer(&v), id(&v))
                 .map(|_| json!(true)),
             "limit" => {

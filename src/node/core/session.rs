@@ -433,6 +433,102 @@ pub struct NodeSessionHandle {
     lifetime: Arc<SessionLifetime>,
 }
 
+#[cfg(feature = "agent-files")]
+#[derive(Clone, Copy)]
+pub(crate) struct FileCommands<'a> {
+    commands: &'a mpsc::Sender<SessionCommand>,
+}
+
+#[cfg(feature = "agent-files")]
+impl FileCommands<'_> {
+    pub(crate) fn send_paths(
+        &self,
+        peer: NodeId,
+        sources: Vec<std::path::PathBuf>,
+    ) -> std::result::Result<(), String> {
+        let sources =
+            crate::node::core::drop_send::normalize(sources).map_err(|error| error.to_string())?;
+        self.commands
+            .try_send(SessionCommand::File(FileCommand::SendPaths {
+                peer,
+                sources,
+            }))
+            .map_err(|_| "传输命令队列已满或会话已关闭；拖入项尚未提交".into())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn send_file(
+        &self,
+        peer: NodeId,
+        source: std::path::PathBuf,
+    ) -> std::result::Result<(), String> {
+        self.commands
+            .try_send(SessionCommand::File(FileCommand::SendFile { peer, source }))
+            .map_err(|_| "传输命令队列已满或会话已关闭".into())
+    }
+
+    pub(crate) fn pause_task(&self, id: TaskId) -> std::result::Result<(), String> {
+        self.commands
+            .try_send(SessionCommand::PauseTask(id))
+            .map_err(|_| "传输命令队列已满或会话已关闭".into())
+    }
+
+    pub(crate) fn resume_task(&self, peer: NodeId, id: TaskId) -> std::result::Result<(), String> {
+        self.commands
+            .try_send(SessionCommand::File(FileCommand::Resume { peer, task: id }))
+            .map_err(|_| "传输命令队列已满或会话已关闭".into())
+    }
+
+    pub(crate) fn preview_directory(
+        &self,
+        peer: NodeId,
+        source: std::path::PathBuf,
+    ) -> std::result::Result<TaskId, String> {
+        let request = TaskId::generate();
+        self.commands
+            .try_send(SessionCommand::File(FileCommand::PreviewDirectory {
+                peer,
+                source,
+                request: request.clone(),
+            }))
+            .map_err(|_| "目录预览命令队列已满或会话已关闭".to_owned())?;
+        Ok(request)
+    }
+
+    pub(crate) fn confirm_directory(
+        &self,
+        peer: NodeId,
+        id: TaskId,
+    ) -> std::result::Result<(), String> {
+        self.commands
+            .try_send(SessionCommand::File(FileCommand::ConfirmDirectory {
+                peer,
+                request: id,
+            }))
+            .map_err(|_| "目录确认命令队列已满或会话已关闭".into())
+    }
+
+    pub(crate) fn cancel_directory_preview(&self, id: TaskId) -> std::result::Result<(), String> {
+        self.commands
+            .try_send(SessionCommand::CancelDirectoryPreview(id))
+            .map_err(|_| "目录取消命令队列已满或会话已关闭".into())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn send_directory(
+        &self,
+        peer: NodeId,
+        source: std::path::PathBuf,
+    ) -> std::result::Result<(), String> {
+        self.commands
+            .try_send(SessionCommand::File(FileCommand::SendDirectory {
+                peer,
+                source,
+            }))
+            .map_err(|_| "传输命令队列已满或会话已关闭".into())
+    }
+}
+
 struct SessionLifetime {
     stop: watch::Sender<bool>,
     done: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
@@ -478,6 +574,13 @@ impl Drop for SessionLifetime {
 }
 
 impl NodeSessionHandle {
+    #[cfg(feature = "agent-files")]
+    pub(crate) fn file_commands(&self) -> FileCommands<'_> {
+        FileCommands {
+            commands: &self.commands,
+        }
+    }
+
     /// Internal listener demand; unlike an explicit user connect this does not
     /// clear manual disconnect fences or invent a credential.
     pub(crate) fn request_peer_connection(&self, peer: NodeId) -> std::result::Result<(), String> {
@@ -722,103 +825,6 @@ impl NodeSessionHandle {
             .map_err(|_| "网络会话在停止规则前退出".to_owned())
     }
 
-    #[cfg(feature = "agent-files")]
-    pub fn send_paths(
-        &self,
-        peer: NodeId,
-        sources: Vec<std::path::PathBuf>,
-    ) -> std::result::Result<(), String> {
-        let sources =
-            crate::node::core::drop_send::normalize(sources).map_err(|error| error.to_string())?;
-        self.commands
-            .try_send(SessionCommand::File(FileCommand::SendPaths {
-                peer,
-                sources,
-            }))
-            .map_err(|_| "传输命令队列已满或会话已关闭；拖入项尚未提交".into())
-    }
-    #[allow(dead_code)] // T010 product controls call this tested backend command.
-    #[cfg(feature = "agent-files")]
-    pub fn send_file(
-        &self,
-        peer: NodeId,
-        source: std::path::PathBuf,
-    ) -> std::result::Result<(), String> {
-        self.commands
-            .try_send(SessionCommand::File(FileCommand::SendFile { peer, source }))
-            .map_err(|_| "传输命令队列已满或会话已关闭".into())
-    }
-    #[allow(dead_code)] // T010 product controls call this tested backend command.
-    #[cfg(feature = "agent-files")]
-    pub fn pause_task(
-        &self,
-        id: TaskId,
-    ) -> std::result::Result<(), String> {
-        self.commands
-            .try_send(SessionCommand::PauseTask(id))
-            .map_err(|_| "传输命令队列已满或会话已关闭".into())
-    }
-    #[allow(dead_code)] // T010 product controls call this tested backend command.
-    #[cfg(feature = "agent-files")]
-    pub fn resume_task(&self, peer: NodeId, id: TaskId) -> std::result::Result<(), String> {
-        self.commands
-            .try_send(SessionCommand::File(FileCommand::Resume { peer, task: id }))
-            .map_err(|_| "传输命令队列已满或会话已关闭".into())
-    }
-
-    #[allow(dead_code)] // T010 selection controls.
-    #[cfg(feature = "agent-files")]
-    pub fn preview_directory(
-        &self,
-        peer: NodeId,
-        source: std::path::PathBuf,
-    ) -> std::result::Result<TaskId, String> {
-        let request = TaskId::generate();
-        self.commands
-            .try_send(SessionCommand::File(FileCommand::PreviewDirectory {
-                peer,
-                source,
-                request: request.clone(),
-            }))
-            .map_err(|_| "目录预览命令队列已满或会话已关闭".to_owned())?;
-        Ok(request)
-    }
-    #[cfg(feature = "agent-files")]
-    pub fn confirm_directory(
-        &self,
-        peer: NodeId,
-        id: TaskId,
-    ) -> std::result::Result<(), String> {
-        self.commands
-            .try_send(SessionCommand::File(FileCommand::ConfirmDirectory {
-                peer,
-                request: id,
-            }))
-            .map_err(|_| "目录确认命令队列已满或会话已关闭".into())
-    }
-    #[cfg(feature = "agent-files")]
-    pub fn cancel_directory_preview(
-        &self,
-        id: TaskId,
-    ) -> std::result::Result<(), String> {
-        self.commands
-            .try_send(SessionCommand::CancelDirectoryPreview(id))
-            .map_err(|_| "目录取消命令队列已满或会话已关闭".into())
-    }
-
-    #[cfg(feature = "agent-files")]
-    pub fn send_directory(
-        &self,
-        peer: NodeId,
-        source: std::path::PathBuf,
-    ) -> std::result::Result<(), String> {
-        self.commands
-            .try_send(SessionCommand::File(FileCommand::SendDirectory {
-                peer,
-                source,
-            }))
-            .map_err(|_| "传输命令队列已满或会话已关闭".into())
-    }
     #[allow(dead_code)] // T010 controls.
     #[cfg(feature = "node-speed")]
     pub fn start_speed(

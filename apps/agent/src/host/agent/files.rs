@@ -1,6 +1,7 @@
 //! IPC operations backed by the optional file capability.
 
 use super::{Agent, Command, FilePage, NodeId};
+use crate::node::core::control::FileCommands;
 use serde_json::{Value, json};
 use std::time::Duration;
 use veytrane_files::task_model::TaskDiagnostic;
@@ -10,6 +11,7 @@ impl Agent {
     pub(super) async fn execute_files(
         &self,
         service: &TransferService,
+        commands: FileCommands<'_>,
         command: Command,
     ) -> Result<Value, String> {
         match command {
@@ -17,25 +19,22 @@ impl Agent {
                 if paths.is_empty() || paths.len() > 128 || paths.iter().any(|p| !p.is_absolute()) {
                     return Err("发送路径必须是1..128个本机绝对路径".into());
                 }
-                self.control
-                    .send_paths(NodeId::from_hex(&peer).map_err(|e| e.to_string())?, paths)?;
+                commands.send_paths(NodeId::from_hex(&peer).map_err(|e| e.to_string())?, paths)?;
                 Ok(json!({"accepted":true}))
             }
             Command::PreviewDirectory { peer, path } => {
                 crate::node::core::drop_send::validate_paths(std::slice::from_ref(&path))
                     .map_err(|e| e.to_string())?;
-                let request = self
-                    .control
+                let request = commands
                     .preview_directory(NodeId::from_hex(&peer).map_err(|e| e.to_string())?, path)?;
                 Ok(json!({"accepted":true,"request":request}))
             }
             Command::Pause { task } => {
-                self.control.pause_task(task)?;
+                commands.pause_task(task)?;
                 Ok(json!({"accepted":true}))
             }
             Command::Resume { peer, task } => {
-                self.control
-                    .resume_task(NodeId::from_hex(&peer).map_err(|e| e.to_string())?, task)?;
+                commands.resume_task(NodeId::from_hex(&peer).map_err(|e| e.to_string())?, task)?;
                 Ok(json!({"accepted":true}))
             }
             Command::Cancel { task } => {
@@ -67,7 +66,7 @@ impl Agent {
                 Ok(json!({"path":path}))
             }
             Command::ConfirmDirectory { peer, request } => {
-                self.control.confirm_directory(
+                commands.confirm_directory(
                     NodeId::from_hex(&peer).map_err(|e| e.to_string())?,
                     request.clone(),
                 )?;
@@ -75,7 +74,7 @@ impl Agent {
                 Ok(json!({"accepted":true}))
             }
             Command::CancelDirectory { request } => {
-                self.control.cancel_directory_preview(request.clone())?;
+                commands.cancel_directory_preview(request.clone())?;
                 self.previews.lock().await.retain(|(_, p)| p.id != request);
                 Ok(json!({"accepted":true}))
             }

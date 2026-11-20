@@ -1166,6 +1166,7 @@ async fn incremental_preview_confirm_and_cancel_run_through_authenticated_sessio
         .unwrap()
     }
     let request = ha
+        .file_commands()
         .preview_directory(b.node_id(), root.join("目录"))
         .unwrap();
     let preview = ready(&mut ea, &request).await;
@@ -1173,12 +1174,17 @@ async fn incremental_preview_confirm_and_cancel_run_through_authenticated_sessio
     assert_eq!(preview.unchanged, 1);
     assert!(a_service.snapshot().await.unwrap().is_empty());
     assert!(b_service.snapshot().await.unwrap().is_empty());
-    ha.cancel_directory_preview(preview.id).unwrap();
+    ha.file_commands()
+        .cancel_directory_preview(preview.id)
+        .unwrap();
     let request = ha
+        .file_commands()
         .preview_directory(b.node_id(), root.join("目录"))
         .unwrap();
     let preview = ready(&mut ea, &request).await;
-    ha.confirm_directory(b.node_id(), preview.id).unwrap();
+    ha.file_commands()
+        .confirm_directory(b.node_id(), preview.id)
+        .unwrap();
     time::timeout(Duration::from_secs(10), async {
         loop {
             let records = a_service.snapshot().await.unwrap();
@@ -1230,15 +1236,21 @@ async fn unauthorized_file_directory_resume_and_speed_commands_cannot_start_busi
     let peer = Identity::generate().node_id();
     let source = root.join("source.txt");
     std::fs::write(&source, b"sensitive").unwrap();
-    handle.send_file(peer, source).unwrap();
-    handle.send_directory(peer, root.join("receive")).unwrap();
+    handle.file_commands().send_file(peer, source).unwrap();
     handle
+        .file_commands()
+        .send_directory(peer, root.join("receive"))
+        .unwrap();
+    handle
+        .file_commands()
         .preview_directory(peer, root.join("receive"))
         .unwrap();
     handle
+        .file_commands()
         .confirm_directory(peer, crate::node::core::task_model::TaskId::generate())
         .unwrap();
     handle
+        .file_commands()
         .resume_task(peer, crate::node::core::task_model::TaskId::generate())
         .unwrap();
     handle
@@ -1636,12 +1648,15 @@ async fn directional_business_fixture(relay_enabled: bool) {
     );
     let source_b = root.join("reverse.bin");
     std::fs::write(&source_b, b"reverse").unwrap();
-    hb.send_paths(
-        a.node_id(),
-        vec![source_b.clone(), root.join("must-not-be-read")],
-    )
-    .unwrap();
-    hb.send_file(a.node_id(), source_b.clone()).unwrap();
+    hb.file_commands()
+        .send_paths(
+            a.node_id(),
+            vec![source_b.clone(), root.join("must-not-be-read")],
+        )
+        .unwrap();
+    hb.file_commands()
+        .send_file(a.node_id(), source_b.clone())
+        .unwrap();
     hb.start_speed(
         a.node_id(),
         crate::node::core::config::SpeedtestDirection::Upload,
@@ -1682,7 +1697,7 @@ async fn directional_business_fixture(relay_enabled: bool) {
     let source_a = root.join("forward.bin");
     std::fs::write(&source_a, b"forward").unwrap();
     let (cleanup_reached, cleanup_release) = service_a.gate_test_send_cleanup();
-    ha.send_file(b.node_id(), source_a).unwrap();
+    ha.file_commands().send_file(b.node_id(), source_a).unwrap();
     time::timeout(Duration::from_secs(10), async {
         while !service_a
             .snapshot()
@@ -2124,9 +2139,11 @@ async fn auto_resume_real_sessions_restore_same_task_over_fresh_authenticated_tr
         let (_release, wait) = oneshot::channel();
         *sb.checkpoint_gate.lock().unwrap() = Some((reached, wait));
         if directory {
-            ha.send_directory(b.node_id(), source_dir).unwrap();
+            ha.file_commands()
+                .send_directory(b.node_id(), source_dir)
+                .unwrap();
         } else {
-            ha.send_file(b.node_id(), source).unwrap();
+            ha.file_commands().send_file(b.node_id(), source).unwrap();
         }
         time::timeout(Duration::from_secs(10), gate)
             .await
@@ -3169,17 +3186,18 @@ async fn native_drop_batch_command_sends_mixed_selection_to_the_bound_peer() {
     let directory = root.join("目录");
     std::fs::create_dir_all(directory.join("空目录")).unwrap();
     std::fs::write(directory.join("子.bin"), b"directory child").unwrap();
-    ha.send_paths(
-        ib.node_id(),
-        vec![
-            source.clone(),
-            source,
-            directory.join("子.bin"),
-            directory.join("空目录"),
-            directory,
-        ],
-    )
-    .unwrap();
+    ha.file_commands()
+        .send_paths(
+            ib.node_id(),
+            vec![
+                source.clone(),
+                source,
+                directory.join("子.bin"),
+                directory.join("空目录"),
+                directory,
+            ],
+        )
+        .unwrap();
     time::timeout(Duration::from_secs(10), async {
         let mut changed = a.subscribe();
         loop {
@@ -3258,7 +3276,7 @@ async fn session_command_sends_to_passive_peer_using_owned_transfer_service() {
     let bytes = vec![55; 1024 * 1024];
     let source = root.join("selected.bin");
     std::fs::write(&source, &bytes).unwrap();
-    ha.send_file(ib.node_id(), source).unwrap();
+    ha.file_commands().send_file(ib.node_id(), source).unwrap();
     time::timeout(Duration::from_secs(10), async {
         let mut changed = a.subscribe();
         loop {
@@ -3962,8 +3980,11 @@ async fn revoking_trust_interrupts_both_file_directions_until_fresh_authenticati
     let bytes = vec![0x5a; 1024 * 1024];
     std::fs::write(root.join("trusted.bin"), &bytes).unwrap();
     std::fs::write(root.join("password.bin"), &bytes).unwrap();
-    ha.send_file(b.node_id(), root.join("trusted.bin")).unwrap();
-    hb.send_file(a.node_id(), root.join("password.bin"))
+    ha.file_commands()
+        .send_file(b.node_id(), root.join("trusted.bin"))
+        .unwrap();
+    hb.file_commands()
+        .send_file(a.node_id(), root.join("password.bin"))
         .unwrap();
     time::timeout(Duration::from_secs(10), async {
         a_wait.await.unwrap();
@@ -4028,7 +4049,8 @@ async fn revoking_trust_interrupts_both_file_directions_until_fresh_authenticati
         .into_iter()
         .find(|task| task.direction() == crate::node::core::task_model::TaskDirection::Send)
         .unwrap();
-    hb.resume_task(a.node_id(), resume.task_id().clone())
+    hb.file_commands()
+        .resume_task(a.node_id(), resume.task_id().clone())
         .unwrap();
     time::timeout(Duration::from_secs(10), async {
         loop {

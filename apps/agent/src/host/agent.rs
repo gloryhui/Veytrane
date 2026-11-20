@@ -231,7 +231,9 @@ impl Agent {
             ) => {
                 #[cfg(feature = "agent-files")]
                 if let Some(service) = &self.file_service {
-                    return self.execute_files(service, request).await;
+                    return self
+                        .execute_files(service, self.control.file_commands(), request)
+                        .await;
                 }
                 #[cfg(not(feature = "agent-files"))]
                 drop(request);

@@ -10,6 +10,8 @@ use crate::error::{Error, Result};
 use crate::identity::{Identity, NodeId};
 #[cfg(feature = "agent-files")]
 pub use crate::node::core::drop_send::Admission as PathAdmission;
+#[cfg(feature = "agent-files")]
+pub(crate) use crate::node::core::session::FileCommands;
 pub use crate::node::core::session::SessionEvent;
 #[cfg(test)]
 pub use crate::node::core::session::change_trusted_device;
