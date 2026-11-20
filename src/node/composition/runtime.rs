@@ -50,20 +50,25 @@ pub fn spawn_with_storage(
     mut config: NodeSessionConfig,
     tasks: &Path,
     receive_root: PathBuf,
-) -> crate::error::Result<(NodeControl, ControlEvents)> {
+) -> crate::error::Result<(NodeControl, ControlEvents, Option<TransferService>)> {
     if !config.enable_files {
-        return spawn(identity, config).map_err(crate::error::Error::Io);
+        return spawn(identity, config)
+            .map(|(control, events)| (control, events, None))
+            .map_err(crate::error::Error::Io);
     }
     let shared = SharedRuntime::new();
     let (store, _) = TaskStore::open(tasks)
         .map_err(|error| crate::error::Error::Protocol(error.to_string()))?;
     let speed = config.enable_speed.then(|| shared.speed());
-    config.transfer = Some(TransferService::new_with_shared(
+    let file_service = TransferService::new_with_shared(
         store,
         receive_root,
         shared.activity,
         shared.changed,
         shared.frame_budget,
-    ));
-    control::spawn(identity, config, speed).map_err(crate::error::Error::Io)
+    );
+    config.transfer = Some(file_service.clone());
+    control::spawn(identity, config, speed)
+        .map(|(control, events)| (control, events, Some(file_service)))
+        .map_err(crate::error::Error::Io)
 }

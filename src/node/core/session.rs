@@ -1318,14 +1318,6 @@ pub(crate) fn spawn(
     }
     let max_peers = config.max_peers;
     let speed = speed.filter(|_| config.enable_speed);
-    #[cfg(feature = "agent-files")]
-    let control = crate::node::core::control::ControlState::new_with_files(
-        identity.node_id(),
-        config.transfer.clone(),
-        speed,
-        max_peers,
-    );
-    #[cfg(not(feature = "agent-files"))]
     let control = crate::node::core::control::ControlState::new(
         identity.node_id(),
         speed,

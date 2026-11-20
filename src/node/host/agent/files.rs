@@ -4,9 +4,14 @@ use super::{Agent, Command, FilePage, NodeId};
 use serde_json::{Value, json};
 use std::time::Duration;
 use veytrane_files::task_model::TaskDiagnostic;
+use veytrane_files::transfer::TransferService;
 
 impl Agent {
-    pub(super) async fn execute_files(&self, command: Command) -> Result<Value, String> {
+    pub(super) async fn execute_files(
+        &self,
+        service: &TransferService,
+        command: Command,
+    ) -> Result<Value, String> {
         match command {
             Command::Send { peer, paths } => {
                 if paths.is_empty() || paths.len() > 128 || paths.iter().any(|p| !p.is_absolute()) {
@@ -34,7 +39,7 @@ impl Agent {
                 Ok(json!({"accepted":true}))
             }
             Command::Cancel { task } => {
-                self.control
+                service
                     .cancel_task(task)
                     .await
                     .map_err(|e| e.to_string())?;
@@ -44,20 +49,21 @@ impl Agent {
                 if tasks.is_empty() || tasks.len() > 128 {
                     return Err("每次只能清理1..128个已完成任务".into());
                 }
-                let removed = self
-                    .control
+                let removed = service
                     .remove_completed_history(tasks.into_iter().collect())
                     .map_err(|e| e.to_string())?;
                 Ok(json!({"removed":removed}))
             }
             Command::DeleteReceivedFile { task } => {
-                self.control
+                service
                     .delete_completed_receive_file(&task)
                     .map_err(|e| e.to_string())?;
                 Ok(json!({"deleted":true}))
             }
             Command::TaskLocation { task } => {
-                let path = self.control.reveal_task(&task).map_err(|e| e.to_string())?;
+                let path = service
+                    .reveal_task(&veytrane_files::task_location::Selection::Task(task))
+                    .map_err(|e| e.to_string())?;
                 Ok(json!({"path":path}))
             }
             Command::ConfirmDirectory { peer, request } => {
@@ -79,8 +85,10 @@ impl Agent {
 
     pub(super) async fn file_page(&self, offset: usize) -> Result<FilePage, String> {
         let snapshot = self
-            .control
-            .task_snapshot()
+            .file_service
+            .as_ref()
+            .map(|service| service.file_snapshot())
+            .transpose()
             .map_err(|error| error.to_string())?;
         let mut page = FilePage::default();
         if let Some(snapshot) = snapshot {

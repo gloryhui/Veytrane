@@ -118,8 +118,6 @@ pub(crate) struct ControlState {
     events: broadcast::Sender<SequencedEvent>,
     trust_sources: Arc<Mutex<BTreeMap<String, crate::node::core::authorization::TrustSource>>>,
     max_peers: usize,
-    #[cfg(feature = "agent-files")]
-    pub(crate) transfer: Option<crate::node::core::transfer::TransferService>,
     pub(crate) speed: Option<crate::node::core::speed::SpeedService>,
 }
 
@@ -179,21 +177,8 @@ impl ControlState {
             events,
             trust_sources: Default::default(),
             max_peers,
-            #[cfg(feature = "agent-files")]
-            transfer: None,
             speed,
         }
-    }
-    #[cfg(feature = "agent-files")]
-    pub(crate) fn new_with_files(
-        identity: NodeId,
-        transfer: Option<crate::node::core::transfer::TransferService>,
-        speed: Option<crate::node::core::speed::SpeedService>,
-        max_peers: usize,
-    ) -> Self {
-        let mut state = Self::new(identity, speed, max_peers);
-        state.transfer = transfer;
-        state
     }
 
     pub(crate) fn observe(&self, event: &SessionEvent) {
@@ -482,27 +467,6 @@ impl NodeControl {
         };
         result.map_err(Error::Protocol)
     }
-    #[cfg(feature = "agent-files")]
-    pub(crate) fn task_snapshot(
-        &self,
-    ) -> Result<Option<veytrane_files::task_snapshot::FileSnapshot>> {
-        self.control
-            .transfer
-            .as_ref()
-            .map(|service| service.file_snapshot())
-            .transpose()
-    }
-    #[cfg_attr(not(feature = "agent-files"), allow(dead_code))]
-    pub(crate) fn has_file_service(&self) -> bool {
-        #[cfg(feature = "agent-files")]
-        {
-            self.control.transfer.is_some()
-        }
-        #[cfg(not(feature = "agent-files"))]
-        {
-            false
-        }
-    }
     pub(crate) fn speed_snapshots(
         &self,
     ) -> std::collections::HashMap<NodeId, crate::node::core::speed::SpeedSnapshot> {
@@ -511,63 +475,6 @@ impl NodeControl {
             .as_ref()
             .map(|service| service.snapshots())
             .unwrap_or_default()
-    }
-}
-
-impl NodeControl {
-    #[cfg(feature = "agent-files")]
-    fn file_service(&self) -> Result<&crate::node::core::transfer::TransferService> {
-        self.control
-            .transfer
-            .as_ref()
-            .ok_or_else(|| Error::Protocol("文件服务未启用".into()))
-    }
-    #[cfg(feature = "agent-files")]
-    pub async fn cancel_task(&self, task: TaskId) -> Result<()> {
-        self.file_service()?.cancel_task(task).await
-    }
-    #[cfg(feature = "agent-files")]
-    pub fn set_auto_resume(&self, enabled: bool) -> Result<()> {
-        self.file_service()?.set_auto_resume(enabled);
-        Ok(())
-    }
-    #[cfg(feature = "agent-files")]
-    pub fn set_send_limit(&self, limit: u8) -> Result<()> {
-        self.file_service()?.set_send_limit(limit)
-    }
-    #[cfg(feature = "agent-files")]
-    pub fn set_file_limits(&self, limits: crate::node::core::bandwidth::FileLimits) -> Result<()> {
-        self.file_service()?.set_file_limits(limits)
-    }
-    #[cfg(feature = "agent-files")]
-    pub fn set_receive_root(&self, root: PathBuf) -> Result<()> {
-        self.file_service()?.set_receive_root(root);
-        Ok(())
-    }
-    #[cfg(feature = "agent-files")]
-    pub fn set_receive_safety_mib(&self, value: u16) -> Result<()> {
-        self.file_service()?.set_receive_safety_mib(value)
-    }
-    #[cfg(feature = "agent-files")]
-    pub fn remove_completed_task(&self, task: &TaskId) -> Result<()> {
-        self.file_service()?.remove_completed_task(task)
-    }
-    #[cfg(feature = "agent-files")]
-    pub fn remove_completed_history(
-        &self,
-        tasks: std::collections::BTreeSet<TaskId>,
-    ) -> Result<Vec<TaskId>> {
-        self.file_service()?.remove_completed_history(tasks)
-    }
-    #[cfg(feature = "agent-files")]
-    pub fn delete_completed_receive_file(&self, task: &TaskId) -> Result<()> {
-        self.file_service()?.delete_completed_receive_file(task)
-    }
-    #[cfg(feature = "agent-files")]
-    pub fn reveal_task(&self, task: &TaskId) -> Result<PathBuf> {
-        self.file_service()?.reveal_task(
-            &veytrane_files::task_location::Selection::Task(task.clone()),
-        )
     }
 }
 

@@ -46,6 +46,8 @@ struct ActiveCapabilities {
 }
 pub struct Agent {
     pub(crate) control: NodeControl,
+    #[cfg(feature = "agent-files")]
+    pub(super) file_service: Option<veytrane_files::transfer::TransferService>,
     pub(crate) config: Mutex<ConfigRecord>,
     pub(crate) paths: AgentPaths,
     epoch: String,
@@ -206,8 +208,8 @@ impl Agent {
                     | Command::CancelDirectory { .. }
             ) => {
                 #[cfg(feature = "agent-files")]
-                if self.control.has_file_service() {
-                    return self.execute_files(request).await;
+                if let Some(service) = &self.file_service {
+                    return self.execute_files(service, request).await;
                 }
                 #[cfg(not(feature = "agent-files"))]
                 drop(request);
@@ -514,30 +516,31 @@ async fn run_with_recovery(
         tcp: session.enable_tcp,
     };
     #[cfg(feature = "agent-files")]
-    let (control, mut raw) = if session.enable_files {
+    let (control, mut raw, file_service) = if session.enable_files {
         crate::storage::permissions::ensure_directory(&record.settings.receive_root)?;
-        let (control, events) = runtime::spawn_with_storage(
+        let (control, events, file_service) = runtime::spawn_with_storage(
             identity,
             session,
             &paths.tasks(),
             record.settings.receive_root.clone(),
         )
         .map_err(io::Error::other)?;
-        control
-            .set_auto_resume(record.settings.auto_resume)
-            .map_err(io::Error::other)?;
-        control
-            .set_send_limit(record.settings.send_concurrency)
-            .map_err(io::Error::other)?;
-        control
-            .set_file_limits(record.settings.file_limits)
-            .map_err(io::Error::other)?;
-        control
-            .set_receive_safety_mib(record.settings.receive_safety_mib)
-            .map_err(io::Error::other)?;
-        (control, events)
+        if let Some(service) = &file_service {
+            service.set_auto_resume(record.settings.auto_resume);
+            service
+                .set_send_limit(record.settings.send_concurrency)
+                .map_err(io::Error::other)?;
+            service
+                .set_file_limits(record.settings.file_limits)
+                .map_err(io::Error::other)?;
+            service
+                .set_receive_safety_mib(record.settings.receive_safety_mib)
+                .map_err(io::Error::other)?;
+        }
+        (control, events, file_service)
     } else {
-        runtime::spawn(identity, session)?
+        let (control, events) = runtime::spawn(identity, session)?;
+        (control, events, None)
     };
     #[cfg(not(feature = "agent-files"))]
     let (control, mut raw) = runtime::spawn(identity, session)?;
@@ -547,6 +550,8 @@ async fn run_with_recovery(
     let (_, mut events) = control.subscribe().map_err(io::Error::other)?;
     let agent = Arc::new(Agent {
         control,
+        #[cfg(feature = "agent-files")]
+        file_service,
         config: Mutex::new(record),
         paths: paths.clone(),
         epoch: format!("{:032x}", rand::random::<u128>()),

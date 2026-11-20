@@ -241,7 +241,7 @@ impl Agent {
         let path = self.paths.config();
         let commit_record = record.clone();
         #[cfg(feature = "agent-files")]
-        let file_service = self.control.control.transfer.clone();
+        let file_service = self.file_service.clone();
         let outcome = match self
             .control
             .commit_policy(policy, options, move || {
