@@ -1773,7 +1773,7 @@ impl TransferService {
             let mut measurements = self.measurements.lock().unwrap();
             measurements.retain(store.list());
             let recovery = self.recovery.lock().unwrap();
-            let tasks = store
+            store
                 .list()
                 .iter()
                 .map(|record| {
@@ -1789,8 +1789,7 @@ impl TransferService {
                         ),
                     )
                 })
-                .collect::<Vec<_>>();
-            tasks
+                .collect::<Vec<_>>()
         };
         tasks.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)));
         Ok(FileSnapshot {
