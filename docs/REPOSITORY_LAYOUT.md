@@ -44,7 +44,7 @@ src/main.rs → 独立 CLI
 | `crates/veytrane-speed` | 测速控制、数据流、租约及结果。 |
 | `crates/veytrane-tcp` | TCP 规则校验、流配额、监听和 QUIC 字节桥接。 |
 
-`composition/settings.rs` 定义当前 `node.json`。宿主验证并投影策略，提交一次性持久化操作。会话 actor 在同一事务点确认连接代际、写盘并发布有效授权。`core/config.rs` 还保留共享规则校验、测速类型和会话配置读写。
+`composition/settings.rs` 定义当前 `node.json`。宿主验证并投影策略，提交一次性持久化操作。会话 actor 在同一事务点确认连接代际、写盘并发布有效授权。`core/config.rs` 提供共享校验及运行类型，旧桌面配置读写和旧信任编辑路径保留在回归测试中。
 
 `core/process_tests.rs` 保留原先位于旧桌面目录的真实进程业务回归，直接依赖核心，随 node 特性测试执行，全部使用 P2PN v2 协商及统一分发器。
 
