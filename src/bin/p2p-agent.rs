@@ -1,6 +1,9 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 use clap::Parser;
-use p2p_file::node::{adapters::cli as management_cli, host::agent, local::paths::AgentPaths};
+use p2p_file::node::{
+    host::{agent, configuration},
+    local::paths::AgentPaths,
+};
 use std::path::PathBuf;
 #[derive(Parser)]
 #[command(about = "Veytrane Agent · 无图形界面的可信设备互联节点", version)]
@@ -50,11 +53,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let paths = AgentPaths::new(&root)?;
     if args.init {
-        println!("{}", management_cli::initialize(&paths)?);
+        println!("{}", configuration::initialize(&paths)?);
         return Ok(());
     }
     if args.initialize && !paths.config().try_exists()? {
-        management_cli::initialize(&paths)?;
+        configuration::initialize(&paths)?;
     }
     if let Some(path) = args.diagnostic_log.as_deref() {
         let seconds = args.diagnostic_seconds.unwrap_or(90);

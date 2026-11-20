@@ -1,15 +1,15 @@
 //! Typed local management; never starts a second networking runtime.
 use crate::node::api::client::AgentClient;
-use crate::node::api::protocol::{self as ipc, Command, Request, Response};
-use crate::node::core::settings::{ConfigRecord, NodeSettings};
-use crate::node::core::task_model::TaskId;
+use crate::node::api::protocol::{Command, Request, Response};
+pub use crate::node::host::configuration::{initialize, offline_apply, read_json};
 use crate::node::local::paths::AgentPaths;
 use clap::{Parser, Subcommand};
-use serde_json::{Value, json};
+use serde_json::json;
 use std::{
     io::{self, Read},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
+use veytrane_node::operation_id::TaskId;
 
 #[derive(Parser)]
 #[command(about = "Veytrane Node · 管理同一后台 Agent", version)]
@@ -130,21 +130,6 @@ pub enum Action {
     },
     Stop,
 }
-pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> io::Result<T> {
-    let mut bytes = zeroize::Zeroizing::new(Vec::new());
-    let input: Box<dyn Read> = if path == Path::new("-") {
-        Box::new(io::stdin())
-    } else {
-        Box::new(std::fs::File::open(path)?)
-    };
-    input
-        .take(ipc::FRAME_LIMIT as u64 + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() > ipc::FRAME_LIMIT {
-        return Err(io::Error::other("输入超过1MiB"));
-    }
-    serde_json::from_slice(&bytes).map_err(io::Error::other)
-}
 fn password_stdin() -> io::Result<String> {
     let mut bytes = zeroize::Zeroizing::new(Vec::new());
     io::stdin().take(1025).read_to_end(&mut bytes)?;
@@ -153,66 +138,6 @@ fn password_stdin() -> io::Result<String> {
     }
     let value = String::from_utf8(bytes.to_vec()).map_err(io::Error::other)?;
     Ok(value.trim_end_matches(['\r', '\n']).to_owned())
-}
-pub fn initialize(paths: &AgentPaths) -> io::Result<Value> {
-    let _lock =
-        crate::instance_lock::InstanceLock::acquire(&paths.lock()).map_err(io::Error::other)?;
-    if paths.config().try_exists()? {
-        return Err(io::Error::other("节点配置已存在"));
-    }
-    let identity =
-        crate::identity::Identity::load_or_create(&paths.identity()).map_err(io::Error::other)?;
-    let _identity = AgentPaths::identity_lock(identity.node_id())?;
-    let receive = paths.root.join("receive");
-    ConfigRecord::initialize(&paths.config(), receive).map_err(io::Error::other)?;
-    Ok(json!({"node_id":identity.node_id().to_hex(),"config":paths.config()}))
-}
-pub fn offline_apply(paths: &AgentPaths, file: &Path, expected: u64) -> io::Result<Value> {
-    let _lock =
-        crate::instance_lock::InstanceLock::acquire(&paths.lock()).map_err(io::Error::other)?;
-    let identity = crate::identity::Identity::load(&paths.identity()).map_err(io::Error::other)?;
-    let _identity = AgentPaths::identity_lock(identity.node_id())?;
-    let mut record = ConfigRecord::load(&paths.config()).map_err(io::Error::other)?;
-    if record.revision != expected {
-        return Err(io::Error::other(format!(
-            "revision_conflict: 当前revision为{}",
-            record.revision
-        )));
-    }
-    let mut value: Value = read_json(file)?;
-    let object = value
-        .as_object_mut()
-        .ok_or_else(|| io::Error::other("配置草稿必须是对象"))?;
-    if object.contains_key("remote_auth") {
-        return Err(io::Error::other("草稿不得包含验证器"));
-    }
-    object.insert(
-        "remote_auth".into(),
-        serde_json::to_value(&record.settings.remote_auth).map_err(io::Error::other)?,
-    );
-    let mut settings: NodeSettings = serde_json::from_value(value).map_err(io::Error::other)?;
-    for device in &settings.trusted_devices {
-        let source = settings
-            .trust_sources
-            .get(&device.node_id)
-            .ok_or_else(|| io::Error::other("设备缺少来源"))?;
-        if record.settings.trust_sources.get(&device.node_id) != Some(source) {
-            settings.trust_sources.insert(
-                device.node_id.clone(),
-                crate::node::core::authorization::TrustSource::Administrator,
-            );
-        }
-    }
-    settings.validate().map_err(io::Error::other)?;
-    record.settings = settings;
-    record.revision = record
-        .revision
-        .checked_add(1)
-        .ok_or_else(|| io::Error::other("revision已耗尽"))?;
-    record.last_request = None;
-    record.validate().map_err(io::Error::other)?;
-    let outcome = crate::storage::atomic::write_json(&paths.config(), &record)?;
-    Ok(json!({"revision":record.revision,"durability_warning":outcome.durability_warning}))
 }
 pub async fn run(args: Args) -> io::Result<Response> {
     let root = match args.data_dir {
