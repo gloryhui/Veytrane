@@ -46,14 +46,17 @@ use crate::node::core::network_state::{
     BeginPeerAttempt, DEFAULT_MAX_PEERS, MAX_PEER_CAPACITY, MAX_PENDING_PEERS, NetworkLifecycle,
     PeerLifecycle, PeerRegistry, reconnect_delay, should_initiate_quic,
 };
-use crate::node::core::speed::{DEFAULT_MAX_PEER_BUSINESS_STREAMS, SpeedService};
+use crate::node::core::speed::SpeedService;
 #[cfg(feature = "agent-files")]
 use veytrane_files::transfer::{FileCommand, FileCommandResult};
 
+pub(crate) mod business;
 mod direct;
 #[cfg(test)]
 mod direct_tests;
 mod recovery;
+mod test_support;
+use business::{BusinessContext, BusinessHandler};
 
 const COMMAND_CAPACITY: usize = 64;
 const EVENT_CAPACITY: usize = 128;
@@ -199,7 +202,7 @@ fn is_current_signal_generation(current: u64, result_generation: u64) -> bool {
     current == result_generation
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct NodeSessionConfig {
     pub direct: crate::node::core::connectivity::DirectSettings,
     pub service_ids: HashMap<String, String>,
@@ -1239,39 +1242,47 @@ type TunnelTaskResult = (String, std::result::Result<(), String>);
 type TunnelTaskJoin = Option<std::result::Result<TunnelTaskResult, tokio::task::JoinError>>;
 
 #[cfg(test)]
+fn default_test_speed() -> SpeedService {
+    let (changed, _) = watch::channel(0);
+    let activity = crate::node::core::activity::Activity::new(changed.clone());
+    SpeedService::new(
+        activity,
+        changed,
+        crate::node::core::frame_budget::FrameBudget::default(),
+    )
+}
+
+#[cfg(test)]
 pub(crate) fn spawn_for_test(
     identity: Identity,
     config: NodeSessionConfig,
 ) -> std::io::Result<(NodeSessionHandle, mpsc::Receiver<SessionEvent>)> {
-    let speed = if config.enable_speed {
+    let speed = config.enable_speed.then(|| {
         #[cfg(feature = "agent-files")]
         if let Some(service) = config.transfer.as_ref() {
             let (activity, changed, frame_budget) = service.shared_parts();
-            return spawn(
-                identity,
-                config,
-                Some(SpeedService::new(activity, changed, frame_budget)),
-            );
+            return SpeedService::new(activity, changed, frame_budget);
         }
-        let (changed, _) = watch::channel(0);
-        let activity = crate::node::core::activity::Activity::new(changed.clone());
-        Some(SpeedService::new(
-            activity,
-            changed,
-            crate::node::core::frame_budget::FrameBudget::default(),
-        ))
-    } else {
-        None
-    };
-    spawn(identity, config, speed)
+        default_test_speed()
+    });
+    test_support::spawn(identity, config, speed)
+}
+
+pub(crate) struct SessionServices<B> {
+    pub speed: Option<SpeedService>,
+    pub business: Arc<B>,
+    pub tcp_streams: Arc<veytrane_tcp::ForwardStreamOwner>,
 }
 
 /// Start the assembled session on its dedicated Tokio runtime.
-pub(crate) fn spawn(
+pub(crate) fn spawn<B>(
     identity: Identity,
     config: NodeSessionConfig,
-    speed: Option<SpeedService>,
-) -> std::io::Result<(NodeSessionHandle, mpsc::Receiver<SessionEvent>)> {
+    mut services: SessionServices<B>,
+) -> std::io::Result<(NodeSessionHandle, mpsc::Receiver<SessionEvent>)>
+where
+    B: BusinessHandler,
+{
     if config.service_ids.len() > 512 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -1307,15 +1318,15 @@ pub(crate) fn spawn(
     }
     crate::node::core::trusted_devices::validate(&config.trusted_devices)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    if config.enable_speed && speed.is_none() {
+    if config.enable_speed && services.speed.is_none() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "测速服务未装配",
         ));
     }
     let max_peers = config.max_peers;
-    let speed = speed.filter(|_| config.enable_speed);
-    let speed_available = speed.is_some();
+    services.speed = services.speed.filter(|_| config.enable_speed);
+    let speed_available = services.speed.is_some();
     let control = crate::node::core::control::ControlState::new(identity.node_id(), max_peers);
     control.set_trust_sources(&config.trust_sources);
     let runtime_control = control.clone();
@@ -1345,20 +1356,20 @@ pub(crate) fn spawn(
                         run_session(
                             identity,
                             config,
-                            speed,
-                            session_command_tx,
-                            command_rx,
-                            SessionPolicies {
+                            services,
+                            SessionChannels {
+                                command_tx: session_command_tx,
+                                commands: command_rx,
                                 targets: runtime_allowed_targets,
                                 resources: runtime_resources,
+                                shutdown: stopped,
+                                events: SessionEvents::new(
+                                    event_tx.clone(),
+                                    event_shutdown,
+                                    runtime_control,
+                                    max_peers,
+                                ),
                             },
-                            stopped,
-                            SessionEvents::new(
-                                event_tx.clone(),
-                                event_shutdown,
-                                runtime_control,
-                                max_peers,
-                            ),
                         )
                         .await;
                         #[cfg(feature = "agent-files")]
@@ -1396,25 +1407,36 @@ pub(crate) fn spawn(
     ))
 }
 
-struct SessionPolicies {
+struct SessionChannels {
+    command_tx: mpsc::Sender<SessionCommand>,
+    commands: mpsc::Receiver<SessionCommand>,
     targets: watch::Sender<Vec<crate::node::core::config::AllowedForwardTarget>>,
     resources: watch::Sender<crate::node::core::authorization::ResourcePolicy>,
+    shutdown: watch::Receiver<bool>,
+    events: SessionEvents,
 }
 
-async fn run_session(
+async fn run_session<B>(
     identity: Identity,
     config: NodeSessionConfig,
-    speed_service: Option<SpeedService>,
-    command_tx: mpsc::Sender<SessionCommand>,
-    mut commands: mpsc::Receiver<SessionCommand>,
-    policies: SessionPolicies,
-    mut shutdown: watch::Receiver<bool>,
-    events: SessionEvents,
-) {
-    let SessionPolicies {
+    services: SessionServices<B>,
+    channels: SessionChannels,
+) where
+    B: BusinessHandler,
+{
+    let SessionServices {
+        speed: speed_service,
+        business,
+        tcp_streams: forward_streams,
+    } = services;
+    let SessionChannels {
+        command_tx,
+        mut commands,
         targets: allowed_forward_targets,
         resources: resource_policy,
-    } = policies;
+        mut shutdown,
+        events,
+    } = channels;
     let max_peers = config.max_peers;
     let _ = events
         .send(SessionEvent::SignalSecurity {
@@ -1485,9 +1507,6 @@ async fn run_session(
         services: config.service_ids.clone(),
     };
     let service_queries = Arc::new(Semaphore::new(16));
-    let forward_streams = Arc::new(veytrane_tcp::ForwardStreamOwner::new(
-        veytrane_tcp::DEFAULT_MAX_NODE_TCP_STREAMS,
-    ));
     #[cfg(feature = "agent-files")]
     let files_enabled = config.transfer.is_some() && config.enable_files;
     #[cfg(not(feature = "agent-files"))]
@@ -4466,14 +4485,11 @@ async fn run_session(
                         .await;
                     }
                 }
-                #[cfg(feature = "agent-files")]
-                let transfer = config.transfer.clone();
-                let speed_service = speed_service.clone();
+                let business = business.clone();
                 let business_connection = connection.clone();
                 let allowed_targets = allowed_forward_targets.subscribe();
                 let resources = resource_policy.subscribe();
                 let business_events = events.clone();
-                let service_tcp_streams = forward_streams.clone();
                 peer_tasks.spawn(async move {
                     use veytrane_node::{
                         capability::{CAP_FILE_TRANSFER, CAP_SPEED_EXECUTION, CAP_TCP_TUNNEL},
@@ -4500,76 +4516,18 @@ async fn run_session(
                             return;
                         }
                     };
-                    let business_budget = (incoming.files.is_some() || incoming.speed.is_some())
-                        .then(|| Arc::new(Semaphore::new(DEFAULT_MAX_PEER_BUSINESS_STREAMS)));
-                    let handle_speed = async {
-                        if let (Some(service), Some(streams), Some(budget)) =
-                            (speed_service, incoming.speed, &business_budget)
-                        {
-                            service
-                                .serve_peer(
-                                    business_connection.clone(),
-                                    peer,
-                                    local_node,
-                                    live.clone(),
-                                    resources.clone(),
-                                    budget.clone(),
-                                    streams,
-                                )
-                                .await
-                        } else {
-                            Ok(())
-                        }
-                    };
-                    let handle_file = async {
-                        #[cfg(feature = "agent-files")]
-                        {
-                            if let (Some(service), Some(streams), Some(budget)) =
-                                (transfer, incoming.files, &business_budget)
-                            {
-                                service
-                                    .serve_files_dispatched(
-                                        business_connection.clone(),
-                                        peer,
-                                        live.clone(),
-                                        streams,
-                                        resources.clone(),
-                                        budget.clone(),
-                                    )
-                                    .await
-                            } else {
-                                Ok(())
-                            }
-                        }
-                        #[cfg(not(feature = "agent-files"))]
-                        {
-                            drop(incoming.files);
-                            Ok::<(), Error>(())
-                        }
-                    };
-                    let handle_tcp = async {
-                        if let Some(streams) = incoming.services {
-                            crate::node::core::services::serve(
-                                peer,
-                                live.clone(),
-                                allowed_targets,
-                                resources.clone(),
-                                streams,
-                                service_tcp_streams,
-                            )
-                            .await
-                        } else {
-                            Ok(())
-                        }
-                    };
-                    let (speed_result, file_result, _tcp_result, _) = tokio::join!(
-                        biased;
-                        handle_speed,
-                        handle_file,
-                        handle_tcp,
-                        business_connection.closed(),
-                    );
-                    if speed_result.is_err() || file_result.is_err() {
+                    let outcome = business
+                        .serve(BusinessContext {
+                            connection: business_connection,
+                            peer,
+                            local: local_node,
+                            authorization: live.clone(),
+                            targets: allowed_targets,
+                            resources,
+                            incoming,
+                        })
+                        .await;
+                    if outcome.report_end {
                         let _ = business_events
                             .send(SessionEvent::Diagnostic("节点业务流处理已结束".into()))
                             .await;

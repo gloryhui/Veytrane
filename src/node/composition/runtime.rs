@@ -1,10 +1,13 @@
 //! Explicit construction of the production session and its capability handles.
 
 use crate::identity::Identity;
+use crate::node::composition::business::StaticBusiness;
 use crate::node::core::control::{self, ControlEvents, NodeControl, NodeSessionConfig};
+use crate::node::core::session::SessionServices;
 use std::io;
 #[cfg(feature = "agent-files")]
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::sync::watch;
 #[cfg(feature = "agent-files")]
 use veytrane_files::{task_store::TaskStore, transfer::TransferService};
@@ -57,7 +60,19 @@ pub(crate) fn spawn_assembled(
     config: NodeSessionConfig,
 ) -> io::Result<RuntimeAssembly> {
     let speed = config.enable_speed.then(|| SharedRuntime::new().speed());
-    let (control, events) = control::spawn(identity, config, speed.clone())?;
+    let tcp_streams = Arc::new(veytrane_tcp::ForwardStreamOwner::new(
+        veytrane_tcp::DEFAULT_MAX_NODE_TCP_STREAMS,
+    ));
+    let business = Arc::new(StaticBusiness::new(speed.clone(), tcp_streams.clone()));
+    let (control, events) = control::spawn(
+        identity,
+        config,
+        SessionServices {
+            speed: speed.clone(),
+            business,
+            tcp_streams,
+        },
+    )?;
     Ok(RuntimeAssembly {
         control,
         events,
@@ -89,8 +104,24 @@ pub fn spawn_with_storage(
         shared.frame_budget,
     );
     config.transfer = Some(file_service.clone());
-    let (control, events) =
-        control::spawn(identity, config, speed.clone()).map_err(crate::error::Error::Io)?;
+    let tcp_streams = Arc::new(veytrane_tcp::ForwardStreamOwner::new(
+        veytrane_tcp::DEFAULT_MAX_NODE_TCP_STREAMS,
+    ));
+    let business = Arc::new(StaticBusiness::with_files(
+        speed.clone(),
+        Some(file_service.clone()),
+        tcp_streams.clone(),
+    ));
+    let (control, events) = control::spawn(
+        identity,
+        config,
+        SessionServices {
+            speed: speed.clone(),
+            business,
+            tcp_streams,
+        },
+    )
+    .map_err(crate::error::Error::Io)?;
     Ok(RuntimeAssembly {
         control,
         events,

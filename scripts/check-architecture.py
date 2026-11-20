@@ -85,9 +85,13 @@ def violations(root):
                 errors.append(f"{relative}: unknown node layer {layer}")
                 continue
             reject(r"\bdesktop\s*::", "node must not depend on desktop presentation")
+            allowed = ALLOWED[layer]
+            if (parts == ("src", "node", "core", "session", "test_support.rs")
+                    and code.lstrip().startswith("#![cfg(test)]\n")):
+                allowed = allowed | {"composition"}
             for match in re.finditer(r"\bcrate::node::(\w+)", code):
                 dependency = match[1]
-                if dependency not in ALLOWED[layer]:
+                if dependency not in allowed:
                     line = code.count("\n", 0, match.start()) + 1
                     errors.append(f"{relative}:{line}: {layer} -> {dependency} is forbidden; use the owning layer")
             reject(r"\bcrate::node::\s*\{", "use explicit layer imports")

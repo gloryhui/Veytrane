@@ -1558,8 +1558,8 @@ async fn directional_business_fixture(relay_enabled: bool) {
             config.network.advertise = vec![blackhole.local_addr().unwrap()];
         }
     }
-    let (ha, mut ea) = super::spawn(a.clone(), ca, Some(speed_a.clone())).unwrap();
-    let (hb, mut eb) = super::spawn(b.clone(), cb, Some(speed_b.clone())).unwrap();
+    let (ha, mut ea) = super::test_support::spawn(a.clone(), ca, Some(speed_a.clone())).unwrap();
+    let (hb, mut eb) = super::test_support::spawn(b.clone(), cb, Some(speed_b.clone())).unwrap();
     let short_a = time::timeout(Duration::from_secs(5), async {
         loop {
             if let Some(SessionEvent::ShortIdRegistered(id)) = ea.recv().await {

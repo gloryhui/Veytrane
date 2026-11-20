@@ -342,12 +342,15 @@ impl ControlEvents {
     }
 }
 
-pub(crate) fn spawn(
+pub(crate) fn spawn<B>(
     identity: Identity,
     config: NodeSessionConfig,
-    speed: Option<crate::node::core::speed::SpeedService>,
-) -> std::io::Result<(NodeControl, ControlEvents)> {
-    let (handle, receiver) = crate::node::core::session::spawn(identity, config, speed)?;
+    services: crate::node::core::session::SessionServices<B>,
+) -> std::io::Result<(NodeControl, ControlEvents)>
+where
+    B: crate::node::core::session::business::BusinessHandler,
+{
+    let (handle, receiver) = crate::node::core::session::spawn(identity, config, services)?;
     Ok((handle, ControlEvents { receiver }))
 }
 
