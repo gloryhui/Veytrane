@@ -28,6 +28,7 @@ const PAUSE_TIMEOUT: Duration = Duration::from_secs(5);
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 const WINDOW: usize = 4;
 const MAX_RECEIVE_FILES: usize = 3;
+const SELECTION_WORKERS: usize = 3;
 
 #[cfg(any(test, feature = "test-support"))]
 pub type TestGate = Arc<
@@ -53,6 +54,7 @@ pub struct TransferService {
     incremental_peers: Arc<Mutex<HashSet<NodeId>>>,
     previews: Arc<Mutex<HashMap<TaskId, crate::incremental::Pending>>>,
     preview_requests: Arc<Mutex<HashMap<NodeId, crate::incremental::Request>>>,
+    selection_workers: Arc<Semaphore>,
     comparisons: Arc<tokio::sync::Semaphore>,
     frame_budget: veytrane_node::frame_budget::FrameBudget,
     rate_origin: Instant,
@@ -104,6 +106,41 @@ struct Active {
     metadata: bool,
     pause: watch::Sender<bool>,
 }
+
+pub enum FileCommand {
+    PreviewDirectory {
+        peer: NodeId,
+        source: PathBuf,
+        request: TaskId,
+    },
+    ConfirmDirectory {
+        peer: NodeId,
+        request: TaskId,
+    },
+    SendPaths {
+        peer: NodeId,
+        sources: Vec<PathBuf>,
+    },
+    SendFile {
+        peer: NodeId,
+        source: PathBuf,
+    },
+    SendDirectory {
+        peer: NodeId,
+        source: PathBuf,
+    },
+    Resume {
+        peer: NodeId,
+        task: TaskId,
+    },
+}
+
+pub enum FileCommandResult {
+    Preview(crate::incremental::Preview),
+    SelectionQueued(usize),
+    Resumed,
+}
+
 pub struct ScheduledSend {
     pub entry: crate::queue::QueueEntry,
     generation: u64,
@@ -242,6 +279,7 @@ impl TransferService {
             incremental_peers: Default::default(),
             previews: Default::default(),
             preview_requests: Default::default(),
+            selection_workers: Arc::new(Semaphore::new(SELECTION_WORKERS)),
             comparisons: Arc::new(tokio::sync::Semaphore::new(2)),
             frame_budget,
             rate_origin: Instant::now(),
@@ -1209,6 +1247,81 @@ impl TransferService {
             }
         }
         Ok(ids)
+    }
+
+    pub async fn execute_command(
+        &self,
+        connection: Option<&Connection>,
+        command: FileCommand,
+    ) -> Result<FileCommandResult> {
+        match command {
+            FileCommand::PreviewDirectory {
+                peer,
+                source,
+                request,
+            } => {
+                let _worker = self
+                    .selection_workers
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| disk::failure("扫描任务已关闭"))?;
+                let connection = connection.ok_or_else(|| disk::failure("请先连接并授权对端"))?;
+                self.preview_directory_request(connection, peer, source, request)
+                    .await
+                    .map(FileCommandResult::Preview)
+            }
+            FileCommand::ConfirmDirectory { peer, request } => {
+                let connection = connection.ok_or_else(|| disk::failure("请先连接并授权对端"))?;
+                self.confirm_directory(connection, peer, request)
+                    .await
+                    .map(|ids| FileCommandResult::SelectionQueued(ids.len()))
+            }
+            FileCommand::SendPaths { peer, sources } => {
+                let _worker = self
+                    .selection_workers
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| disk::failure("扫描任务已关闭"))?;
+                self.select_paths(peer, sources)
+                    .await
+                    .map(|ids| FileCommandResult::SelectionQueued(ids.len()))
+            }
+            FileCommand::SendFile { peer, source } => {
+                let _worker = self
+                    .selection_workers
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| disk::failure("扫描任务已关闭"))?;
+                self.select_file(peer, source)
+                    .await
+                    .map(|_| FileCommandResult::SelectionQueued(1))
+            }
+            FileCommand::SendDirectory { peer, source } => {
+                let _worker = self
+                    .selection_workers
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| disk::failure("扫描任务已关闭"))?;
+                self.select_directory(peer, source)
+                    .await
+                    .map(|ids| FileCommandResult::SelectionQueued(ids.len()))
+            }
+            FileCommand::Resume { peer, task } => {
+                let record = self.task(task.clone()).await?;
+                if record.direction() == TaskDirection::Send {
+                    self.enqueue_tasks(peer, vec![task]).await?;
+                } else {
+                    let connection =
+                        connection.ok_or_else(|| disk::failure("请先连接任务绑定的对端"))?;
+                    self.resume(connection, peer, task).await?;
+                }
+                Ok(FileCommandResult::Resumed)
+            }
+        }
     }
     pub async fn select_file(&self, peer: NodeId, source: PathBuf) -> Result<TaskId> {
         let _selection_activity = self.acquire_file_activity(peer)?;

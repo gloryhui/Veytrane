@@ -47,6 +47,8 @@ use crate::node::core::network_state::{
     PeerLifecycle, PeerRegistry, reconnect_delay, should_initiate_quic,
 };
 use crate::node::core::speed::{DEFAULT_MAX_PEER_BUSINESS_STREAMS, SpeedService};
+#[cfg(feature = "agent-files")]
+use veytrane_files::transfer::{FileCommand, FileCommandResult};
 
 mod direct;
 #[cfg(test)]
@@ -716,7 +718,10 @@ impl NodeSessionHandle {
         let sources =
             crate::node::core::drop_send::normalize(sources).map_err(|error| error.to_string())?;
         self.commands
-            .try_send(SessionCommand::SendPaths { peer, sources })
+            .try_send(SessionCommand::File(FileCommand::SendPaths {
+                peer,
+                sources,
+            }))
             .map_err(|_| "传输命令队列已满或会话已关闭；拖入项尚未提交".into())
     }
     #[allow(dead_code)] // T010 product controls call this tested backend command.
@@ -727,7 +732,7 @@ impl NodeSessionHandle {
         source: std::path::PathBuf,
     ) -> std::result::Result<(), String> {
         self.commands
-            .try_send(SessionCommand::SendFile { peer, source })
+            .try_send(SessionCommand::File(FileCommand::SendFile { peer, source }))
             .map_err(|_| "传输命令队列已满或会话已关闭".into())
     }
     #[allow(dead_code)] // T010 product controls call this tested backend command.
@@ -742,13 +747,9 @@ impl NodeSessionHandle {
     }
     #[allow(dead_code)] // T010 product controls call this tested backend command.
     #[cfg(feature = "agent-files")]
-    pub fn resume_task(
-        &self,
-        peer: NodeId,
-        id: TaskId,
-    ) -> std::result::Result<(), String> {
+    pub fn resume_task(&self, peer: NodeId, id: TaskId) -> std::result::Result<(), String> {
         self.commands
-            .try_send(SessionCommand::ResumeTask { peer, id })
+            .try_send(SessionCommand::File(FileCommand::Resume { peer, task: id }))
             .map_err(|_| "传输命令队列已满或会话已关闭".into())
     }
 
@@ -761,11 +762,11 @@ impl NodeSessionHandle {
     ) -> std::result::Result<TaskId, String> {
         let request = TaskId::generate();
         self.commands
-            .try_send(SessionCommand::PreviewDirectory {
+            .try_send(SessionCommand::File(FileCommand::PreviewDirectory {
                 peer,
                 source,
                 request: request.clone(),
-            })
+            }))
             .map_err(|_| "目录预览命令队列已满或会话已关闭".to_owned())?;
         Ok(request)
     }
@@ -776,7 +777,10 @@ impl NodeSessionHandle {
         id: TaskId,
     ) -> std::result::Result<(), String> {
         self.commands
-            .try_send(SessionCommand::ConfirmDirectory { peer, id })
+            .try_send(SessionCommand::File(FileCommand::ConfirmDirectory {
+                peer,
+                request: id,
+            }))
             .map_err(|_| "目录确认命令队列已满或会话已关闭".into())
     }
     #[cfg(feature = "agent-files")]
@@ -796,7 +800,10 @@ impl NodeSessionHandle {
         source: std::path::PathBuf,
     ) -> std::result::Result<(), String> {
         self.commands
-            .try_send(SessionCommand::SendDirectory { peer, source })
+            .try_send(SessionCommand::File(FileCommand::SendDirectory {
+                peer,
+                source,
+            }))
             .map_err(|_| "传输命令队列已满或会话已关闭".into())
     }
     #[allow(dead_code)] // T010 controls.
@@ -949,44 +956,12 @@ enum SessionCommand {
         id: TaskId,
     },
     #[cfg(feature = "agent-files")]
-    PreviewDirectory {
-        peer: NodeId,
-        source: std::path::PathBuf,
-        request: TaskId,
-    },
-    #[cfg(feature = "agent-files")]
-    ConfirmDirectory {
-        peer: NodeId,
-        id: TaskId,
-    },
+    File(FileCommand),
     #[cfg(feature = "agent-files")]
     CancelDirectoryPreview(TaskId),
-    #[cfg(feature = "agent-files")]
-    SendPaths {
-        peer: NodeId,
-        sources: Vec<std::path::PathBuf>,
-    },
-    #[allow(dead_code)] // T010 selection controls.
-    #[cfg(feature = "agent-files")]
-    SendDirectory {
-        peer: NodeId,
-        source: std::path::PathBuf,
-    },
-    #[allow(dead_code)] // T010 product controls.
-    #[cfg(feature = "agent-files")]
-    SendFile {
-        peer: NodeId,
-        source: std::path::PathBuf,
-    },
     #[allow(dead_code)] // T010 product controls.
     #[cfg(feature = "agent-files")]
     PauseTask(TaskId),
-    #[allow(dead_code)] // T010 product controls.
-    #[cfg(feature = "agent-files")]
-    ResumeTask {
-        peer: NodeId,
-        id: TaskId,
-    },
     ConnectPeer(NodeId),
     ConnectTrusted(NodeId),
     ConnectAuthenticated {
@@ -1042,9 +1017,14 @@ impl SessionCommand {
         match self {
             Self::StartSpeed { .. } => veytrane_node::capability::CAP_SPEED_EXECUTION,
             #[cfg(feature = "agent-files")]
-            Self::PreviewDirectory { .. }
-            | Self::ConfirmDirectory { .. }
-            | Self::SendDirectory { .. } => veytrane_node::capability::CAP_DIRECTORY_TRANSFER,
+            Self::File(command) => match command {
+                FileCommand::PreviewDirectory { .. }
+                | FileCommand::ConfirmDirectory { .. }
+                | FileCommand::SendDirectory { .. } => {
+                    veytrane_node::capability::CAP_DIRECTORY_TRANSFER
+                }
+                _ => veytrane_node::capability::CAP_FILE_TRANSFER,
+            },
             #[cfg(feature = "agent-files")]
             _ => veytrane_node::capability::CAP_FILE_TRANSFER,
             #[cfg(not(feature = "agent-files"))]
@@ -1052,10 +1032,10 @@ impl SessionCommand {
         }
     }
     #[cfg_attr(not(feature = "agent-files"), allow(dead_code))]
-    fn preview_request(&self) -> Option<TaskId> {
+    fn preview_request(&self) -> Option<&TaskId> {
         #[cfg(feature = "agent-files")]
         match self {
-            Self::PreviewDirectory { request, .. } => Some(request.clone()),
+            Self::File(FileCommand::PreviewDirectory { request, .. }) => Some(request),
             _ => None,
         }
         #[cfg(not(feature = "agent-files"))]
@@ -1064,15 +1044,22 @@ impl SessionCommand {
     fn business_peer(&self) -> Option<NodeId> {
         match self {
             #[cfg(feature = "agent-files")]
-            Self::PreviewDirectory { peer, .. }
-            | Self::ConfirmDirectory { peer, .. }
-            | Self::SendPaths { peer, .. }
-            | Self::SendFile { peer, .. }
-            | Self::SendDirectory { peer, .. }
-            | Self::ResumeTask { peer, .. } => Some(*peer),
+            Self::File(command) => Some(file_peer(command)),
             Self::StartSpeed { peer, .. } => Some(*peer),
             _ => None,
         }
+    }
+}
+
+#[cfg(feature = "agent-files")]
+fn file_peer(command: &FileCommand) -> NodeId {
+    match command {
+        FileCommand::PreviewDirectory { peer, .. }
+        | FileCommand::ConfirmDirectory { peer, .. }
+        | FileCommand::SendPaths { peer, .. }
+        | FileCommand::SendFile { peer, .. }
+        | FileCommand::SendDirectory { peer, .. }
+        | FileCommand::Resume { peer, .. } => *peer,
     }
 }
 
@@ -1597,8 +1584,6 @@ async fn run_session(
     let mut deferred_candidates: HashMap<NodeId, (Vec<Candidate>, PunchToken)> = HashMap::new();
     let mut tunnel_tasks: JoinSet<TunnelTaskResult> = JoinSet::new();
     #[cfg(feature = "agent-files")]
-    let selection_workers = Arc::new(Semaphore::new(3));
-    #[cfg(feature = "agent-files")]
     let selection_jobs = Arc::new(Semaphore::new(64));
     #[cfg(feature = "agent-files")]
     let continuation_jobs = Arc::new(Semaphore::new(3));
@@ -1850,7 +1835,7 @@ async fn run_session(
             #[cfg(feature = "agent-files")]
             if let Some(request) = command.preview_request() {
                 let _ = events
-                    .send(SessionEvent::DirectoryPreviewFailed(request))
+                    .send(SessionEvent::DirectoryPreviewFailed(request.clone()))
                     .await;
             }
             if matches!(command, SessionCommand::StartSpeed { .. }) {
@@ -1877,7 +1862,7 @@ async fn run_session(
             #[cfg(feature = "agent-files")]
             if let Some(request) = command.preview_request() {
                 let _ = events
-                    .send(SessionEvent::DirectoryPreviewFailed(request))
+                    .send(SessionEvent::DirectoryPreviewFailed(request.clone()))
                     .await;
             }
             if matches!(command, SessionCommand::StartSpeed { .. }) {
@@ -2562,24 +2547,12 @@ async fn run_session(
                 }
             }
             #[cfg(feature = "agent-files")]
-            Wake::Command(Some(
-                command @ (SessionCommand::PreviewDirectory { .. }
-                | SessionCommand::ConfirmDirectory { .. }
-                | SessionCommand::SendPaths { .. }
-                | SessionCommand::SendFile { .. }
-                | SessionCommand::SendDirectory { .. }
-                | SessionCommand::ResumeTask { .. }),
-            )) => {
-                let peer = match &command {
-                    SessionCommand::PreviewDirectory { peer, .. }
-                    | SessionCommand::ConfirmDirectory { peer, .. }
-                    | SessionCommand::SendPaths { peer, .. }
-                    | SessionCommand::SendFile { peer, .. }
-                    | SessionCommand::SendDirectory { peer, .. }
-                    | SessionCommand::ResumeTask { peer, .. } => *peer,
-                    _ => unreachable!(),
+            Wake::Command(Some(SessionCommand::File(command))) => {
+                let peer = file_peer(&command);
+                let preview_request = match &command {
+                    FileCommand::PreviewDirectory { request, .. } => Some(request.clone()),
+                    _ => None,
                 };
-                let preview_request = command.preview_request();
                 let Some(service) = config.transfer.clone() else {
                     let _ = events
                         .send(SessionEvent::Diagnostic("任务存储尚未就绪".into()))
@@ -2605,7 +2578,7 @@ async fn run_session(
                 let connection = connections
                     .get(&peer)
                     .map(|(_, connection)| connection.clone());
-                let job_pool = if matches!(&command, SessionCommand::ResumeTask { .. }) {
+                let job_pool = if matches!(&command, FileCommand::Resume { .. }) {
                     continuation_jobs.clone()
                 } else {
                     selection_jobs.clone()
@@ -2635,121 +2608,27 @@ async fn run_session(
                     continue;
                 }
                 let live = authorizations[&peer].2.live();
-                let selection_workers = selection_workers.clone();
                 let events = events.clone();
                 peer_tasks.spawn(async move {
                     let _permit = permit;
                     let result = live
                         .guard(false, async {
-                            match command {
-                                SessionCommand::PreviewDirectory {
-                                    source, request, ..
-                                } => {
-                                    let _worker = selection_workers
-                                        .clone()
-                                        .acquire_owned()
-                                        .await
-                                        .map_err(|_| {
-                                        crate::node::core::transfer_files::failure("扫描任务已关闭")
-                                    })?;
-                                    let connection = connection.ok_or_else(|| {
-                                        crate::node::core::transfer_files::failure(
-                                            "请先连接并授权对端",
-                                        )
-                                    })?;
-                                    let preview = service
-                                        .preview_directory_request(
-                                            &connection,
-                                            peer,
-                                            source,
-                                            request,
-                                        )
-                                        .await?;
+                            match service
+                                .execute_command(connection.as_ref(), command)
+                                .await?
+                            {
+                                FileCommandResult::Preview(preview) => {
                                     let _ =
                                         events.send(SessionEvent::DirectoryPreview(preview)).await;
-                                    Ok(())
                                 }
-                                SessionCommand::ConfirmDirectory { id, .. } => {
-                                    let connection = connection.ok_or_else(|| {
-                                        crate::node::core::transfer_files::failure(
-                                            "请先连接并授权对端",
-                                        )
-                                    })?;
-                                    let ids =
-                                        service.confirm_directory(&connection, peer, id).await?;
+                                FileCommandResult::SelectionQueued(count) => {
                                     let _ = events
-                                        .send(SessionEvent::SelectionQueued {
-                                            peer,
-                                            count: ids.len(),
-                                        })
+                                        .send(SessionEvent::SelectionQueued { peer, count })
                                         .await;
-                                    Ok(())
                                 }
-                                SessionCommand::SendPaths { sources, .. } => {
-                                    let _worker = selection_workers
-                                        .clone()
-                                        .acquire_owned()
-                                        .await
-                                        .map_err(|_| {
-                                        crate::node::core::transfer_files::failure("扫描任务已关闭")
-                                    })?;
-                                    let ids = service.select_paths(peer, sources).await?;
-                                    let _ = events
-                                        .send(SessionEvent::SelectionQueued {
-                                            peer,
-                                            count: ids.len(),
-                                        })
-                                        .await;
-                                    Ok(())
-                                }
-                                SessionCommand::SendFile { source, .. } => {
-                                    let _worker = selection_workers
-                                        .clone()
-                                        .acquire_owned()
-                                        .await
-                                        .map_err(|_| {
-                                        crate::node::core::transfer_files::failure("扫描任务已关闭")
-                                    })?;
-                                    service.select_file(peer, source).await?;
-                                    let _ = events
-                                        .send(SessionEvent::SelectionQueued { peer, count: 1 })
-                                        .await;
-                                    Ok(())
-                                }
-                                SessionCommand::SendDirectory { source, .. } => {
-                                    let _worker = selection_workers
-                                        .clone()
-                                        .acquire_owned()
-                                        .await
-                                        .map_err(|_| {
-                                        crate::node::core::transfer_files::failure("扫描任务已关闭")
-                                    })?;
-                                    let ids = service.select_directory(peer, source).await?;
-                                    let _ = events
-                                        .send(SessionEvent::SelectionQueued {
-                                            peer,
-                                            count: ids.len(),
-                                        })
-                                        .await;
-                                    Ok(())
-                                }
-                                SessionCommand::ResumeTask { id, .. } => {
-                                    let record = service.task(id.clone()).await?;
-                                    if record.direction()
-                                        == crate::node::core::task_model::TaskDirection::Send
-                                    {
-                                        service.enqueue_tasks(peer, vec![id]).await
-                                    } else {
-                                        let connection = connection.ok_or_else(|| {
-                                            crate::node::core::transfer_files::failure(
-                                                "请先连接任务绑定的对端",
-                                            )
-                                        })?;
-                                        service.resume(&connection, peer, id).await
-                                    }
-                                }
-                                _ => unreachable!(),
+                                FileCommandResult::Resumed => {}
                             }
+                            Ok(())
                         })
                         .await;
                     if let Err(error) = result {
