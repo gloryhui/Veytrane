@@ -13,9 +13,14 @@ pub(crate) async fn prepare(
     control: &NodeControl,
     start: Option<&str>,
 ) -> Result<Prepared> {
+    let rules = if settings.enable_tcp {
+        settings.forwards.as_slice()
+    } else {
+        &[]
+    };
     manager
         .prepare(
-            &settings.forwards,
+            rules,
             &settings.service_ids,
             start,
             |peer| async move {

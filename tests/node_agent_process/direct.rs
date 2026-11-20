@@ -6,6 +6,7 @@ enum TestAgentMix {
     MinimalBoth,
     MinimalClientFullServer,
     TcpClientFullServer,
+    BareClientFullServer,
 }
 
 fn minimal_agent() -> Option<String> {
@@ -31,8 +32,18 @@ fn test_agent_mix(minimal: Option<&str>) -> TestAgentMix {
             TestAgentMix::MinimalClientFullServer
         }
         Some("tcp-client-full-server") => {
-            assert!(minimal.is_some(), "tcp-client-full-server requires VEYTRANE_TEST_MINIMAL_AGENT");
+            assert!(
+                minimal.is_some(),
+                "tcp-client-full-server requires VEYTRANE_TEST_MINIMAL_AGENT"
+            );
             TestAgentMix::TcpClientFullServer
+        }
+        Some("bare-client-full-server") => {
+            assert!(
+                minimal.is_some(),
+                "bare-client-full-server requires VEYTRANE_TEST_MINIMAL_AGENT"
+            );
+            TestAgentMix::BareClientFullServer
         }
         Some(other) => panic!("unknown VEYTRANE_TEST_AGENT_MIX={other}"),
         None if minimal.is_some() => TestAgentMix::MinimalBoth,
@@ -119,15 +130,23 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
     let (client_binary, server_binary) = match mix {
         TestAgentMix::FullBoth => (None, None),
         TestAgentMix::MinimalBoth => (minimal.as_deref(), minimal.as_deref()),
-        TestAgentMix::MinimalClientFullServer | TestAgentMix::TcpClientFullServer => {
+        TestAgentMix::MinimalClientFullServer
+        | TestAgentMix::TcpClientFullServer
+        | TestAgentMix::BareClientFullServer => {
             (minimal.as_deref(), None)
         }
     };
     let server_files = matches!(
         mix,
-        TestAgentMix::MinimalClientFullServer | TestAgentMix::TcpClientFullServer
+        TestAgentMix::MinimalClientFullServer
+            | TestAgentMix::TcpClientFullServer
+            | TestAgentMix::BareClientFullServer
     );
-    let client_speed = mix != TestAgentMix::TcpClientFullServer;
+    let client_speed = matches!(
+        mix,
+        TestAgentMix::FullBoth | TestAgentMix::MinimalBoth | TestAgentMix::MinimalClientFullServer
+    );
+    let client_tcp = mix != TestAgentMix::BareClientFullServer;
     let mut client = init_agent(sandbox.0.join("client"), client_binary);
     let mut server = init_agent(sandbox.0.join("server"), server_binary);
     let client_id = client.id();
@@ -151,6 +170,7 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
         let files_enabled = node.root == server.root && server_files;
         settings["enable_files"] = json!(files_enabled);
         settings["enable_speed"] = json!(node.root == server.root || client_speed);
+        settings["enable_tcp"] = json!(node.root == server.root || client_tcp);
         settings["direct"]["lan_discovery"] = json!(false);
         grant(&mut settings, std::slice::from_ref(peer));
         settings["resources"]["peers"][0]["files"] = json!(files_enabled);
@@ -203,7 +223,28 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
     );
     wait_peer(&client, &server_id).await;
     wait_peer(&server, &client_id).await;
-    echo_request(listen, b"TCP before speed").await;
+    if client_tcp {
+        echo_request(listen, b"TCP before speed").await;
+    } else {
+        assert!(
+            TcpListener::bind(listen).is_ok(),
+            "disabled TCP opened its saved listener"
+        );
+        let rejected = client
+            .response(Api::StartForward {
+                rule: "echo".into(),
+            })
+            .await;
+        assert_eq!(rejected.error.unwrap().code, "capability_disabled");
+        for (node, peer) in [(&client, &server_id), (&server, &client_id)] {
+            assert!(
+                node.response(Api::Services { peer: peer.clone() })
+                    .await
+                    .error
+                    .is_some()
+            );
+        }
+    }
     let rejected = client
         .response(Api::Send {
             peer: server_id.clone(),
@@ -261,7 +302,9 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
         &["connect-address", &server_id, &endpoint.to_string()],
     );
     wait_peer(&client, &server_id).await;
-    echo_request(listen, b"TCP after reconnect").await;
+    if client_tcp {
+        echo_request(listen, b"TCP after reconnect").await;
+    }
     client.stop().await;
     server.stop().await;
     for (node, has_files) in [(&client, false), (&server, server_files)] {

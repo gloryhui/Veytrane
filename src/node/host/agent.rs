@@ -232,6 +232,9 @@ impl Agent {
             }
             Command::StartForward { rule } => {
                 let record = self.config.lock().await;
+                if !record.settings.enable_tcp {
+                    return Err("capability_disabled: TCP 转发未启用".into());
+                }
                 if !record
                     .settings
                     .forwards
@@ -253,6 +256,9 @@ impl Agent {
             }
             Command::StopForward { rule } => {
                 let record = self.config.lock().await;
+                if !record.settings.enable_tcp {
+                    return Err("capability_disabled: TCP 转发未启用".into());
+                }
                 if !record.settings.forwards.iter().any(|r| r.id == rule) {
                     return Err("转发规则不存在".into());
                 }
