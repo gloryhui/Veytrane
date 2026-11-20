@@ -195,6 +195,14 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
 
     start_agent(&mut server, server_binary).await;
     start_agent(&mut client, client_binary).await;
+    assert_eq!(
+        client.ok(Api::Status).await["capabilities"],
+        json!({"files": false, "speed": client_speed, "tcp": client_tcp})
+    );
+    assert_eq!(
+        server.ok(Api::Status).await["capabilities"],
+        json!({"files": server_files, "speed": true, "tcp": true})
+    );
     if server_files {
         let until = Instant::now() + Duration::from_secs(10);
         while !(server.root.join("tasks.json").is_file() && server.root.join("receive").is_dir()) {

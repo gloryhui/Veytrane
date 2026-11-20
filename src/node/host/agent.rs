@@ -38,11 +38,18 @@ struct Journal {
     events: VecDeque<SequencedEvent>,
     floor: u64,
 }
+#[derive(serde::Serialize)]
+struct ActiveCapabilities {
+    files: bool,
+    speed: bool,
+    tcp: bool,
+}
 pub struct Agent {
     pub(crate) control: NodeControl,
     pub(crate) config: Mutex<ConfigRecord>,
     pub(crate) paths: AgentPaths,
     epoch: String,
+    capabilities: ActiveCapabilities,
     journal: Mutex<Journal>,
     cache: Mutex<HashMap<String, Cached>>,
     pub(crate) mutations: Mutex<()>,
@@ -75,7 +82,7 @@ impl Agent {
                 let last_error = self.last_error.lock().await.clone();
                 let diagnostics = self.diagnostics.lock().await.clone();
                 Ok(
-                    json!({"core_running":self.control.is_running(),"build":crate::node::api::build_info::value("p2p-agent"),"diagnostics":diagnostics,"restart_pending":self.restart_pending.load(std::sync::atomic::Ordering::Acquire),"budgets":{"peers":self.control.peer_capacity(),"pending_peers":8,"tcp_streams":veytrane_tcp::DEFAULT_MAX_NODE_TCP_STREAMS,"tcp_per_rule":veytrane_tcp::DEFAULT_MAX_TUNNEL_STREAMS,"management_connections":32,"service_controls_per_peer":veytrane_tcp::services::MAX_PENDING_CONTROLS},"data_dir":self.paths.root,"epoch":self.epoch,"revision":configuration.revision,"node":node,"last_error":last_error,"forwards":forwards}),
+                    json!({"core_running":self.control.is_running(),"build":crate::node::api::build_info::value("p2p-agent"),"diagnostics":diagnostics,"restart_pending":self.restart_pending.load(std::sync::atomic::Ordering::Acquire),"capabilities":self.capabilities,"budgets":{"peers":self.control.peer_capacity(),"pending_peers":8,"tcp_streams":veytrane_tcp::DEFAULT_MAX_NODE_TCP_STREAMS,"tcp_per_rule":veytrane_tcp::DEFAULT_MAX_TUNNEL_STREAMS,"management_connections":32,"service_controls_per_peer":veytrane_tcp::services::MAX_PENDING_CONTROLS},"data_dir":self.paths.root,"epoch":self.epoch,"revision":configuration.revision,"node":node,"last_error":last_error,"forwards":forwards}),
                 )
             }
             Command::Nearby => Ok(serde_json::to_value(
@@ -501,6 +508,11 @@ async fn run_with_recovery(
         .map_err(io::Error::other)?;
     let mut session = record.settings.session().map_err(io::Error::other)?;
     session.tunnel_rules.clear();
+    let capabilities = ActiveCapabilities {
+        files: cfg!(feature = "agent-files") && session.enable_files,
+        speed: session.enable_speed,
+        tcp: session.enable_tcp,
+    };
     #[cfg(feature = "agent-files")]
     let (control, mut raw) = if session.enable_files {
         crate::storage::permissions::ensure_directory(&record.settings.receive_root)?;
@@ -538,6 +550,7 @@ async fn run_with_recovery(
         config: Mutex::new(record),
         paths: paths.clone(),
         epoch: format!("{:032x}", rand::random::<u128>()),
+        capabilities,
         journal: Mutex::new(Journal {
             events: VecDeque::new(),
             floor: 0,
