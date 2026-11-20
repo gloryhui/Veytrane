@@ -117,7 +117,7 @@ Veytrane 的核心是可信节点之间建立、维持和恢复连接的机制�
 | 配置与 IPC | `cargo test --locked --test node_agent_process agent_process_config_transaction_idempotency_restart_and_ownership`；覆盖同 revision 并发、重复请求、落盘失败、重建与 `Events` 重同步。`Tasks` 的旧分页、空集合、预览脱敏、测速字段均可被现有客户端读取。 |
 | TCP / 授权 / 产品 | `cargo test --locked --test node_agent_process unified_service_tcp_streams_do_not_exhaust_control_slots`，再按改动运行 `three_agent_processes_unified_files_directory_four_forwards_and_revocation`。Live 与 Sub2API 分别验产品授权集合、重连与关停；`scripts/live-local-smoke.py` 仍可用原 CLI 命令启动测试信令。 |
 | Web / GPUI / CLI | 导航测试按变动选 `scripts/navigation-native-smoke.py`、`navigation-platform-tests.py`、`navigation-ui-tests.cjs`；先检查各自参数和范围，再在隔离配置执行。验证 Web 启动失败不影响既有转发，核心重建期间 HTTP 可达，退出释放监听；两个桌面/网页客户端选择互不干扰。GPUI 分别记录已构建与已实际交互验证。 |
-| 边界和测试有效性 | 当前 `python3 scripts/check-architecture.py` 仅扫描 `src` 和显式导入。改为同时检查 workspace 包的生产依赖和新的源码目录；不得靠改写 import 让检查假绿。`scripts/node-core-e2e.py` 有 `node::core::` 命令过滤和日志正则，随包移动同步更新；核对发现的测试数、指定 case 名和子进程证据。`scripts/e2e.sh` 属于独立 CLI，保留独立验收。 |
+| 边界和测试有效性 | `python3 scripts/check-architecture.py` 同时核对应用与库的源码、workspace 生产依赖以及各发行组合的依赖排除规则。`scripts/node-core-e2e.py` 分别运行根会话、节点、文件和 TCP 的测试，核对指定用例与实际子进程证据。`scripts/e2e.sh` 单独验收独立 CLI。 |
 | 发行与跨平台 | 核对现有八个二进制、`--build-info` 的既有消费者、原 CLI 子命令、独立 Web、macOS/Linux socket、Windows pipe 与 ACL、桌面打包和服务启动模板。对 Windows/Linux 未在本机可验证的部分记录对应 CI/实机状态，不以本机编译代替。 |
 
 执行记录至少写明阶段、提交、构建 feature、用例、实际结果与未验项。检查功能时使用隔离的本地数据和回环测试节点；单平台或模拟测试分别标注。每笔阶段提交及推送授权遵循仓库 `AGENTS.md`。
@@ -226,14 +226,35 @@ Veytrane 的核心是可信节点之间建立、维持和恢复连接的机制�
 - `b808325` 将 Live 和 Sub2API 发行入口切换为独立特性。Live smoke 所需信令单独通过 `standalone` 构建。
 - `8219896` 让 `node-runtime`、Live 与 Sub2API 在独立构建时也排除测速执行，Agent 基础组合继续装配 TCP 和测速。配置保留原字段，单独产品显式要求缺失的测速能力时返回错误。分层检查、裁剪及完整组合编译和 16 项产品用例通过。
 
+### S6 最终源码与候选包（2026-11-21）
+
+- `b4df252` 将文件实例由运行时装配经 `SessionServices` 注入会话，生产 `NodeSessionConfig` 只持有参数。`30cd2db` 让 Agent 经 `FileCommands` 使用原有 actor 队列提交对端文件操作。文件执行、任务库和恢复归文件包，Agent 负责本地管理与快照聚合。根运行时的会话仍持有按 feature 注入的具体能力句柄，以协调连接代际、授权、命令及撤销。`veytrane-node` 自身可单独构建。
+- Apple Silicon 候选由干净的 `30cd2db` 生成。包内桌面、Agent 和管理 CLI 的构建提交一致，两管理二进制报告 IPC v1，候选核验器通过。ZIP SHA-256 为 `c84617a1b479b6fc06e5f128aa39984db635299276a6809330c77c2e4890b6f5`，包含 820 个依赖的记录。签名为 ad hoc，未公证。包内 Agent 的隔离导航在核心重建期间连续成功读取 11 次，无已安装 Agent 请求。
+- 本次全 feature 编译通过。Cargo 元数据确认 `live-gateway`、`live-viewer`、`p2p-agent`、`p2p-desktop`、`p2p-node`、`p2p-sub2api-gateway`、`p2p_file` 和 `sub2api-client` 八个既有二进制。
+- 信任撤销回归需要关注并发稳定性。在 `30cd2db` 的两次四线程矩阵中，`restart_auto_start_uses_fresh_identity_bound_trust_and_revoke_closes_running_tunnel` 均报告 UDP 打洞超时。回溯复跑在撤销后显式密码重连的 `Running` 等待点超时。单跑、六项相邻用例并行和加入诊断的全组均通过。前一提交 `9373f10` 的四线程核心组也通过。根因尚未确定，测试断言和生产连接逻辑保持原样。
+- 平台证据按构建提交使用。`126a5f7` 的原生工作流 `44772210443` 通过两种 macOS 及 Windows x64 候选，Windows 命名管道、ACL 和接收存储步骤通过。Linux 通过回环导航、跨 UID IPC、X11 和候选校验，随后 Web 导航的严格 Clippy 检查失败，候选未上传。Windows 原生托盘用例需要交互式桌面，尚未执行。Apple Silicon 的工作台、测速取消、断开与 `⌘Q` 隔离操作有 `18d114b` 实机记录。
+- [交互架构图](layer-review.html) 的八种主题、独立亮暗按钮与 PNG 下载处理再次通过静态核验。自动审批拒绝了浏览器打开操作，实际切换、布局与 PNG 下载没有浏览器验收结果。
+
+| 第 6 节验收项 | 交付证据 |
+|---|---|
+| 最小 node、测速+TCP Agent | 最小 node 编译及生产依赖检查通过，`30cd2db` 独立构建 `agent-base`。两个裁剪版完成测速、并行 TCP、断开重连，隔离根无接收目录、任务库或任务锁。 |
+| 双端组合与拒绝 | `30cd2db` 的双裁剪版、裁剪版对完整版、仅 TCP 对完整版、基础会话对完整版四组进程均通过。认证、协商、未获授权流、队列上限和撤销另由核心与业务包用例覆盖。 |
+| 线协议与旧数据 | 节点包的固定字节与授权用例、文件包的帧、越界、持久回执和续传检查通过。`30cd2db` 使用 `0b0d77b` 的旧 Agent 实际生成任务，裁剪版保持旧任务库字节，重新启用后恢复原任务 ID。 |
+| 文件与测速并发 | 文件包的互斥、取消和旧 UNI 令牌隔离用例通过，真实裁剪 Agent 在测速期间转发授权 TCP。 |
+| 配置与 IPC | `30cd2db` 的九项 Agent 进程测试通过，覆盖事务并发、重复请求、重建、所有权、能力查询及撤销。`2fe610c` 记录两个客户端的独立任务选择。 |
+| TCP / 授权 / 产品 | Agent 进程通过高并发 TCP 和三节点授权撤销。`30cd2db` 的专用 Live/Sub2API 组合通过 16 项隔离用例，1 项已部署网关用例按标记忽略。 |
+| Web / GPUI / CLI | `30cd2db` 本机候选的隔离导航通过。`18d114b` 有 Apple Silicon 原生桌面交互。独立 CLI 的 IPv4、IPv6 与强制 Relay 有 `3cc368b` 证据，强制 Relay 在 `b17fe43` 复验。 |
+| 边界和测试有效性 | `30cd2db` 通过源码、Cargo 生产依赖和源码索引检查。最终干净工作树复跑通过全部 15 个场景，四套测试分别通过 136、44、229、3 项，并采集 21 条进程证据。前两轮超时及回溯见上文。 |
+| 发行与跨平台 | `30cd2db` 通过八入口编译与 Apple Silicon 候选核验。`126a5f7` 的其他平台证据及 Windows 托盘、Linux 上传门槛见上文。 |
+
 ## 7. 新增或移除业务时的操作示例
 
 **新增一个使用既有 TCP 的产品**：在 `apps/<产品>` 内确定对端、服务 ID、目标与可见目录；使用 node 和 TCP 的公开接口组装；在产品自己的 UI 或 CLI 接入管理命令；测试未授权访问、撤销、重连和关闭。Live 是这种模式的现有实例。
 
 **新增需要自有对等消息的能力**：先定义对端如何协商、编号如何分配、消息大小、授权和取消语义。新增 `crates/veytrane-<能力>` 的处理器、控制句柄和状态，在产品入口按需注册；确需对外管理时扩充有版本约束的管理契约。用“新端 ↔ 缺此能力的端”和“两个均支持的端”分别测试。核心改动限于确有需要的基础协议保留位、共用传输机制及相应规范。
 
-**撤下文件传输**：先在目标产品装配中取消 files，维持已有身份、配置、旧任务和接收目录；移除产品 UI 的文件入口，验证无文件矩阵。若同时要取消 `p2p_file send/recv/push` 的发行，再盘点独立 CLI 用户和打包脚本，单列下线决定。信令、测速和授权 TCP 的生命周期均可独立继续。
+**撤下文件传输**。复用已有数据目录时，先用支持文件能力的 Agent 通过现有配置事务关闭 `enable_files`，再重建会话。确认 `Status.capabilities.files` 为 `false` 后，可以切换到 `agent-base` 发行组合。文件任务和接收数据保留原路径。重新启用时使用带 `agent-files` 的组合及同一数据目录，再通过配置事务启用并重建会话。独立 CLI 的信令和文件命令有自己的调用方，取消其发行前应分别确认现有脚本和使用方式。
 
 ## 给施工模型的首条指令
 
-> 以本文 S0 为起点，核对当前工作树与基线，保留其他任务的未提交修改。依次施工 S1–S6，每阶段只纳入本阶段变动、定向验证并本地提交，正文记录依赖提交和验证结果。最先交付能运行的 TCP+测速无文件节点。默认发行行为、线上协议、数据格式及同进程 `3001` 导航按本文保持；遇到真实契约冲突，请列出调用方与可选迁移方案再决策。最终用第 6 节矩阵交付证据。
+> 先核对当前工作树、提交和第 6 节的已验收证据，从尚未退出的工单继续。保留其他任务的未提交修改。按明确的小阶段定向验证并本地提交，正文记录依赖提交和验证结果。保留默认发行行为、线上协议、数据格式和同进程 `3001` 导航。遇到契约冲突时先列出实际调用方和可选迁移方案。最终按第 6 节逐项记录结果及剩余验收。

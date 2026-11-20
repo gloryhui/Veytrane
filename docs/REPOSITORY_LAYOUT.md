@@ -18,14 +18,22 @@ src/main.rs → apps/standalone-cli
 
 默认构建保留现有二进制入口、`node.json`、IPC JSON 和线上协议。Agent 可选装文件和导航。根包的部分重导出仍供现有调用方使用。
 
+## 兼容入口
+
+| 入口 | 已核实的调用方与退出条件 |
+| --- | --- |
+| `node::host`、`node::adapters::cli`、`desktop` | Agent、管理 CLI 和桌面的根二进制经这些模块进入相应应用。调整 Rust 路径时先切换三个启动器，并验证原二进制名、`--build-info` 和打包入口。 |
+| `node::api`、`node::local` | Agent 和管理 CLI 的构建信息，以及进程测试的原始 socket/pipe 与 IPC DTO 仍使用这些路径。迁完调用方并核实外部使用后，再移除相应重导出。 |
+| 根传输模块和 `p2p_file` | 共用网络代码、独立 CLI、原部署命令及 `scripts/live-local-smoke.py` 的临时信令仍使用这些入口。调整信令或独立文件命令的发行范围时，需要先完成现有脚本和部署的迁移。 |
+
 ## 源码职责
 
 | 位置 | 职责与边界 |
 | --- | --- |
-| `src/node/core/` | 会话、连接代际、网络恢复及已认证流生命周期。每条连接使用一个 BI 分发器，向已协商的业务交付有界队列和实时授权，协调关闭与撤销。 |
-| `src/node/composition/` | 运行时装配、`NodeSettings`、持久配置、策略投影和 TCP 转发连接适配器。`runtime.rs` 供 Agent、Live 与 Sub2API 组装会话及能力。`business.rs` 启动各能力的入站处理并分配每 peer 配额。 |
+| `src/node/core/` | 会话、连接代际、网络恢复及已认证流生命周期。每条连接使用一个 BI 分发器，向已协商的业务交付有界队列和实时授权。根运行时的会话 actor 通过按 feature 注入的具体服务句柄协调命令、关闭与撤销。 |
+| `src/node/composition/` | 运行时装配、`NodeSettings`、持久配置、策略投影和 TCP 转发连接适配器。`runtime.rs` 供 Agent、Live 与 Sub2API 组装会话及能力，并用 `SessionServices` 注入同一组服务实例。`business.rs` 启动各能力的入站处理并分配每 peer 配额。 |
 | `apps/agent` | `p2p-agent` 的启动参数、可选导航与宿主装配，以及核心重建和退出协调。 |
-| `apps/agent/src/host/` | Agent 进程所有权、IPC 服务端命令、配置 revision、请求去重、事件聚合与关停。根包保留 `node::host` 导入。 |
+| `apps/agent/src/host/` | Agent 进程所有权、IPC 服务端命令、配置 revision、请求去重、事件聚合与关停。文件命令经 `FileCommands` 提交到同一会话队列，文件快照从业务实例聚合。根包保留 `node::host` 导入。 |
 | `crates/veytrane-management` | IPC v1 请求和响应、AgentClient、当前用户路径、Unix socket 和 Windows pipe。`node/api` 给旧 Rust 调用方转出契约和客户端，并提供根二进制版本信息。 |
 | `apps/node-cli` | `p2p-node` 的命令编排，正常请求直接使用管理 IPC 契约，离线操作调用宿主配置入口。`node/adapters` 保留已有 Rust 导入路径。 |
 | `apps/web-management` | `p2p-node web` 管理页和 Agent 默认 `3001` 导航。两个入口经同一 IPC 使用 Agent。内置导航与 Agent 同进程，核心重建时导航继续运行。 |
@@ -117,6 +125,8 @@ python3 scripts/node-host-tests.py
 本次清理与验证见 [遗留代码清理记录](task-reports/LEGACY_CLEANUP.md)；首次分层证据见 [分层整理验证记录](task-reports/REPOSITORY_REORGANIZATION.md)。
 
 节点的 P2PN 协商与双向流分发位于 `veytrane-node`。文件与测速分别解码已分配的 P2PF 消息，`services.rs` 负责按服务 ID 开流并复用 `veytrane-tcp` 的字节搬运。
+
+[模块化施工说明](../architecture/node-modularization-plan.md#6-验收矩阵与执行入口)记录各构建组合、进程验证及原生平台证据。
 
 ## 无信令连接入口
 
