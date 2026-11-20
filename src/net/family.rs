@@ -1,50 +1,9 @@
 //! Native address families: an IPv6 socket never carries IPv4-mapped packets.
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+#[cfg(test)]
+use std::net::Ipv6Addr;
+use std::net::SocketAddr;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub enum AddressFamily {
-    Ipv6,
-    Ipv4,
-}
-
-impl AddressFamily {
-    pub fn of(addr: SocketAddr) -> Self {
-        if addr.is_ipv4() {
-            Self::Ipv4
-        } else {
-            Self::Ipv6
-        }
-    }
-    pub fn wildcard(self, port: u16) -> SocketAddr {
-        SocketAddr::new(
-            match self {
-                Self::Ipv4 => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                Self::Ipv6 => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            },
-            port,
-        )
-    }
-    pub fn loopback(self, port: u16) -> SocketAddr {
-        SocketAddr::new(
-            match self {
-                Self::Ipv4 => IpAddr::V4(Ipv4Addr::LOCALHOST),
-                Self::Ipv6 => IpAddr::V6(Ipv6Addr::LOCALHOST),
-            },
-            port,
-        )
-    }
-    pub fn accepts(self, addr: SocketAddr) -> bool {
-        Self::of(addr) == self && usable_address(addr)
-    }
-}
-impl std::fmt::Display for AddressFamily {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Ipv4 => "IPv4",
-            Self::Ipv6 => "IPv6",
-        })
-    }
-}
+pub use veytrane_transport::udp::{AddressFamily, usable_address};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, clap::ValueEnum)]
 pub enum NetworkFamilies {
@@ -60,23 +19,6 @@ impl NetworkFamilies {
                 (self, family),
                 (Self::Ipv4Only, AddressFamily::Ipv4) | (Self::Ipv6Only, AddressFamily::Ipv6)
             )
-    }
-}
-
-/// No scoped link-local, mapped, unspecified, multicast or zero-port candidates.
-/// ULA and global IPv6 remain ordinary Host candidates, independently of STUN.
-pub fn usable_address(addr: SocketAddr) -> bool {
-    if addr.port() == 0 || addr.ip().is_unspecified() || addr.ip().is_multicast() {
-        return false;
-    }
-    match addr {
-        SocketAddr::V4(a) => !a.ip().is_broadcast(),
-        SocketAddr::V6(a) => {
-            a.scope_id() == 0
-                && a.flowinfo() == 0
-                && !a.ip().is_unicast_link_local()
-                && a.ip().to_ipv4_mapped().is_none()
-        }
     }
 }
 

@@ -7225,6 +7225,7 @@ dependencies = [
  "socket2",
  "thiserror 2.0.20",
  "tokio",
+ "tracing",
  "windows-sys 0.59.0",
 ]
 

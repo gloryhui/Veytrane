@@ -12,7 +12,7 @@
 # Relay fixture 使用受控直连黑洞，UDP Relay 只转发设备间端到端加密的 QUIC datagram。
 # 这个脚本验证的是**整条链路的接线**（信令、令牌、打洞、QUIC、隧道分发、
 # 文件落盘校验），验证不了真实 NAT 穿透——那需要两台在不同网络里的机器。
-# NAT 穿透的关键逻辑由 src/nat/punch.rs 的单元测试覆盖（含地址相关映射场景）。
+# NAT 穿透的关键逻辑由 crates/veytrane-transport/src/punch.rs 的单元测试覆盖（含地址相关映射场景）。
 
 set -euo pipefail
 export NO_COLOR=1

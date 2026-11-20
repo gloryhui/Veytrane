@@ -15,6 +15,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::watch;
 
 use crate::error::{Error, Result};
+use crate::udp::AddressFamily;
 
 /// 探测包的魔术前缀，用来把自己发的包和别人的数据区分开。
 pub const PROBE_MAGIC: &[u8] = b"P2PF-PUNCH/1";
@@ -135,7 +136,7 @@ pub async fn simultaneous_open_any(
         return Err(Error::Transport("没有可用的候选地址，无法打洞".into()));
     }
 
-    let family = crate::net::AddressFamily::of(socket.local_addr()?);
+    let family = AddressFamily::of(socket.local_addr()?);
     if candidates
         .iter()
         .any(|candidate| !family.accepts(*candidate))

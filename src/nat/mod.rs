@@ -1,7 +1,7 @@
 //! NAT 穿透：STUN 查询、类型判定与打洞。主动网关端口映射尚未实现。
 
 pub mod classify;
-pub mod punch;
+pub use veytrane_transport::punch;
 pub mod stun;
 
 pub use classify::{
