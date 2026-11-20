@@ -26,6 +26,12 @@ pub const REGISTER_DOMAIN: &[u8] = b"p2p_file/signal-register/v2";
 
 /// 单个节点允许公布的候选地址数量上限。
 pub const MAX_CANDIDATES: usize = 32;
+/// 信令单帧上限。
+pub const MAX_SIGNAL_FRAME_LEN: u32 = 64 * 1024;
+/// 每条连接待写队列容量。
+pub const OUTBOX_CAPACITY: usize = 64;
+#[doc(hidden)]
+pub const SHORT_LOOKUP_UNAVAILABLE: &str = "设备查询不可用或请求过多，请稍后重试";
 
 /// 候选地址的类型，决定了它的优先级。
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]

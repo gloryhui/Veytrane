@@ -19,6 +19,8 @@ pub mod quic;
 pub mod raw_frame;
 pub mod short_id;
 #[cfg(feature = "signal-tls")]
+pub mod signal_client;
+#[cfg(feature = "signal-tls")]
 pub mod signal_tls;
 #[cfg(feature = "quic")]
 pub mod signal_wire;
