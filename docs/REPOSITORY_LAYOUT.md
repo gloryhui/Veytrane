@@ -22,8 +22,8 @@ src/main.rs → 独立 CLI
 
 | 位置 | 职责与边界 |
 | --- | --- |
-| `src/node/core/` | 会话、连接代际、网络恢复及已认证流生命周期。根会话仍负责文件、测速与 TCP 的运行装配。各能力的执行代码由对应包持有。 |
-| `src/node/composition/` | `NodeSettings`、持久配置记录、配置到会话策略的投影，以及 TCP 转发连接适配器。 |
+| `src/node/core/` | 会话、连接代际、网络恢复及已认证流生命周期。根会话接收已装配的服务，在每条连接上为双方已协商的业务注册有界队列，协调关闭与撤销。各能力的执行代码由对应包持有。 |
+| `src/node/composition/` | `NodeSettings`、持久配置记录、配置到会话策略的投影，以及 TCP 转发连接适配器。`runtime.rs` 供 Agent、Live 与 Sub2API 组装会话及所需的测速、文件服务。 |
 | `src/node/host/` | Agent 进程所有权、IPC 服务端命令、配置 revision、请求去重、事件聚合与关停。 |
 | `crates/veytrane-management` | IPC v1 请求和响应、AgentClient、当前用户路径、Unix socket 和 Windows pipe。`node/api` 给旧 Rust 调用方转出契约和客户端，并提供根二进制版本信息。 |
 | `src/node/adapters/` | `p2p-node` 的命令编排，正常请求走 IPC，离线操作调用宿主。 |

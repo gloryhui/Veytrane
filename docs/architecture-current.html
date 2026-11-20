@@ -355,7 +355,7 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
       "title": "共享节点核心",
       "tag": "HEADLESS CORE",
       "path": "src/node/core/mod.rs",
-      "summary": "核心保留会话、授权、分发与投影；配置/转发装配在 composition，文件、测速和 TCP 由独立库执行。",
+      "summary": "核心保留会话、授权、分发与投影。composition 准备配置、转发和能力，文件、测速和 TCP 由独立库执行。",
       "rules": [
         "不反向依赖 host、api、local、adapters、products 或 desktop。",
         "通用 Agent 与专用版共享实现，各自持有运行时。",
@@ -566,9 +566,9 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
       "title": "控制与会话",
       "tag": "CORE / ORCHESTRATION",
       "path": "src/node/core/session.rs",
-      "summary": "唯一 P2PN v2 会话：身份认证、持续授权、File / Service / Speed 分发。",
+      "summary": "P2PN v2 会话接收已装配的能力，完成身份认证、持续授权，并为已协商的业务流注册队列。",
       "rules": [
-        "一个入站接纳者分派 File / Service / Speed。",
+        "每条连接只有一个入站接纳者，未注册类型按既有规则拒绝。",
         "旧代际结果不得覆盖当前连接。",
         "旧版本在协商拒绝；没有逐 peer 模式或旧桌面接收循环。"
       ],
@@ -582,6 +582,11 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
           "name": "会话循环",
           "path": "src/node/core/session.rs",
           "detail": "信令与无信令直连的代际、认证、权限与业务发布。"
+        },
+        {
+          "name": "能力装配",
+          "path": "src/node/composition/runtime.rs",
+          "detail": "按产品配置创建文件与测速服务，共享活动许可与帧预算。"
         },
         {
           "name": "统一协议",
