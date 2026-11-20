@@ -9,4 +9,6 @@ pub mod live_authorization;
 pub mod operation_id;
 pub mod p2pf;
 pub mod peer_registry;
+#[cfg(feature = "remote-auth")]
+pub mod remote_auth;
 pub mod wire;

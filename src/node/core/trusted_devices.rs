@@ -65,6 +65,13 @@ pub fn contains(devices: &[TrustedDevice], peer: NodeId) -> bool {
     devices.iter().any(|device| device.node_id == peer.to_hex())
 }
 
+pub(crate) fn node_ids(devices: &[TrustedDevice]) -> HashSet<NodeId> {
+    devices
+        .iter()
+        .filter_map(|device| NodeId::from_hex(&device.node_id).ok())
+        .collect()
+}
+
 /// Gregorian date from Unix seconds (UTC); metadata only.
 pub fn date(seconds: u64) -> String {
     let days = (seconds / 86_400).min(2_932_896) as i64 + 719_468;

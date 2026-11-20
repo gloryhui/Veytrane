@@ -4413,7 +4413,6 @@ dependencies = [
 name = "p2p_file"
 version = "0.1.0"
 dependencies = [
- "argon2",
  "axum",
  "blake3",
  "cap-fs-ext",
@@ -4422,10 +4421,8 @@ dependencies = [
  "dirs 5.0.1",
  "ed25519-dalek",
  "embed-resource",
- "getrandom 0.4.3",
  "gpui",
  "hex",
- "hmac",
  "if-addrs",
  "ksni",
  "mdns-sd",
@@ -7142,14 +7139,20 @@ dependencies = [
 name = "veytrane-node"
 version = "0.1.0"
 dependencies = [
+ "argon2",
+ "getrandom 0.4.3",
  "hex",
+ "hmac",
  "postcard",
  "quinn",
  "rand 0.10.3",
  "serde",
+ "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.20",
  "tokio",
  "veytrane-transport",
+ "zeroize",
 ]
 
 [[package]]

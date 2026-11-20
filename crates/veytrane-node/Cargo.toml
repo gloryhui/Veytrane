@@ -6,17 +6,31 @@ rust-version = "1.90"
 publish = false
 
 [features]
+remote-auth = [
+    "dep:argon2",
+    "dep:getrandom",
+    "dep:hmac",
+    "dep:sha2",
+    "dep:zeroize",
+    "veytrane-transport/quic",
+]
 test-support = []
 
 [dependencies]
+argon2 = { version = "=0.5.3", optional = true }
+getrandom = { version = "0.4", optional = true }
 hex = "0.4.3"
+hmac = { version = "=0.12.1", optional = true }
 postcard = { version = "1.1.3", features = ["alloc"] }
 quinn = "0.11.12"
 rand = "0.10.3"
 serde = { version = "1.0.229", features = ["derive"] }
+sha2 = { version = "=0.10.9", optional = true }
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["io-util", "macros", "rt", "sync", "time"] }
 veytrane-transport = { path = "../veytrane-transport" }
+zeroize = { version = "1.8", features = ["derive"], optional = true }
 
 [dev-dependencies]
+serde_json = "=1.0.151"
 tokio = { version = "1.53.1", features = ["test-util"] }

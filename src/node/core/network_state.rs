@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use crate::identity::NodeId;
 pub use veytrane_node::peer_registry::{
-    BeginPeerAttempt, DEFAULT_MAX_PEERS, MAX_PEER_CAPACITY, MAX_PENDING_PEERS, MAX_RECONNECT_DELAY,
-    PEER_LOOKUP_TIMEOUT, PeerLifecycle, PeerRegistry, reconnect_delay, should_initiate_quic,
+    BeginPeerAttempt, DEFAULT_MAX_PEERS, MAX_PEER_CAPACITY, MAX_PENDING_PEERS, PEER_LOOKUP_TIMEOUT,
+    PeerLifecycle, PeerRegistry, reconnect_delay, should_initiate_quic,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]

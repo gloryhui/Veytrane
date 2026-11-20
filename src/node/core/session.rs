@@ -1487,7 +1487,7 @@ async fn run_session(
     let mut remote_verifier = config.remote_auth.clone();
     let auth_context = AuthContext::default();
     let mut trusted_devices = config.trusted_devices.clone();
-    auth_context.set_trusted(&trusted_devices);
+    auth_context.set_trusted(crate::node::core::trusted_devices::node_ids(&trusted_devices));
     let mut authorizations: HashMap<
         NodeId,
         (
@@ -1935,7 +1935,9 @@ async fn run_session(
                 let old_trusted = trusted_devices.clone();
                 trusted_devices = record.settings.trusted_devices.clone();
                 remote_verifier = record.settings.remote_auth.clone();
-                auth_context.set_trusted(&trusted_devices);
+                auth_context.set_trusted(crate::node::core::trusted_devices::node_ids(
+                    &trusted_devices,
+                ));
                 resource_policy.send_replace(record.settings.resources.clone());
                 allowed_forward_targets.send_replace(record.settings.services.clone());
                 let sources = record
@@ -2274,7 +2276,7 @@ async fn run_session(
                                 crate::node::core::trusted_devices::contains(devices, *peer)
                         });
                     }
-                    auth_context.set_trusted(devices);
+                    auth_context.set_trusted(crate::node::core::trusted_devices::node_ids(devices));
                     for (peer, (generation, _, rights)) in &authorizations {
                         let authorization = *rights.borrow();
                         if peers.transition(
