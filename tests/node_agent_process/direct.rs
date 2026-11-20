@@ -80,6 +80,14 @@ async fn start_agent(node: &mut Node, binary: Option<&str>) {
 }
 
 async fn configured_pair(sandbox: &Sandbox, discovery: bool) -> (Node, Node) {
+    configured_pair_with_agent(sandbox, discovery, None).await
+}
+
+async fn configured_pair_with_agent(
+    sandbox: &Sandbox,
+    discovery: bool,
+    binary: Option<&str>,
+) -> (Node, Node) {
     let mut a = Node::init(sandbox.0.join("direct-a"));
     let mut b = Node::init(sandbox.0.join("direct-b"));
     for (node, peer) in [(&a, b.id()), (&b, a.id())] {
@@ -92,8 +100,8 @@ async fn configured_pair(sandbox: &Sandbox, discovery: bool) -> (Node, Node) {
         grant(&mut settings, &[peer]);
         offline(node, settings);
     }
-    a.start().await;
-    b.start().await;
+    start_agent(&mut a, binary).await;
+    start_agent(&mut b, binary).await;
     for node in [&a, &b] {
         node.ok(Api::SetPassword {
             expected_revision: 1,
@@ -324,7 +332,9 @@ async fn completed_file_task_survives_files_disabled_then_full_reenable() {
     use p2p_file::node::{core::task_model::TaskState, core::task_store::TaskStore};
 
     let sandbox = Sandbox::new();
-    let (mut sender, mut receiver) = configured_pair(&sandbox, false).await;
+    let baseline = std::env::var("VEYTRANE_TEST_BASELINE_AGENT").ok();
+    let (mut sender, mut receiver) =
+        configured_pair_with_agent(&sandbox, false, baseline.as_deref()).await;
     let sender_id = sender.id();
     let receiver_id = receiver.id();
     let bytes = vec![0x6bu8; 192 * 1024];
