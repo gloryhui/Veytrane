@@ -4447,6 +4447,7 @@ dependencies = [
  "unicode-segmentation",
  "veytrane-file-policy",
  "veytrane-files",
+ "veytrane-http-auth",
  "veytrane-management",
  "veytrane-node",
  "veytrane-speed",
@@ -7131,6 +7132,18 @@ dependencies = [
  "veytrane-speed",
  "veytrane-transport",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "veytrane-http-auth"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "hex",
+ "rand 0.10.3",
+ "serde_json",
+ "tracing",
+ "veytrane-transport",
 ]
 
 [[package]]

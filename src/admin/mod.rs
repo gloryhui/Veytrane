@@ -5,7 +5,7 @@
 //! loopback bind only. Remote administration is expected to go through an SSH
 //! tunnel.
 
-use std::io::{self, Write};
+use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -19,6 +19,8 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
+use veytrane_http_auth::authorize_token;
+pub use veytrane_http_auth::load_or_create_token;
 
 use crate::error::{Error, Result};
 use crate::identity::NodeId;
@@ -424,7 +426,11 @@ async fn apply_client(
 }
 
 fn authorize(state: &AdminState, headers: &HeaderMap) -> std::result::Result<(), ApiError> {
-    authorize_token(headers, &state.inner.token)
+    authorize_token(headers, &state.inner.token).map_err(|error| ApiError {
+        status: error.status,
+        message: error.message,
+        details: Vec::new(),
+    })
 }
 #[cfg(feature = "node")]
 pub(crate) fn authorize_management(
@@ -432,59 +438,6 @@ pub(crate) fn authorize_management(
     token: &str,
 ) -> std::result::Result<(), Box<Response>> {
     authorize_token(headers, token).map_err(|error| Box::new(error.into_response()))
-}
-fn authorize_token(headers: &HeaderMap, expected: &str) -> std::result::Result<(), ApiError> {
-    let host = headers
-        .get(header::HOST)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| ApiError::bad_request("缺少 Host 请求头"))?;
-    if !host_allowed(host) {
-        return Err(ApiError::forbidden("Host 不受信任"));
-    }
-    if let Some(origin) = headers.get(header::ORIGIN) {
-        let origin = origin
-            .to_str()
-            .map_err(|_| ApiError::forbidden("Origin 非法"))?;
-        if origin != format!("http://{host}") {
-            return Err(ApiError::forbidden("Origin 与 Host 不匹配"));
-        }
-    }
-    let token = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .ok_or_else(ApiError::unauthorized)?
-        .trim();
-    if !constant_time_eq(token.as_bytes(), expected.as_bytes()) {
-        return Err(ApiError::unauthorized());
-    }
-    Ok(())
-}
-
-fn host_allowed(host: &str) -> bool {
-    // Allow any local port so an SSH tunnel may map a different local port.
-    // The hostname itself must stay loopback; DNS rebinding uses a foreign name.
-    let hostname = if host.starts_with('[') {
-        host.split_once(']')
-            .map(|(name, _)| format!("{name}]"))
-            .unwrap_or_else(|| host.to_string())
-    } else {
-        host.rsplit_once(':')
-            .map(|(name, _)| name.to_string())
-            .unwrap_or_else(|| host.to_string())
-    };
-    matches!(hostname.as_str(), "127.0.0.1" | "localhost" | "[::1]")
-}
-
-fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-    let mut difference = 0_u8;
-    for (a, b) in left.iter().zip(right) {
-        difference |= a ^ b;
-    }
-    difference == 0
 }
 
 fn write_json_atomic<T: Serialize>(
@@ -504,58 +457,6 @@ pub fn default_token_path(config_path: &Path) -> PathBuf {
     config_path.with_file_name(format!("{file_name}.admin-token"))
 }
 
-/// Read a token file, creating a random token with `0600` permissions if absent.
-pub fn load_or_create_token(path: &Path) -> Result<String> {
-    match std::fs::read_to_string(path) {
-        Ok(text) => {
-            let token = text.trim().to_string();
-            if token.len() < 32 {
-                return Err(Error::Protocol(format!(
-                    "管理 token 文件 {} 内容过短（至少 32 字符）",
-                    path.display()
-                )));
-            }
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if let Ok(metadata) = std::fs::metadata(path)
-                    && metadata.permissions().mode() & 0o077 != 0
-                {
-                    warn!(
-                        path = %path.display(),
-                        "管理 token 文件权限过宽，建议 chmod 600"
-                    );
-                }
-            }
-            Ok(token)
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            if let Some(parent) = path.parent()
-                && !parent.as_os_str().is_empty()
-            {
-                std::fs::create_dir_all(parent)?;
-            }
-            let token = hex::encode(rand::random::<[u8; 32]>());
-            let mut options = std::fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            let mut file = options.open(path)?;
-            file.write_all(token.as_bytes())?;
-            file.write_all(b"\n")?;
-            file.sync_all()?;
-            Ok(token)
-        }
-        Err(error) => Err(Error::Io(io::Error::new(
-            error.kind(),
-            format!("读取管理 token 文件 {} 失败: {error}", path.display()),
-        ))),
-    }
-}
-
 #[derive(Debug)]
 struct ApiError {
     status: StatusCode,
@@ -567,20 +468,6 @@ impl ApiError {
     fn bad_request(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
-            message: message.into(),
-            details: Vec::new(),
-        }
-    }
-    fn unauthorized() -> Self {
-        Self {
-            status: StatusCode::UNAUTHORIZED,
-            message: "需要有效的管理 token".into(),
-            details: Vec::new(),
-        }
-    }
-    fn forbidden(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::FORBIDDEN,
             message: message.into(),
             details: Vec::new(),
         }
