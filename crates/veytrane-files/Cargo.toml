@@ -6,7 +6,7 @@ rust-version = "1.90"
 publish = false
 
 [features]
-node-tasks = ["dep:thiserror", "dep:veytrane-node"]
+node-tasks = ["dep:thiserror", "dep:tokio", "dep:veytrane-node"]
 safe-storage = [
     "dep:cap-fs-ext",
     "dep:cap-std",
@@ -26,6 +26,7 @@ rand = { version = "0.10.3", optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", optional = true }
 thiserror = { version = "2.0.20", optional = true }
+tokio = { version = "1.53.1", features = ["io-util", "sync", "time"], optional = true }
 tracing = "0.1.44"
 unicode-normalization = { version = "=0.1.25", optional = true }
 veytrane-node = { path = "../veytrane-node", optional = true }
@@ -33,6 +34,7 @@ veytrane-transport = { path = "../veytrane-transport" }
 
 [dev-dependencies]
 serde_json = "=1.0.151"
+tokio = { version = "1.53.1", features = ["macros", "rt", "test-util"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 rustix = { version = "=1.1.5", features = ["fs"], optional = true }

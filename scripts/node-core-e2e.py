@@ -54,16 +54,18 @@ def main():
     test_args = ["--", "--nocapture", "--test-threads=4"]
     command = cargo + ["-p", "p2p_file", "--features", "node", "--lib", "node::core::"] + test_args
     wire_command = cargo + ["-p", "veytrane-node", "--lib", "wire::"] + test_args
+    file_command = cargo + ["-p", "veytrane-files", "--features", "node-tasks,safe-storage", "--lib"] + test_args
+    commands = (command, wire_command, file_command)
     started = datetime.datetime.now(datetime.timezone.utc).isoformat()
     begin = time.monotonic()
     log_file = output / "node-core.log"
     with log_file.open("w", encoding="utf-8") as log:
         exit_code = 0
-        for invocation in (command, wire_command):
+        for invocation in commands:
             result = subprocess.run(invocation, cwd=repo, stdout=log, stderr=subprocess.STDOUT)
             exit_code = exit_code or result.returncode
     text = log_file.read_text(encoding="utf-8", errors="replace")
-    passed = set(re.findall(r"test ((?:node::core::|wire::)[\w:]+) \.\.\. ok", text))
+    passed = set(re.findall(r"test ([\w:]+) \.\.\. ok", text))
     proofs = []
     for line in text.splitlines():
         marker = "DESKTOP_E2E_PROOF "
@@ -88,9 +90,9 @@ def main():
     kills = {p["detail"]["killed"] for p in proofs if p["scenario"] == "session-os-kill-manual-continue"}
     pause = {p["detail"]["initiator"] for p in proofs if p["scenario"] == "process-pause-continue"}
     proof_complete = len(boundary) == 10 and kills == {"a", "b"} and pause == {"sender", "receiver", "simultaneous"}
-    complete_runs = len(re.findall(r"test result: ok\. [1-9]\d* passed; 0 failed; 0 ignored", text)) == 2
+    complete_runs = len(re.findall(r"test result: ok\. [1-9]\d* passed; 0 failed; 0 ignored", text)) == len(commands)
     success = exit_code == 0 and complete_runs and proof_complete and all(c["result"] == "PASS" for c in cases)
-    matrix = {"schema": "node-core-e2e/v1", "head_sha": head, "working_tree_dirty": dirty, "platform": platform.platform(), "architecture": platform.machine(), "started_utc": started, "elapsed_seconds": round(time.monotonic()-begin, 3), "command": command, "wire_command": wire_command, "exit_code": exit_code, "result": "PASS" if success else "FAIL", "cases": cases, "process_proofs": proofs, "proof_complete": proof_complete, "limits": ["Process actors execute production NodeSession, not GPUI window automation.", "StorageFull/PermissionDenied injection is modeled I/O; Unix chmod denial and Windows occupied-target denial are distinct actual platform tests.", "Controlled writer fairness is not a physical bandwidth threshold.", "Loopback/CI are not physical Win10/11, Apple Silicon interaction or dual NAT.", "Independent CLI tests and scripts/e2e.sh run separately after rebuild; this script does not claim them."]}
+    matrix = {"schema": "node-core-e2e/v1", "head_sha": head, "working_tree_dirty": dirty, "platform": platform.platform(), "architecture": platform.machine(), "started_utc": started, "elapsed_seconds": round(time.monotonic()-begin, 3), "command": command, "wire_command": wire_command, "file_command": file_command, "exit_code": exit_code, "result": "PASS" if success else "FAIL", "cases": cases, "process_proofs": proofs, "proof_complete": proof_complete, "limits": ["Process actors execute production NodeSession, not GPUI window automation.", "StorageFull/PermissionDenied injection is modeled I/O; Unix chmod denial and Windows occupied-target denial are distinct actual platform tests.", "Controlled writer fairness is not a physical bandwidth threshold.", "Loopback/CI are not physical Win10/11, Apple Silicon interaction or dual NAT.", "Independent CLI tests and scripts/e2e.sh run separately after rebuild; this script does not claim them."]}
     (output / "matrix.json").write_text(json.dumps(matrix, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")
     print(json.dumps({"result": matrix["result"], "head_sha": head, "working_tree_dirty": dirty, "platform": matrix["platform"], "elapsed_seconds": matrix["elapsed_seconds"], "evidence": str(output), "cases": len(cases), "process_proofs": len(proofs)}, ensure_ascii=False))
     return 0 if success else 1
