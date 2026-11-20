@@ -50,14 +50,20 @@ def main():
         parser.error("output directory must be empty; old failure logs must be preserved")
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=repo))
-    command = ["cargo", "test", "--locked", "--offline", "--no-default-features", "--features", "node", "--lib", "node::core::", "--", "--nocapture", "--test-threads=4"]
+    cargo = ["cargo", "test", "--locked", "--offline", "--no-default-features"]
+    test_args = ["--", "--nocapture", "--test-threads=4"]
+    command = cargo + ["-p", "p2p_file", "--features", "node", "--lib", "node::core::"] + test_args
+    wire_command = cargo + ["-p", "veytrane-node", "--lib", "wire::"] + test_args
     started = datetime.datetime.now(datetime.timezone.utc).isoformat()
     begin = time.monotonic()
     log_file = output / "node-core.log"
     with log_file.open("w", encoding="utf-8") as log:
-        result = subprocess.run(command, cwd=repo, stdout=log, stderr=subprocess.STDOUT)
+        exit_code = 0
+        for invocation in (command, wire_command):
+            result = subprocess.run(invocation, cwd=repo, stdout=log, stderr=subprocess.STDOUT)
+            exit_code = exit_code or result.returncode
     text = log_file.read_text(encoding="utf-8", errors="replace")
-    passed = set(re.findall(r"test (node::core::[\w:]+) \.\.\. ok", text))
+    passed = set(re.findall(r"test ((?:node::core::|wire::)[\w:]+) \.\.\. ok", text))
     proofs = []
     for line in text.splitlines():
         marker = "DESKTOP_E2E_PROOF "
@@ -77,14 +83,14 @@ def main():
     )
     for scenario, required in CASES.items():
         missing = [name for name in required if not any(p.endswith("::" + name) for p in passed)]
-        cases.append({"scenario": scenario, "result": "PASS" if not missing and result.returncode == 0 else "FAIL", "required_tests": required, "missing": missing, "evidence": "node-core.log"})
+        cases.append({"scenario": scenario, "result": "PASS" if not missing and exit_code == 0 else "FAIL", "required_tests": required, "missing": missing, "evidence": "node-core.log"})
     boundary = {p["detail"]["boundary"] for p in proofs if p["scenario"] == "publication-os-kill"}
     kills = {p["detail"]["killed"] for p in proofs if p["scenario"] == "session-os-kill-manual-continue"}
     pause = {p["detail"]["initiator"] for p in proofs if p["scenario"] == "process-pause-continue"}
     proof_complete = len(boundary) == 10 and kills == {"a", "b"} and pause == {"sender", "receiver", "simultaneous"}
-    ignored = re.search(r"test result: ok\. \d+ passed; 0 failed; 0 ignored", text) is not None
-    success = result.returncode == 0 and ignored and proof_complete and all(c["result"] == "PASS" for c in cases)
-    matrix = {"schema": "node-core-e2e/v1", "head_sha": head, "working_tree_dirty": dirty, "platform": platform.platform(), "architecture": platform.machine(), "started_utc": started, "elapsed_seconds": round(time.monotonic()-begin, 3), "command": command, "exit_code": result.returncode, "result": "PASS" if success else "FAIL", "cases": cases, "process_proofs": proofs, "proof_complete": proof_complete, "limits": ["Process actors execute production NodeSession, not GPUI window automation.", "StorageFull/PermissionDenied injection is modeled I/O; Unix chmod denial and Windows occupied-target denial are distinct actual platform tests.", "Controlled writer fairness is not a physical bandwidth threshold.", "Loopback/CI are not physical Win10/11, Apple Silicon interaction or dual NAT.", "Independent CLI tests and scripts/e2e.sh run separately after rebuild; this script does not claim them."]}
+    complete_runs = len(re.findall(r"test result: ok\. [1-9]\d* passed; 0 failed; 0 ignored", text)) == 2
+    success = exit_code == 0 and complete_runs and proof_complete and all(c["result"] == "PASS" for c in cases)
+    matrix = {"schema": "node-core-e2e/v1", "head_sha": head, "working_tree_dirty": dirty, "platform": platform.platform(), "architecture": platform.machine(), "started_utc": started, "elapsed_seconds": round(time.monotonic()-begin, 3), "command": command, "wire_command": wire_command, "exit_code": exit_code, "result": "PASS" if success else "FAIL", "cases": cases, "process_proofs": proofs, "proof_complete": proof_complete, "limits": ["Process actors execute production NodeSession, not GPUI window automation.", "StorageFull/PermissionDenied injection is modeled I/O; Unix chmod denial and Windows occupied-target denial are distinct actual platform tests.", "Controlled writer fairness is not a physical bandwidth threshold.", "Loopback/CI are not physical Win10/11, Apple Silicon interaction or dual NAT.", "Independent CLI tests and scripts/e2e.sh run separately after rebuild; this script does not claim them."]}
     (output / "matrix.json").write_text(json.dumps(matrix, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")
     print(json.dumps({"result": matrix["result"], "head_sha": head, "working_tree_dirty": dirty, "platform": matrix["platform"], "elapsed_seconds": matrix["elapsed_seconds"], "evidence": str(output), "cases": len(cases), "process_proofs": len(proofs)}, ensure_ascii=False))
     return 0 if success else 1

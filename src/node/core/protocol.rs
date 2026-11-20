@@ -12,19 +12,12 @@ use crate::protocol::manifest::{ChunkHash, FileManifest};
 
 use crate::node::core::task_model::TaskId;
 
-pub const CAP_TASK_PROTOCOL: u64 = 1;
-pub const CAP_RELATIVE_ENTRIES: u64 = 2;
-pub const CAP_PAUSE_RESUME: u64 = 4;
-pub const CAP_SPEED_OWNERSHIP: u64 = 8;
-pub const CAP_FILE_TRANSFER: u64 = 16;
-pub const CAP_DIRECTORY_TRANSFER: u64 = 32;
-pub const CAP_SPEED_EXECUTION: u64 = 64;
-pub const CAP_TCP_TUNNEL: u64 = 128;
-pub const CAP_REMOTE_AUTH: u64 = 256;
-pub const CAP_TRUSTED_DEVICE_AUTH: u64 = 1 << 9;
-pub const CAP_FILE_FLOW: u64 = 1 << 10;
-pub const CAP_AUTO_RESUME: u64 = 1 << 11;
-pub const CAP_INCREMENTAL_DIRECTORY: u64 = 1 << 12;
+pub use veytrane_node::capability::{
+    CAP_AUTO_RESUME, CAP_DIRECTORY_TRANSFER, CAP_FILE_FLOW, CAP_FILE_TRANSFER,
+    CAP_INCREMENTAL_DIRECTORY, CAP_PAUSE_RESUME, CAP_RELATIVE_ENTRIES, CAP_REMOTE_AUTH,
+    CAP_SPEED_EXECUTION, CAP_SPEED_OWNERSHIP, CAP_TASK_PROTOCOL, CAP_TCP_TUNNEL,
+    CAP_TRUSTED_DEVICE_AUTH,
+};
 pub const MAX_FRAME_BYTES: u32 = 4 * 1024 * 1024;
 pub const MAX_CHUNKS: usize = 65_536;
 pub const MAX_TASKS_PER_PEER: usize = 128;
