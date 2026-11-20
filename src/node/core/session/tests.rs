@@ -4112,6 +4112,16 @@ async fn refreshing_udp_candidates_reregisters_signal_and_restores_existing_tunn
     let mut cb = local_config(signal);
     cb.allowed_forward_targets
         .push(service_grant("echo", target, vec![a.node_id().to_hex()]));
+    let udp_a = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let udp_b = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    for (config, socket) in [(&mut ca, &udp_a), (&mut cb, &udp_b)] {
+        let address = socket.local_addr().unwrap();
+        config.network.local_port = address.port();
+        config.network.families = crate::net::NetworkFamilies::Ipv4Only;
+        config.network.advertise_only = true;
+        config.network.advertise = vec![address];
+    }
+    drop((udp_a, udp_b));
     let (hb, mut eb) = spawn(b.clone(), cb).unwrap();
     wait_signal_online(&mut eb).await;
     let (ha, mut ea) = spawn(a.clone(), ca).unwrap();
