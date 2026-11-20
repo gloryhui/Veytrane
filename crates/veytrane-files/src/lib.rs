@@ -7,11 +7,19 @@ pub mod bandwidth;
 pub mod chunk_bitmap;
 pub mod chunker;
 pub mod download;
+#[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
+pub mod drop_send;
+#[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
+pub mod files;
 #[cfg(feature = "node-tasks")]
 pub mod frame_budget;
+#[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
+pub mod incremental;
 pub mod manifest;
 #[cfg(feature = "node-tasks")]
 pub mod protocol;
+#[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
+pub mod publish;
 #[cfg(feature = "node-tasks")]
 pub mod queue;
 #[cfg(feature = "node-tasks")]
@@ -33,5 +41,7 @@ pub mod task_recovery;
 pub mod task_snapshot;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod task_store;
+#[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
+pub mod transfer_files;
 
 use veytrane_transport::error;
