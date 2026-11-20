@@ -220,10 +220,12 @@ fn handle_action(action: TrayAction, cx: &mut App) {
     }
 }
 
-fn request_quit(cx: &mut App) {
-    if cx.global::<TrayRuntime>().quitting {
-        return;
+pub(super) fn request_quit(cx: &mut App) {
+    if cx.has_global::<TrayRuntime>() {
+        if cx.global::<TrayRuntime>().quitting {
+            return;
+        }
+        cx.update_global::<TrayRuntime, _>(|runtime, _| runtime.quitting = true);
     }
-    cx.update_global::<TrayRuntime, _>(|runtime, _| runtime.quitting = true);
     cx.quit();
 }

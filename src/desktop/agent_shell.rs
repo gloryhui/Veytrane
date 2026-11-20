@@ -1124,6 +1124,7 @@ pub fn run(root: PathBuf, background: bool) {
     let application = Application::new();
     application.on_reopen(tray_host::show_main);
     application.run(move |cx: &mut App| {
+        cx.on_action(|_: &Quit, cx| tray_host::request_quit(cx));
         cx.bind_keys([
             KeyBinding::new("backspace", Backspace, None),
             KeyBinding::new("delete", Delete, None),
@@ -1135,6 +1136,7 @@ pub fn run(root: PathBuf, background: bool) {
             KeyBinding::new("secondary-v", Paste, None),
             KeyBinding::new("secondary-c", Copy, None),
             KeyBinding::new("secondary-x", Cut, None),
+            KeyBinding::new("secondary-q", Quit, None),
             KeyBinding::new("home", Home, None),
             KeyBinding::new("end", End, None),
             KeyBinding::new("secondary-enter", ConnectPeer, Some("AgentWorkbench")),
