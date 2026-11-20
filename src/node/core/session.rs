@@ -464,21 +464,13 @@ pub(crate) struct SessionPolicy {
     pub trust_sources: HashMap<NodeId, crate::node::core::authorization::TrustSource>,
     pub resources: crate::node::core::authorization::ResourcePolicy,
     pub services: Vec<veytrane_tcp::rules::AllowedForwardTarget>,
-    #[cfg(feature = "agent-files")]
-    pub files: FilePolicyUpdate,
 }
 
-#[cfg(feature = "agent-files")]
-pub(crate) struct FilePolicyUpdate {
-    pub receive_root: std::path::PathBuf,
-    pub auto_resume: bool,
-    pub send_concurrency: u8,
-    pub file_limits: veytrane_file_policy::bandwidth::FileLimits,
-    pub receive_safety_mib: u16,
-}
-
-type PersistResult = std::result::Result<veytrane_transport::atomic::WriteOutcome, String>;
-type PersistPolicy = Box<dyn FnOnce() -> PersistResult + Send>;
+type WriteOutcome = veytrane_transport::atomic::WriteOutcome;
+type PersistResult = std::result::Result<WriteOutcome, String>;
+type PublishPolicy = Box<dyn FnOnce() + Send>;
+type PreparedPolicy = std::result::Result<(WriteOutcome, PublishPolicy), String>;
+type PersistPolicy = Box<dyn FnOnce() -> PreparedPolicy + Send>;
 
 impl Drop for SessionLifetime {
     fn drop(&mut self) {
@@ -520,7 +512,7 @@ impl NodeSessionHandle {
         &self,
         policy: SessionPolicy,
         options: CommitOptions,
-        persist: impl FnOnce() -> PersistResult + Send + 'static,
+        persist: impl FnOnce() -> PreparedPolicy + Send + 'static,
     ) -> PersistResult {
         let (done, result) = oneshot::channel();
         self.commands
@@ -1972,17 +1964,7 @@ async fn run_session(
                         continue;
                     }
                 }
-                #[cfg(feature = "agent-files")]
-                if let Some(service) = &config.transfer
-                    && service.receive_root_path() != policy.files.receive_root
-                    && let Err(error) = crate::node::core::config::validate_receive_directory(
-                        &policy.files.receive_root,
-                    )
-                {
-                    let _ = done.send(Err(error.to_string()));
-                    continue;
-                }
-                let outcome = match persist() {
+                let (outcome, publish) = match persist() {
                     Ok(outcome) => outcome,
                     Err(error) => {
                         let _ = done.send(Err(error));
@@ -2085,17 +2067,7 @@ async fn run_session(
                         service.cancel_peer_recovery(peer);
                     }
                 }
-                #[cfg(feature = "agent-files")]
-                if let Some(service) = &config.transfer {
-                    // Values have already been validated before persistence.
-                    if service.receive_root_path() != policy.files.receive_root {
-                        service.set_receive_root(policy.files.receive_root);
-                    }
-                    service.set_auto_resume(policy.files.auto_resume);
-                    let _ = service.set_send_limit(policy.files.send_concurrency);
-                    let _ = service.set_file_limits(policy.files.file_limits);
-                    let _ = service.set_receive_safety_mib(policy.files.receive_safety_mib);
-                }
+                publish();
                 if options.restart {
                     session_shutdown = true;
                 }

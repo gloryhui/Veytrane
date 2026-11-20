@@ -194,14 +194,6 @@ impl NodeSettings {
                 .collect::<Result<_>>()?,
             resources: self.resources.clone(),
             services: self.services.clone(),
-            #[cfg(feature = "agent-files")]
-            files: crate::node::core::session::FilePolicyUpdate {
-                receive_root: self.receive_root.clone(),
-                auto_resume: self.auto_resume,
-                send_concurrency: self.send_concurrency,
-                file_limits: self.file_limits,
-                receive_safety_mib: self.receive_safety_mib,
-            },
         })
     }
 }

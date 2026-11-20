@@ -240,10 +240,35 @@ impl Agent {
         let policy = record.settings.runtime_policy().map_err(|e| e.to_string())?;
         let path = self.paths.config();
         let commit_record = record.clone();
+        #[cfg(feature = "agent-files")]
+        let file_service = self.control.control.transfer.clone();
         let outcome = match self
             .control
             .commit_policy(policy, options, move || {
-                crate::storage::atomic::write_json(&path, &commit_record).map_err(|e| e.to_string())
+                #[cfg(feature = "agent-files")]
+                if let Some(service) = &file_service
+                    && service.receive_root_path() != commit_record.settings.receive_root
+                {
+                    crate::node::core::config::validate_receive_directory(
+                        &commit_record.settings.receive_root,
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
+                let outcome = crate::storage::atomic::write_json(&path, &commit_record)
+                    .map_err(|e| e.to_string())?;
+                Ok((outcome, Box::new(move || {
+                    #[cfg(feature = "agent-files")]
+                    if let Some(service) = file_service {
+                        let file_settings = commit_record.settings;
+                        if service.receive_root_path() != file_settings.receive_root {
+                            service.set_receive_root(file_settings.receive_root);
+                        }
+                        service.set_auto_resume(file_settings.auto_resume);
+                        let _ = service.set_send_limit(file_settings.send_concurrency);
+                        let _ = service.set_file_limits(file_settings.file_limits);
+                        let _ = service.set_receive_safety_mib(file_settings.receive_safety_mib);
+                    }
+                })))
             })
             .await
         {
