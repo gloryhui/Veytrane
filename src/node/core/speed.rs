@@ -3,7 +3,6 @@
 use crate::node::core::activity::{Activity, ExclusivePermit};
 use crate::node::core::authorization::ResourcePolicy;
 use crate::node::core::dispatch::{BiStream, RESET_INVALID, RESET_UNAUTHORIZED};
-use crate::node::core::frame_budget::{BufferedBytes, FrameBudget};
 use crate::node::core::remote_auth::{LiveAuthorization, RemoteAuthorization};
 use crate::protocol::raw_frame::{read_raw_frame_limited, write_raw_frame_limited};
 use crate::{
@@ -20,6 +19,7 @@ use tokio::{
     sync::{Semaphore, mpsc, oneshot, watch},
     task::JoinSet,
 };
+use veytrane_node::frame_budget::{BufferedBytes, FrameBudget};
 use veytrane_node::{operation_id::TaskId, p2pf::MAX_FRAME_BYTES};
 use veytrane_speed::{
     control::{SpeedArbiter, SpeedControl, SpeedDirection, SpeedLease},

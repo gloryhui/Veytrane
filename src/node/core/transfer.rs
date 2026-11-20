@@ -1,4 +1,5 @@
 //! Authenticated single-file streams. Disk work stays off the network/UI executors.
+use crate::node::core::frame_budget::read_file_frame;
 use crate::node::core::protocol::{
     self, Actor, Entry, ErrorCode, Frame, Message, TaskProtocol, WireTaskState,
 };
@@ -711,7 +712,7 @@ impl TransferService {
                 )
                 .await?;
                 send.finish().map_err(disk::local_error)?;
-                let reply = self.frame_budget.read(&mut recv, None).await?;
+                let reply = read_file_frame(&self.frame_budget, &mut recv, None).await?;
                 match reply.frame {
                     Frame {
                         request_id: 1,
@@ -2146,7 +2147,7 @@ impl TransferService {
                     streams.spawn(async move {
                         let _permit = permit;
                         authorization.guard(true, async {
-                        let buffered=tokio::time::timeout(Duration::from_secs(5),service.frame_budget.read(&mut recv,None)).await.map_err(|_|disk::failure("文件流首帧超时"))??;
+                        let buffered=tokio::time::timeout(Duration::from_secs(5),read_file_frame(&service.frame_budget, &mut recv,None)).await.map_err(|_|disk::failure("文件流首帧超时"))??;
                         let crate::node::core::frame_budget::BufferedFrame {frame:mut first,_lease}=buffered;
                         let allowed = resources.borrow().for_peer(peer);
                         if matches!(&first.message, Message::Speed(_)) {
@@ -3021,7 +3022,7 @@ impl TaskIo {
         };
         let reader = tokio::spawn(async move {
             loop {
-                let frame = budget.read(&mut recv, Some(task_limit.clone())).await;
+                let frame = read_file_frame(&budget, &mut recv, Some(task_limit.clone())).await;
                 let failed = frame.is_err();
                 if matches!(&frame, Ok(buffered) if matches!(buffered.frame.message, Message::Pause { .. }))
                 {
