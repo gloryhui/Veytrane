@@ -3,6 +3,7 @@ pub mod client;
 #[cfg(any(feature = "signaling-server", test))]
 #[path = "../../apps/signaling/src/relay.rs"]
 pub mod server;
+#[cfg(any(feature = "signaling-server", test))]
 mod wire;
 
 pub const RELAY_FALLBACK_DELAY: std::time::Duration = std::time::Duration::from_millis(2500);
