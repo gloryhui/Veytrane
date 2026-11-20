@@ -3809,9 +3809,20 @@ async fn restart_auto_start_uses_fresh_identity_bound_trust_and_revoke_closes_ru
         target.local_addr().unwrap(),
         vec![a.node_id().to_hex()],
     )];
+    let reserve_a = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let reserve_b = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    for (config, reserve) in [(&mut ca, &reserve_a), (&mut cb, &reserve_b)] {
+        let address = reserve.local_addr().unwrap();
+        config.network.families = crate::net::NetworkFamilies::Ipv4Only;
+        config.network.local_port = address.port();
+        config.network.advertise_only = true;
+        config.network.advertise = vec![address];
+    }
     // Spawn the persisted owner first, then boot the passwordless auto-start client.
+    drop(reserve_b);
     let (hb, mut eb) = spawn(b.clone(), cb).unwrap();
     wait_signal_online(&mut eb).await;
+    drop(reserve_a);
     let (ha, mut ea) = spawn(a.clone(), ca).unwrap();
     wait_specific_tunnel_state(&mut ea, &rule.id, TunnelRuntimeState::Running).await;
     let only_trust = AuthorizationGrant {
