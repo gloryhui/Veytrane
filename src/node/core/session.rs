@@ -418,6 +418,7 @@ impl SessionEvents {
 pub struct NodeSessionHandle {
     pub(crate) control: crate::node::core::control::ControlState,
     peer_capacity: usize,
+    speed_available: bool,
     resources: watch::Sender<crate::node::core::authorization::ResourcePolicy>,
     commands: mpsc::Sender<SessionCommand>,
     allowed_forward_targets: watch::Sender<Vec<crate::node::core::config::AllowedForwardTarget>>,
@@ -817,7 +818,7 @@ impl NodeSessionHandle {
         direction: crate::node::core::config::SpeedtestDirection,
         seconds: u16,
     ) -> std::result::Result<(), String> {
-        if self.control.speed.is_none() {
+        if !self.speed_available {
             return Err("capability_disabled: 测速服务未启用".into());
         }
         self.commands
@@ -829,12 +830,8 @@ impl NodeSessionHandle {
             .map_err(|_| "测速命令队列已满或会话已关闭".into())
     }
     #[allow(dead_code)] // T010 controls.
-    pub fn cancel_speed(
-        &self,
-        peer: NodeId,
-        id: TaskId,
-    ) -> std::result::Result<(), String> {
-        if self.control.speed.is_none() {
+    pub fn cancel_speed(&self, peer: NodeId, id: TaskId) -> std::result::Result<(), String> {
+        if !self.speed_available {
             return Err("capability_disabled: 测速服务未启用".into());
         }
         self.commands
@@ -1318,11 +1315,8 @@ pub(crate) fn spawn(
     }
     let max_peers = config.max_peers;
     let speed = speed.filter(|_| config.enable_speed);
-    let control = crate::node::core::control::ControlState::new(
-        identity.node_id(),
-        speed,
-        max_peers,
-    );
+    let speed_available = speed.is_some();
+    let control = crate::node::core::control::ControlState::new(identity.node_id(), max_peers);
     control.set_trust_sources(&config.trust_sources);
     let runtime_control = control.clone();
     let (resources, _) = watch::channel(config.resources.clone());
@@ -1351,6 +1345,7 @@ pub(crate) fn spawn(
                         run_session(
                             identity,
                             config,
+                            speed,
                             session_command_tx,
                             command_rx,
                             SessionPolicies {
@@ -1387,6 +1382,7 @@ pub(crate) fn spawn(
         NodeSessionHandle {
             control,
             peer_capacity: max_peers,
+            speed_available,
             resources,
             commands: command_tx,
             allowed_forward_targets,
@@ -1408,6 +1404,7 @@ struct SessionPolicies {
 async fn run_session(
     identity: Identity,
     config: NodeSessionConfig,
+    speed_service: Option<SpeedService>,
     command_tx: mpsc::Sender<SessionCommand>,
     mut commands: mpsc::Receiver<SessionCommand>,
     policies: SessionPolicies,
@@ -1419,7 +1416,6 @@ async fn run_session(
         resources: resource_policy,
     } = policies;
     let max_peers = config.max_peers;
-    let speed_service = events.control.speed.clone();
     let _ = events
         .send(SessionEvent::SignalSecurity {
             tls: config.signal_tls.is_some(),

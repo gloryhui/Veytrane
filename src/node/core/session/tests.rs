@@ -1509,6 +1509,10 @@ async fn directional_business_fixture(relay_enabled: bool) {
     let (sb, _) = TaskStore::open(&root.join("b-state/tasks.json")).unwrap();
     let service_a = TransferService::new(sa, root.join("a-receive"));
     let service_b = TransferService::new(sb, root.join("b-receive"));
+    let (activity_a, changed_a, frame_budget_a) = service_a.shared_parts();
+    let (activity_b, changed_b, frame_budget_b) = service_b.shared_parts();
+    let speed_a = SpeedService::new(activity_a, changed_a, frame_budget_a);
+    let speed_b = SpeedService::new(activity_b, changed_b, frame_budget_b);
     let a = Identity::generate();
     let b = Identity::generate();
     let pa = SecretPassword::new("Local9A".into()).unwrap();
@@ -1554,8 +1558,8 @@ async fn directional_business_fixture(relay_enabled: bool) {
             config.network.advertise = vec![blackhole.local_addr().unwrap()];
         }
     }
-    let (ha, mut ea) = spawn(a.clone(), ca).unwrap();
-    let (hb, mut eb) = spawn(b.clone(), cb).unwrap();
+    let (ha, mut ea) = super::spawn(a.clone(), ca, Some(speed_a.clone())).unwrap();
+    let (hb, mut eb) = super::spawn(b.clone(), cb, Some(speed_b.clone())).unwrap();
     let short_a = time::timeout(Duration::from_secs(5), async {
         loop {
             if let Some(SessionEvent::ShortIdRegistered(id)) = ea.recv().await {
@@ -1703,8 +1707,6 @@ async fn directional_business_fixture(relay_enabled: bool) {
         .unwrap()
         .unwrap();
     assert!(!service_a.test_speed_idle(b.node_id()));
-    let speed_a = ha.control.speed.as_ref().unwrap();
-    let speed_b = hb.control.speed.as_ref().unwrap();
     assert!(
         speed_a
             .start(

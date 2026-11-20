@@ -118,7 +118,6 @@ pub(crate) struct ControlState {
     events: broadcast::Sender<SequencedEvent>,
     trust_sources: Arc<Mutex<BTreeMap<String, crate::node::core::authorization::TrustSource>>>,
     max_peers: usize,
-    pub(crate) speed: Option<crate::node::core::speed::SpeedService>,
 }
 
 impl ControlState {
@@ -162,11 +161,7 @@ impl ControlState {
             sources.retain(|id, _| devices.iter().any(|device| &device.node_id == id));
         }
     }
-    pub(crate) fn new(
-        identity: NodeId,
-        speed: Option<crate::node::core::speed::SpeedService>,
-        max_peers: usize,
-    ) -> Self {
+    pub(crate) fn new(identity: NodeId, max_peers: usize) -> Self {
         let (events, _) = broadcast::channel(256);
         Self {
             snapshot: Arc::new(Mutex::new(NodeSnapshot {
@@ -177,7 +172,6 @@ impl ControlState {
             events,
             trust_sources: Default::default(),
             max_peers,
-            speed,
         }
     }
 
@@ -467,15 +461,6 @@ impl NodeControl {
         };
         result.map_err(Error::Protocol)
     }
-    pub(crate) fn speed_snapshots(
-        &self,
-    ) -> std::collections::HashMap<NodeId, crate::node::core::speed::SpeedSnapshot> {
-        self.control
-            .speed
-            .as_ref()
-            .map(|service| service.snapshots())
-            .unwrap_or_default()
-    }
 }
 
 #[cfg(test)]
@@ -485,11 +470,7 @@ mod transport_tests {
     #[test]
     fn transport_counters_cannot_cross_peer_generations() {
         let id = Identity::generate().node_id();
-        let state = ControlState::new(
-            id,
-            None,
-            crate::node::core::network_state::DEFAULT_MAX_PEERS,
-        );
+        let state = ControlState::new(id, crate::node::core::network_state::DEFAULT_MAX_PEERS);
         state.snapshot.lock().unwrap().peers.insert(
             id.to_hex(),
             PeerSnapshot {
@@ -541,7 +522,7 @@ mod transport_tests {
     fn peer_snapshot_and_short_id_cache_follow_instance_capacity() {
         let local = Identity::generate().node_id();
         let capacity = 3;
-        let state = ControlState::new(local, None, capacity);
+        let state = ControlState::new(local, capacity);
         for generation in 1..=capacity as u64 + 1 {
             state.observe(&SessionEvent::PeerState {
                 peer: Identity::generate().node_id(),

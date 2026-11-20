@@ -36,12 +36,35 @@ impl SharedRuntime {
     }
 }
 
+pub struct RuntimeAssembly {
+    pub control: NodeControl,
+    pub events: ControlEvents,
+    pub speed: Option<SpeedService>,
+    #[cfg(feature = "agent-files")]
+    pub file_service: Option<TransferService>,
+}
+
 pub fn spawn(
     identity: Identity,
     config: NodeSessionConfig,
 ) -> io::Result<(NodeControl, ControlEvents)> {
+    let assembly = spawn_assembled(identity, config)?;
+    Ok((assembly.control, assembly.events))
+}
+
+pub(crate) fn spawn_assembled(
+    identity: Identity,
+    config: NodeSessionConfig,
+) -> io::Result<RuntimeAssembly> {
     let speed = config.enable_speed.then(|| SharedRuntime::new().speed());
-    control::spawn(identity, config, speed)
+    let (control, events) = control::spawn(identity, config, speed.clone())?;
+    Ok(RuntimeAssembly {
+        control,
+        events,
+        speed,
+        #[cfg(feature = "agent-files")]
+        file_service: None,
+    })
 }
 
 #[cfg(feature = "agent-files")]
@@ -50,15 +73,13 @@ pub fn spawn_with_storage(
     mut config: NodeSessionConfig,
     tasks: &Path,
     receive_root: PathBuf,
-) -> crate::error::Result<(NodeControl, ControlEvents, Option<TransferService>)> {
+) -> crate::error::Result<RuntimeAssembly> {
     if !config.enable_files {
-        return spawn(identity, config)
-            .map(|(control, events)| (control, events, None))
-            .map_err(crate::error::Error::Io);
+        return spawn_assembled(identity, config).map_err(crate::error::Error::Io);
     }
     let shared = SharedRuntime::new();
-    let (store, _) = TaskStore::open(tasks)
-        .map_err(|error| crate::error::Error::Protocol(error.to_string()))?;
+    let (store, _) =
+        TaskStore::open(tasks).map_err(|error| crate::error::Error::Protocol(error.to_string()))?;
     let speed = config.enable_speed.then(|| shared.speed());
     let file_service = TransferService::new_with_shared(
         store,
@@ -68,7 +89,12 @@ pub fn spawn_with_storage(
         shared.frame_budget,
     );
     config.transfer = Some(file_service.clone());
-    control::spawn(identity, config, speed)
-        .map(|(control, events)| (control, events, Some(file_service)))
-        .map_err(crate::error::Error::Io)
+    let (control, events) =
+        control::spawn(identity, config, speed.clone()).map_err(crate::error::Error::Io)?;
+    Ok(RuntimeAssembly {
+        control,
+        events,
+        speed,
+        file_service: Some(file_service),
+    })
 }

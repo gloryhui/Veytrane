@@ -46,6 +46,7 @@ struct ActiveCapabilities {
 }
 pub struct Agent {
     pub(crate) control: NodeControl,
+    speed_service: Option<crate::node::core::speed::SpeedService>,
     #[cfg(feature = "agent-files")]
     pub(super) file_service: Option<veytrane_files::transfer::TransferService>,
     pub(crate) config: Mutex<ConfigRecord>,
@@ -124,7 +125,25 @@ impl Agent {
                 #[cfg(not(feature = "agent-files"))]
                 let file_page = FilePage::default();
                 let total = file_page.total;
-                let speeds=self.control.speed_snapshots().iter().map(|(peer,s)|json!({"peer":peer.to_hex(),"id":s.test_id,"direction":s.direction,"state":format!("{:?}",s.status),"bytes":s.bytes,"bytes_per_second":s.bytes_per_second,"elapsed_ms":s.elapsed.as_millis(),"rtt_ms":s.rtt.as_millis()})).collect::<Vec<_>>();
+                let speeds = self
+                    .speed_service
+                    .as_ref()
+                    .map(|service| service.snapshots())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(peer, snapshot)| {
+                        json!({
+                            "peer": peer.to_hex(),
+                            "id": snapshot.test_id,
+                            "direction": snapshot.direction,
+                            "state": format!("{:?}", snapshot.status),
+                            "bytes": snapshot.bytes,
+                            "bytes_per_second": snapshot.bytes_per_second,
+                            "elapsed_ms": snapshot.elapsed.as_millis(),
+                            "rtt_ms": snapshot.rtt.as_millis(),
+                        })
+                    })
+                    .collect::<Vec<_>>();
                 Ok(json!({
                     "tasks": file_page.tasks,
                     "queue": file_page.queue,
@@ -516,16 +535,16 @@ async fn run_with_recovery(
         tcp: session.enable_tcp,
     };
     #[cfg(feature = "agent-files")]
-    let (control, mut raw, file_service) = if session.enable_files {
+    let assembly = if session.enable_files {
         crate::storage::permissions::ensure_directory(&record.settings.receive_root)?;
-        let (control, events, file_service) = runtime::spawn_with_storage(
+        let assembly = runtime::spawn_with_storage(
             identity,
             session,
             &paths.tasks(),
             record.settings.receive_root.clone(),
         )
         .map_err(io::Error::other)?;
-        if let Some(service) = &file_service {
+        if let Some(service) = &assembly.file_service {
             service.set_auto_resume(record.settings.auto_resume);
             service
                 .set_send_limit(record.settings.send_concurrency)
@@ -537,19 +556,26 @@ async fn run_with_recovery(
                 .set_receive_safety_mib(record.settings.receive_safety_mib)
                 .map_err(io::Error::other)?;
         }
-        (control, events, file_service)
+        assembly
     } else {
-        let (control, events) = runtime::spawn(identity, session)?;
-        (control, events, None)
+        runtime::spawn_assembled(identity, session)?
     };
     #[cfg(not(feature = "agent-files"))]
-    let (control, mut raw) = runtime::spawn(identity, session)?;
+    let assembly = runtime::spawn_assembled(identity, session)?;
+    let runtime::RuntimeAssembly {
+        control,
+        events: mut raw,
+        speed: speed_service,
+        #[cfg(feature = "agent-files")]
+        file_service,
+    } = assembly;
     control
         .configuration_committed(record.revision)
         .map_err(io::Error::other)?;
     let (_, mut events) = control.subscribe().map_err(io::Error::other)?;
     let agent = Arc::new(Agent {
         control,
+        speed_service,
         #[cfg(feature = "agent-files")]
         file_service,
         config: Mutex::new(record),
