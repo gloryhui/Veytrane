@@ -12,7 +12,7 @@ src/bin/p2p-node.rs → 管理 CLI → veytrane-management
 src/bin/p2p-agent.rs → Agent 宿主与可选 Web 导航
                    └─ node/composition → node/core → 节点、传输及能力包
 Live / Sub2API → 各自的产品组装 → node/composition、TCP
-src/main.rs → 独立 CLI
+src/main.rs → apps/standalone-cli
            └─ signal-server → apps/signaling → 信令、短 ID 注册库和可选 Relay
 ```
 
@@ -36,6 +36,7 @@ src/main.rs → 独立 CLI
 | `src/storage/` | 基础存储和独立 CLI 文件存储的兼容入口。 |
 | `src/discovery/`、`nat/`、`net/`、`transport/`、`relay/` | 共用发现客户端、打洞、连接竞速、QUIC 和 Relay 客户端。服务端模块只在 `signaling-server` 及测试构建启用。 |
 | `apps/signaling` | `p2p_file signal-server` 的启动、TLS 监听、设备登记与短 ID SQLite，以及可选 Relay 服务端。 |
+| `apps/standalone-cli` | `p2p_file` 的命令编排、进程退出、交互输出及配置热加载。根二进制入口和公开参数解析路径继续供现有调用方使用。 |
 | `src/protocol/`、`transfer/`、`tunnel/`、`admin/` | 原独立 CLI 仍在使用的协议与执行路径；不能因与 node 同名就删除。 |
 | `crates/veytrane-transport` | 身份、绑定到 QUIC 会话的握手、端点、有界原始帧和 OS 存储原语。 |
 | `crates/veytrane-node` | P2PN 协商、双向流分发、会话授权、设备容量、连接代际及活动许可。 |

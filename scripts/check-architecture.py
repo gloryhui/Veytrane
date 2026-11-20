@@ -48,7 +48,7 @@ PROFILE_EXCLUSIONS = {
     "sub2api-client,sub2api-gateway": {
         "veytrane-files", "veytrane-web-management", "axum", "gpui", "rusqlite"
     },
-    "standalone": {"veytrane-management", "veytrane-web-management", "gpui"},
+    "standalone": {"veytrane-node", "veytrane-management", "veytrane-web-management", "gpui"},
 }
 
 
@@ -89,6 +89,9 @@ def violations(root):
                    "products must assemble their own node outside the Agent host")
             reject(r"\bsuper::(?:live|sub2api)\s*::",
                    "products must share helpers through the common runtime module")
+        if parts[:2] == ("apps", "standalone-cli"):
+            reject(r"\bp2p_file::(?:node|desktop)\b|\bp2p_file::\s*\{",
+                   "standalone CLI must use the standalone protocols and transport")
         if parts[1:3] == ("desktop", "agent_shell") or relative.as_posix() == "src/desktop/agent_shell.rs":
             reject(r"\blegacy\s*::|\bDesktopShell\b", "Agent desktop must not borrow the embedded legacy runtime")
             reject(r"crate::node::(?:core|host|products)::", "Agent desktop must use management contracts and shared validation")
