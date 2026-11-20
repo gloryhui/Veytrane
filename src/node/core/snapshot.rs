@@ -185,12 +185,9 @@ pub enum ListRow {
     Task(TaskRow),
 }
 pub struct Snapshot {
-    pub detail_selection: Option<crate::node::core::task_details::Selection>,
-    pub detail: Option<crate::node::core::task_details::Detail>,
     pub space: crate::node::core::space_budget::Summary,
     pub tasks: Vec<TaskRow>,
     pub queue: QueueMetrics,
-    pub speeds: HashMap<NodeId, SpeedSnapshot>,
 }
 impl Snapshot {
     pub fn list(&self, expanded: &HashSet<TaskId>) -> Vec<ListRow> {
@@ -399,11 +396,8 @@ mod tests {
         other.peer = crate::identity::Identity::generate().node_id();
         let view = Snapshot {
             space: Default::default(),
-            detail_selection: None,
-            detail: None,
             tasks: vec![first.clone(), second, other],
             queue: crate::node::core::queue::TaskQueue::default().metrics(),
-            speeds: HashMap::new(),
         };
         let devices = [crate::node::core::trusted_devices::TrustedDevice::new(
             peer,
@@ -525,8 +519,6 @@ mod tests {
         b.confirmed = 4;
         let view = Snapshot {
             space: Default::default(),
-            detail_selection: None,
-            detail: None,
             tasks: vec![a, b],
             queue: QueueMetrics {
                 pending: 0,
@@ -535,7 +527,6 @@ mod tests {
                 limit: 1,
                 converging: false,
             },
-            speeds: HashMap::new(),
         };
         let collapsed = view.list(&HashSet::new());
         assert_eq!(collapsed.len(), 1);

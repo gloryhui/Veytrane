@@ -64,7 +64,6 @@ pub(crate) struct TransferService {
     recovery: Arc<Mutex<crate::node::core::auto_resume::Recovery>>,
     pub(crate) receive_space: crate::node::core::space_budget::SpaceBudget,
     measurements: Arc<Mutex<crate::node::core::task_details::Measurements>>,
-    detail_selection: Arc<Mutex<Option<crate::node::core::task_details::Selection>>>,
     automatic_sends: Arc<Mutex<HashMap<TaskId, crate::node::core::auto_resume::Ticket>>>,
     pub(crate) activity: crate::node::core::activity::Activity,
     #[cfg(test)]
@@ -249,7 +248,6 @@ impl TransferService {
             recovery: Default::default(),
             receive_space: Default::default(),
             measurements: Default::default(),
-            detail_selection: Default::default(),
             automatic_sends: Default::default(),
             #[cfg(test)]
             drop_completion: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1641,12 +1639,6 @@ impl TransferService {
             queue: self.queue_metrics(),
         })
     }
-    pub(crate) fn select_detail(
-        &self,
-        selection: Option<crate::node::core::task_details::Selection>,
-    ) {
-        *self.detail_selection.lock().unwrap() = selection;
-    }
     /// Only called on a background worker; keep lookup and validation in the
     /// store reader, so cleanup cannot change the binding during validation.
     pub(crate) fn reveal_task(
@@ -1663,8 +1655,7 @@ impl TransferService {
     /// never chunk manifests, while holding the store reader. No UI disk/locks.
     pub(crate) fn ui_snapshot(&self) -> Result<crate::node::core::snapshot::Snapshot> {
         let now = self.monotonic_ms();
-        let selection = self.detail_selection.lock().unwrap().clone();
-        let (mut tasks, detail) = {
+        let mut tasks = {
             let store = self
                 .store
                 .lock()
@@ -1672,22 +1663,7 @@ impl TransferService {
             let rates = self.rates.lock().unwrap();
             let mut measurements = self.measurements.lock().unwrap();
             measurements.retain(store.list());
-            let wall = system_time_unix_ms().unwrap_or(-1);
             let recovery = self.recovery.lock().unwrap();
-            let detail = selection.as_ref().and_then(|selection| {
-                crate::node::core::task_details::project(
-                    store.list(),
-                    selection,
-                    |record| {
-                        rates.get(record.task_id()).map_or(0., |rate| {
-                            rate.bytes_per_second(now, record.state() == TaskState::Transferring)
-                        })
-                    },
-                    |id| measurements.sample(id, Instant::now()),
-                    |id| recovery.pending(id),
-                    wall,
-                )
-            });
             let tasks = store
                 .list()
                 .iter()
@@ -1703,17 +1679,42 @@ impl TransferService {
                     })
                 })
                 .collect::<Vec<_>>();
-            (tasks, detail)
+            tasks
         };
         tasks.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)));
         Ok(crate::node::core::snapshot::Snapshot {
             space: self.receive_space.summary(),
-            detail_selection: selection,
-            detail,
             tasks: tasks.into_iter().map(|(_, row)| row).collect(),
             queue: self.queue_metrics(),
-            speeds: HashMap::new(),
         })
+    }
+    #[cfg(test)]
+    pub(crate) fn task_detail(
+        &self,
+        selection: &crate::node::core::task_details::Selection,
+    ) -> Result<Option<crate::node::core::task_details::Detail>> {
+        let now = self.monotonic_ms();
+        let store = self
+            .store
+            .lock()
+            .map_err(|_| disk::failure("任务库锁不可用"))?;
+        let rates = self.rates.lock().unwrap();
+        let mut measurements = self.measurements.lock().unwrap();
+        measurements.retain(store.list());
+        let recovery = self.recovery.lock().unwrap();
+        let wall = system_time_unix_ms().unwrap_or(-1);
+        Ok(crate::node::core::task_details::project(
+            store.list(),
+            selection,
+            |record| {
+                rates.get(record.task_id()).map_or(0., |rate| {
+                    rate.bytes_per_second(now, record.state() == TaskState::Transferring)
+                })
+            },
+            |id| measurements.sample(id, Instant::now()),
+            |id| recovery.pending(id),
+            wall,
+        ))
     }
     async fn receipt(&self, id: &TaskId) -> Result<()> {
         self.recovery.lock().unwrap().forget(id);

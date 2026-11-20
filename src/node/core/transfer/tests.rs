@@ -2230,8 +2230,7 @@ async fn authenticated_directory_preserves_structure_empty_entries_and_collision
     use crate::node::core::task_details::Selection;
     let selection = Selection::Group(records[0].group_id().unwrap().clone());
     for service in [&pair.a, &pair.b] {
-        service.select_detail(Some(selection.clone()));
-        let detail = service.ui_snapshot().unwrap().detail.unwrap();
+        let detail = service.task_detail(&selection).unwrap().unwrap();
         assert_eq!(detail.members.len(), 5);
         assert_eq!(detail.counts.files, 2);
         assert_eq!(detail.counts.directories, 3);
@@ -3321,8 +3320,6 @@ async fn task_details_follow_real_pause_retry_receipts_and_history_removal() {
     let pair = Pair::new().await;
     let (id, bytes) = pair.select(8 * 1024 * 1024).await;
     let selected = Selection::Task(id.clone());
-    pair.a.select_detail(Some(selected.clone()));
-    pair.b.select_detail(Some(selected.clone()));
     let (reached, release) = pair.gate();
     let sender = pair.sender(id.clone());
     reached.await.unwrap();
@@ -3336,7 +3333,7 @@ async fn task_details_follow_real_pause_retry_receipts_and_history_removal() {
     wait_state(&pair.b, &id, TaskState::Paused).await;
     for service in [&pair.a, &pair.b] {
         service.wait_previous_attempt(&id).await.unwrap();
-        let detail = service.ui_snapshot().unwrap().detail.unwrap();
+        let detail = service.task_detail(&selected).unwrap().unwrap();
         assert_eq!(detail.rate, 0.);
         assert_eq!(detail.eta, None);
         assert_eq!(detail.run.attempts, 1);
@@ -3356,7 +3353,7 @@ async fn task_details_follow_real_pause_retry_receipts_and_history_removal() {
         service.wait_previous_attempt(&id).await.unwrap();
         let before = service.snapshot().await.unwrap();
         let changed = *service.changed.borrow();
-        let detail = service.ui_snapshot().unwrap().detail.unwrap();
+        let detail = service.task_detail(&selected).unwrap().unwrap();
         assert_eq!(detail.confirmed, bytes.len() as u64);
         assert_eq!(detail.run.attempts, 2);
         assert_eq!(detail.run.retries, 1);
@@ -3370,7 +3367,7 @@ async fn task_details_follow_real_pause_retry_receipts_and_history_removal() {
     let destination = pair.root.join("b-receive/文件.bin");
     assert_eq!(pair.b.reveal_task(&selected).unwrap(), destination);
     pair.b.remove_completed_task(&id).unwrap();
-    assert!(pair.b.ui_snapshot().unwrap().detail.is_none());
+    assert!(pair.b.task_detail(&selected).unwrap().is_none());
     assert!(pair.b.reveal_task(&selected).is_err());
     assert_eq!(fs::read(destination).unwrap(), bytes);
     pair.shutdown().await;

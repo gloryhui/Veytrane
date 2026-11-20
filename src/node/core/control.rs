@@ -529,13 +529,6 @@ impl NodeControl {
     pub fn delete_completed_receive_file(&self, task: &TaskId) -> Result<()> {
         self.file_service()?.delete_completed_receive_file(task)
     }
-    pub fn select_detail(
-        &self,
-        selection: Option<crate::node::core::task_details::Selection>,
-    ) -> Result<()> {
-        self.file_service()?.select_detail(selection);
-        Ok(())
-    }
     pub fn reveal_task(
         &self,
         selection: &crate::node::core::task_details::Selection,
