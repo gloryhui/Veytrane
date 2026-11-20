@@ -9,7 +9,11 @@ pub use mdns::{
 };
 pub use signal::{
     Candidate, CandidateKind, DEFAULT_SIGNAL_PORT, LookupOutcome, PeerOffer, SignalMessage,
-    SignalingClient, dedup_candidates, run_signal_server, run_signal_server_on, sort_candidates,
+    SignalingClient, dedup_candidates, sort_candidates,
 };
+#[cfg(any(feature = "signaling-server", test))]
+pub use signal::{run_signal_server, run_signal_server_on};
 
 pub mod short_id;
+#[cfg(any(feature = "signaling-server", test))]
+mod short_id_store;

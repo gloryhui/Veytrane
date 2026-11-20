@@ -3,14 +3,18 @@
 use crate::error::{Error, Result};
 use quinn::rustls::{
     self,
-    pki_types::{CertificateDer, PrivateKeyDer, ServerName, pem::PemObject},
+    pki_types::{CertificateDer, ServerName, pem::PemObject},
 };
+#[cfg(any(feature = "signaling-server", test))]
+use rustls::pki_types::PrivateKeyDer;
 use std::{
     io::Read,
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio_rustls::{TlsAcceptor, TlsConnector};
+#[cfg(any(feature = "signaling-server", test))]
+use tokio_rustls::TlsAcceptor;
+use tokio_rustls::TlsConnector;
 
 const MAX_PEM_BYTES: u64 = 4 * 1024 * 1024;
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -22,6 +26,7 @@ pub struct SignalTlsClient {
     pub server_name: Option<String>,
 }
 #[derive(Clone, Debug)]
+#[cfg(any(feature = "signaling-server", test))]
 pub struct SignalTlsServer {
     pub certificate: PathBuf,
     pub private_key: PathBuf,
@@ -102,6 +107,7 @@ impl SignalTlsClient {
         Ok((TlsConnector::from(Arc::new(config)), name))
     }
 }
+#[cfg(any(feature = "signaling-server", test))]
 impl SignalTlsServer {
     pub(crate) fn prepare(&self) -> Result<TlsAcceptor> {
         let chain = certificates(&self.certificate)?;

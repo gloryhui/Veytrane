@@ -11,7 +11,6 @@ use clap::Parser;
 
 use p2p_file::admin;
 use p2p_file::cli::{AdminOpts, Cli, Command, DirectOpts};
-use p2p_file::discovery::signal::{SignalServerConfig, run_signal_server_on_with};
 use p2p_file::discovery::{LanDiscovery, parse_announcement};
 use p2p_file::error::{Error, Result};
 use p2p_file::identity::Identity;
@@ -23,6 +22,9 @@ use p2p_file::transport::quic::{client_endpoint, connect, server_endpoint};
 use p2p_file::tunnel::rules::{ClientConfig, ServePolicy, ServiceConfig};
 use p2p_file::tunnel::supervisor::{RuleSupervisor, SharedSession};
 use p2p_file::tunnel::{ServeConfig, forward_tunnel, push_file, serve_loop};
+
+#[path = "../apps/signaling/src/startup.rs"]
+mod signaling;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -91,7 +93,7 @@ async fn run(cli: Cli) -> Result<()> {
             new_device_ids_per_minute,
             new_device_ids_per_ip_per_minute,
         } => {
-            cmd_signal_server(
+            signaling::run(
                 listen,
                 short_id_db,
                 max_device_ids,
@@ -426,55 +428,6 @@ async fn close_endpoint(endpoint: &quinn::Endpoint) {
     endpoint.close(0u32.into(), b"bye");
     // 给关闭帧一点时间发出去；连不上或对端没响应也不必死等。
     let _ = tokio::time::timeout(Duration::from_secs(3), endpoint.wait_idle()).await;
-}
-
-async fn cmd_signal_server(
-    listen: SocketAddr,
-    short_id_db: std::path::PathBuf,
-    max_device_ids: u32,
-    new_device_ids_per_minute: u32,
-    new_device_ids_per_ip_per_minute: u32,
-    relay: p2p_file::cli::RelayServerOpts,
-    tls: p2p_file::cli::SignalTlsServerOpts,
-) -> Result<()> {
-    let listener = tokio::net::TcpListener::bind(listen).await?;
-    let config = SignalServerConfig {
-        tls: tls.config()?,
-        relay: relay.config()?,
-        short_id_database: Some(short_id_db),
-        max_short_id_mappings: max_device_ids,
-        short_id_allocations_per_minute: new_device_ids_per_minute,
-        short_id_allocations_per_ip_per_minute: new_device_ids_per_ip_per_minute,
-        ..SignalServerConfig::default()
-    };
-    println!("信令服务器监听 {listen}");
-    println!(
-        "信令模式：{}",
-        if config.tls.is_some() {
-            "TLS（客户端校验证书；本端口仅接受 TLS）"
-        } else {
-            "明文 TCP（兼容模式）"
-        }
-    );
-    if let Some(relay) = &config.relay {
-        println!(
-            "Relay UDP enabled: {:?}；仅转发已 pairing 且双边认证的加密 datagram。",
-            relay.listen
-        );
-        println!("云安全组还需放通配置的 Relay UDP 端口；QUIC 身份与业务权限仍由对端验证。");
-    } else {
-        println!("Relay UDP disabled；只交换候选地址，业务数据走 P2P。");
-    }
-    println!("记得在云主机安全组里放通这个 TCP 端口。");
-    println!("按 Ctrl-C 退出。");
-
-    tokio::select! {
-        result = run_signal_server_on_with(listener, config) => result,
-        _ = shutdown_signal() => {
-            println!("\n收到中断信号，退出。");
-            Ok(())
-        }
-    }
 }
 
 struct ServeArgs {

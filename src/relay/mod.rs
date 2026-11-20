@@ -1,5 +1,6 @@
 //! Authenticated, bounded UDP fallback. The relay never terminates QUIC or parses business data.
 pub mod client;
+#[cfg(any(feature = "signaling-server", test))]
 pub mod server;
 mod wire;
 
