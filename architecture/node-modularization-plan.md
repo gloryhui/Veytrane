@@ -192,6 +192,7 @@ Veytrane 的核心是可信节点之间建立、维持和恢复连接的机制�
 - 本机用 Apple Silicon 发布入口构建 `18d114b` 的完整候选，真实包验证器通过。ZIP SHA-256 为 `8a14008114f66536253a932638b77c3629408d0ed996a07dafea7d29c1429418`。两管理二进制仍报告 IPC v1。该包使用 ad hoc 签名，未公证。
 - `44757798922` 在干净 `18d114b` 上通过 Ubuntu 24.04 原生导航、跨 UID 管理边界、六项 X11 托盘与退出行为，及 Linux x86_64 完整候选包验证。候选 SHA-256 为 `6cc3b4d0200c708fd5bdca4b2a03aa115fb86b1288aa0f6092d1cb1bbcad9df8`。后续严格 Clippy 仍报告 Web 导航及文件包 lint，Linux job 失败，候选未上传。
 - 同一 `18d114b` 工作流通过 Apple Silicon 和 Windows x64 原生候选验证。CI 归档 SHA-256 分别为 `1cfd4f35eb2ca15c51592cb890876d2e0476a72a6486312b071431c5b21875ec` 与 `16113a1317db27e56704167307c28edf65a590882c5ed05af7811204e849681c`。Windows 管道和三项存储检查复验通过。该 runner 按测试标记忽略需要桌面会话的原生托盘测试。
+- 同一 `18d114b` 工作流的 Intel macOS job `136362034115` 于 2026-11-20 23:46:59（上海时间）成功完成，上传完整候选及独立桌面应用。GitHub Actions 完整候选 artifact `14644672221` 的外层归档 SHA-256 为 `c5bf5940acf58cff8fb8a28f69d81af74c0ea67cf576a0835849b064b2354f0c`。
 
 ## 7. 新增或移除业务时的操作示例
 
