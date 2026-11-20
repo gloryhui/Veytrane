@@ -2,10 +2,11 @@
 use std::collections::HashSet;
 #[cfg(all(unix, test))]
 use std::fs::File;
+use std::{io, net::IpAddr};
+#[cfg(any(feature = "agent-files", test))]
 use std::{
     fs::{self, OpenOptions},
-    io::{self, Write},
-    net::IpAddr,
+    io::Write,
     path::{Path, PathBuf},
 };
 
@@ -652,10 +653,12 @@ fn validate_forward_configuration(
     Ok(())
 }
 
+#[cfg(any(feature = "agent-files", test))]
 pub(crate) fn validate_receive_directory(path: &Path) -> Result<(), ConfigError> {
     validate_receive_directory_with(path, probe_receive_directory_write)
 }
 
+#[cfg(any(feature = "agent-files", test))]
 fn validate_receive_directory_with(
     path: &Path,
     probe_write: impl FnOnce(&Path) -> io::Result<()>,
@@ -671,6 +674,7 @@ fn validate_receive_directory_with(
     Ok(())
 }
 
+#[cfg(any(feature = "agent-files", test))]
 fn receive_directory_io_error(path: &Path, error: io::Error) -> ConfigError {
     match error.kind() {
         io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem => {
@@ -683,6 +687,7 @@ fn receive_directory_io_error(path: &Path, error: io::Error) -> ConfigError {
     }
 }
 
+#[cfg(any(feature = "agent-files", test))]
 fn probe_receive_directory_write(directory: &Path) -> io::Result<()> {
     for _ in 0..32 {
         let probe_path = directory.join(format!(
@@ -725,11 +730,13 @@ fn probe_receive_directory_write(directory: &Path) -> io::Result<()> {
     ))
 }
 
+#[cfg(any(feature = "agent-files", test))]
 struct ProbeFileCleanup {
     path: PathBuf,
     armed: bool,
 }
 
+#[cfg(any(feature = "agent-files", test))]
 impl ProbeFileCleanup {
     fn new(path: PathBuf) -> Self {
         Self { path, armed: false }
@@ -757,6 +764,7 @@ impl ProbeFileCleanup {
     }
 }
 
+#[cfg(any(feature = "agent-files", test))]
 impl Drop for ProbeFileCleanup {
     fn drop(&mut self) {
         if self.armed {
