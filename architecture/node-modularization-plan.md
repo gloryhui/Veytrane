@@ -122,6 +122,13 @@ Veytrane 的核心是可信节点之间建立、维持和恢复连接的机制�
 
 执行记录至少写明阶段、提交、构建 feature、用例、实际结果与未验项。检查功能时使用隔离的本地数据和回环测试节点；单平台或模拟测试分别标注。每笔阶段提交及推送授权遵循仓库 `AGENTS.md`。
 
+### S0 基线记录（2026-11-20）
+
+- 施工从 `29ad7be` 开始。`cargo metadata --locked --offline --no-deps` 确认根包 `p2p_file` 与八个二进制目标。`check-architecture.py` 在基线返回 1，报告 `host/agent.rs` 直接依赖导航以及 `products/live.rs` 的分组导入。旧的工作树修改单独保留。
+- P2PN v2 复用 `frozen_v2_bytes_and_request_ids_are_independent_of_current_encoder`；P2PF 复用 `golden_file_frames_reject_other_protocols` 和追加分片帧固定字节用例。独立 CLI 的握手固定为 v3，新增 `v3_identity_frames_and_signature_domain_match_fixed_bytes` 覆盖四种身份报文和签名载荷。
+- `ipc_v1_file_and_speed_requests_keep_their_wire_shape` 固定 `tasks`、`resume`、`start_speed`、`stop_speed` 的合成 JSON 请求。配置复用已存在的 schema 1 校验；任务用暂停重启恢复用例，分片用从持久化 checkpoint 恢复用例。进程级 IPC 响应、授权、网络和跨平台场景留给受影响的实施阶段验证。
+- `tests/node_agent_process.rs`、`tests/signaling_tls_cli.rs`、`scripts/node_smoke.py`、`scripts/e2e.sh`、`scripts/live-local-smoke.py` 和 `packaging/RUNNING.md` 均依赖现有 `p2p_file signal-server` 入口。`tests/ipv6_cli_send.rs` 依赖独立收发入口。包拆分时先保证这些消费者还能启动原命令。
+
 ## 7. 新增或移除业务时的操作示例
 
 **新增一个使用既有 TCP 的产品**：在 `apps/<产品>` 内确定对端、服务 ID、目标与可见目录；使用 node 和 TCP 的公开接口组装；在产品自己的 UI 或 CLI 接入管理命令；测试未授权访问、撤销、重连和关闭。Live 是这种模式的现有实例。

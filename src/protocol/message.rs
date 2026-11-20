@@ -235,6 +235,66 @@ mod tests {
     }
 
     #[test]
+    fn v3_identity_frames_and_signature_domain_match_fixed_bytes() {
+        let node_id = NodeId::from_hex("11111111111111111111111111111111").unwrap();
+        let hello = ControlMessage::Hello {
+            protocol_version: 3,
+            node_id,
+            public_key: [0x22; 32],
+            nonce: [0x33; 32],
+        };
+        let mut hello_bytes = vec![0, 3];
+        hello_bytes.extend_from_slice(&[0x11; 16]);
+        hello_bytes.extend_from_slice(&[0x22; 32]);
+        hello_bytes.extend_from_slice(&[0x33; 32]);
+
+        let ack = ControlMessage::HelloAck {
+            protocol_version: 3,
+            node_id,
+            public_key: [0x22; 32],
+            nonce: [0x33; 32],
+            peer_nonce: [0x44; 32],
+            signature: vec![0x55; 64],
+        };
+        let mut ack_bytes = hello_bytes.clone();
+        ack_bytes[0] = 1;
+        ack_bytes.extend_from_slice(&[0x44; 32]);
+        ack_bytes.push(64);
+        ack_bytes.extend_from_slice(&[0x55; 64]);
+
+        let auth = ControlMessage::Auth {
+            signature: vec![0x55; 64],
+        };
+        let mut auth_bytes = vec![2, 64];
+        auth_bytes.extend_from_slice(&[0x55; 64]);
+
+        for (message, bytes) in [
+            (hello, hello_bytes),
+            (ack, ack_bytes),
+            (auth, auth_bytes),
+            (ControlMessage::Ready, vec![3]),
+        ] {
+            assert_eq!(message.encode().unwrap(), bytes);
+            assert_eq!(ControlMessage::decode(&bytes).unwrap(), message);
+        }
+
+        let mut signing_bytes = b"p2p_file/handshake/v3".to_vec();
+        for block in [0x22, 0x33, 0x66, 0x44, 0x77] {
+            signing_bytes.extend_from_slice(&[block; 32]);
+        }
+        assert_eq!(
+            handshake_payload(
+                &[0x66; 32],
+                &[0x44; 32],
+                &[0x22; 32],
+                &[0x33; 32],
+                &[0x77; 32]
+            ),
+            signing_bytes
+        );
+    }
+
+    #[test]
     fn 追加测速消息不改变已有消息编号() {
         // postcard 对 enum 使用声明顺序编码。测速消息追加在末尾，保留 v3
         // 已有控制消息的 discriminant，因此不需要升级协议版本。

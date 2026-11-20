@@ -211,3 +211,31 @@ pub async fn write<T: Serialize>(
     stream.write_all(&bytes).await?;
     stream.flush().await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Request;
+    use serde_json::json;
+
+    #[test]
+    fn ipc_v1_file_and_speed_requests_keep_their_wire_shape() {
+        let peer = "11111111111111111111111111111111";
+        let task = "22222222222222222222222222222222";
+        for command in [
+            json!({"method": "tasks", "offset": 128}),
+            json!({"method": "resume", "peer": peer, "task": task}),
+            json!({"method": "start_speed", "peer": peer, "direction": "both", "seconds": 10}),
+            json!({"method": "stop_speed", "peer": peer, "task": task}),
+        ] {
+            let value = json!({
+                "api_version": 1,
+                "request_id": "baseline-request",
+                "timeout_ms": 30000,
+                "command": command,
+            });
+            let request: Request = serde_json::from_value(value.clone()).unwrap();
+            request.validate().unwrap();
+            assert_eq!(serde_json::to_value(request).unwrap(), value);
+        }
+    }
+}
