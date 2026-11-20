@@ -2,7 +2,7 @@
 use super::{workbench::Page, *};
 use status::{CoreState, StatusSnapshot};
 use tray::{NativeTray, TrayAction};
-#[cfg(all(test, target_os = "windows"))]
+#[cfg(all(test, target_os = "windows", feature = "node"))]
 #[path = "tray_host_tests.rs"]
 mod tests;
 

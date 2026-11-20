@@ -1,7 +1,7 @@
 //! The original desktop workbench, projected exclusively from Agent IPC DTOs.
 //! This view never opens an identity, task store, network session or transfer service.
 use super::*;
-use crate::node::api::protocol::SpeedtestDirection as AgentSpeedDirection;
+use veytrane_management::protocol::SpeedtestDirection as AgentSpeedDirection;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash)]
 pub(super) enum Page {
@@ -1361,7 +1361,7 @@ impl AgentShell {
                     && value
                         .downcast_ref::<gpui::ExternalPaths>()
                         .is_some_and(|paths| {
-                            crate::node::core::drop_send::validate_paths(paths.paths()).is_ok()
+                            veytrane_file_policy::path_batch::validate(paths.paths()).is_ok()
                         })
             })
             .on_drop(cx.listener(|s, paths: &gpui::ExternalPaths, _, cx| {
@@ -1607,7 +1607,7 @@ impl AgentShell {
                         ui_components::secondary_button("保存并应用限速", enabled).on_mouse_up(
                             MouseButton::Left,
                             cx.listener(|s, _, _, cx| {
-                                match crate::node::core::bandwidth::FileLimits::parse(
+                                match veytrane_file_policy::bandwidth::FileLimits::parse(
                                     &Self::text(&s.ui.upload, cx),
                                     &Self::text(&s.ui.download, cx),
                                 ) {

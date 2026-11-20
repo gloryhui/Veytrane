@@ -1,5 +1,7 @@
 //! Pure file configuration policy shared by settings and file execution.
 
+pub mod path_batch;
+
 pub mod bandwidth {
     use serde::{Deserialize, Serialize};
 

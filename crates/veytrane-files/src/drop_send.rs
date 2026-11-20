@@ -1,12 +1,6 @@
 //! Native external-path batches. UI admission is pure; metadata runs off-thread.
 use crate::error::Result;
-use std::{
-    collections::HashSet,
-    path::{Component, PathBuf},
-};
-pub(crate) const MAX_PATHS: usize = 128;
-const MAX_PATH_BYTES: usize = 32_768;
-const MAX_BATCH_BYTES: usize = 1024 * 1024;
+use std::{collections::HashSet, path::PathBuf};
 #[derive(Clone, Copy, Default)]
 pub struct Admission {
     pub authorized: bool,
@@ -31,33 +25,7 @@ impl Selection {
     }
 }
 pub fn validate_paths(paths: &[PathBuf]) -> Result<()> {
-    if paths.is_empty() || paths.len() > MAX_PATHS {
-        return Err(crate::transfer_files::failure(
-            "每次拖入 1..128 个文件或目录",
-        ));
-    }
-    let mut bytes = 0usize;
-    for path in paths {
-        let length = path.as_os_str().as_encoded_bytes().len();
-        bytes = bytes.saturating_add(length);
-        if length > MAX_PATH_BYTES || bytes > MAX_BATCH_BYTES {
-            return Err(crate::transfer_files::failure(
-                "拖入路径过长或本批次路径总量超过 1 MiB",
-            ));
-        }
-        if !path.is_absolute()
-            || path.to_str().is_none()
-            || path.file_name().is_none()
-            || path
-                .components()
-                .any(|part| matches!(part, Component::ParentDir))
-        {
-            return Err(crate::transfer_files::failure(
-                "拖入项必须是绝对 UTF-8 文件或目录路径，不支持父目录跳转",
-            ));
-        }
-    }
-    Ok(())
+    veytrane_file_policy::path_batch::validate(paths).map_err(crate::transfer_files::failure)
 }
 pub fn normalize(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
     validate_paths(&paths)?;
@@ -117,6 +85,7 @@ pub fn classify(paths: Vec<PathBuf>) -> Result<Vec<Selection>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use veytrane_file_policy::path_batch::{MAX_PATH_BYTES, MAX_PATHS};
     #[test]
     fn every_ui_admission_boundary_is_required() {
         let ready = Admission {

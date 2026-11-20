@@ -34,7 +34,7 @@ fn main() {
     }
     let root = match args.data_dir {
         Some(path) => path,
-        None => match p2p_file::node::local::paths::AgentPaths::default_root() {
+        None => match veytrane_management::paths::AgentPaths::default_root() {
             Ok(path) => path,
             Err(e) => {
                 eprintln!("{e}");

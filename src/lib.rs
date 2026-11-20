@@ -38,7 +38,7 @@ pub mod tunnel;
 #[cfg(feature = "agent-base")]
 pub mod node;
 
-#[cfg(feature = "gui")]
+#[cfg(feature = "desktop-client")]
 pub mod desktop;
 
 pub use error::{Error, Result};

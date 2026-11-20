@@ -47,8 +47,11 @@ agent-files = ["agent-base", "dep:veytrane-files", "veytrane-files/node-runtime"
 agent-web = ["agent-base", "dep:veytrane-web-management"]
 standalone = ["dep:veytrane-files", "dep:veytrane-http-auth", "dep:axum", "signaling-server"]
 signaling-server = ["dep:rusqlite"]
-gui = [
-    "node",
+gui = ["node", "desktop-client"]
+desktop-client = [
+    "dep:veytrane-file-policy",
+    "dep:veytrane-management",
+    "dep:veytrane-node",
     "dep:gpui",
     "dep:unicode-segmentation",
     "dep:raw-window-handle",
@@ -56,6 +59,7 @@ gui = [
     "dep:ksni",
     "dep:x11rb",
     "dep:objc2",
+    "dep:windows-sys",
 ]
 
 [dependencies]
@@ -111,7 +115,7 @@ veytrane-transport = { path = "crates/veytrane-transport", features = ["test-sup
 [[bin]]
 name = "p2p-desktop"
 path = "src/bin/p2p-desktop.rs"
-required-features = ["gui"]
+required-features = ["desktop-client"]
 
 [[bin]]
 name = "p2p-agent"

@@ -32,7 +32,7 @@ fn main() {
     .expect("write embedded Sub2API profile");
     println!("cargo:rerun-if-changed=assets/icons/app-icon.ico");
     println!("cargo:rerun-if-changed=assets/icons/app-icon.rc");
-    if env::var_os("CARGO_FEATURE_GUI").is_some()
+    if env::var_os("CARGO_FEATURE_DESKTOP_CLIENT").is_some()
         && env::var("TARGET").is_ok_and(|target| target.contains("windows"))
     {
         embed_resource::compile_for(
