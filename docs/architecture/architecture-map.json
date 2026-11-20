@@ -368,9 +368,14 @@
       ],
       "parts": [
         {
-          "name": "客户端",
+          "name": "客户端回退策略",
           "path": "src/relay/client.rs",
-          "detail": "Relay admission 与直连竞速配合。"
+          "detail": "解析中继地址，与直连候选错峰竞速。"
+        },
+        {
+          "name": "UDP 接入与认证准备",
+          "path": "crates/veytrane-transport/src/quic/relay.rs",
+          "detail": "验证接入报文，并将同一 UDP socket 交给 QUIC。"
         },
         {
           "name": "服务端",

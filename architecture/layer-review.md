@@ -8,7 +8,7 @@
 
 | 范围 | 现行归属 |
 |---|---|
-| 节点与网络 | `veytrane-node` 提供协商、认证、peer 容量、代际和有界流分发。`veytrane-transport` 提供身份、QUIC、原始帧、打洞、UDP 地址族规则和信令客户端。根会话负责网络切换和业务连接的生命周期。 |
+| 节点与网络 | `veytrane-node` 提供协商、认证、peer 容量、代际和有界流分发。`veytrane-transport` 提供身份、QUIC、原始帧、打洞、信令客户端和 Relay 接入。根会话负责网络切换及连接生命周期，装配层启动各能力的入站处理。 |
 | 文件与测速 | 文件包持有任务、接收根、队列和恢复。测速包持有对端测速、租约与结果。Agent 分别读取各自服务的快照并执行本地任务操作。需要当前对端授权的命令由会话 actor 串行处理。客户端各自管理选中项。 |
 | 管理和导航 | GPUI 窗口和托盘位于 `apps/desktop`。`apps/agent` 持有 IPC 宿主并装配 `apps/web-management` 的可选导航。Web、GPUI 与管理 CLI 使用 IPC v1，内置导航继续在 Agent 进程内提供回环 HTTP。CLI 通过宿主的专用本机入口进行离线初始化和配置。 |
 | 独立命令 | `apps/standalone-cli` 编排旧协议的文件、隧道、服务和测速。`apps/signaling` 提供独立信令服务端，继续由 `p2p_file signal-server` 启动。两者与管理 Agent 的命令属于不同入口。 |

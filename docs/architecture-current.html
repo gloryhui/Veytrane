@@ -115,7 +115,7 @@ business:{tag:'CAPABILITIES',title:'三类业务能力',text:'文件 / 目录、
 state:{tag:'LOCAL / PERSISTENCE',title:'配置与任务状态',text:'node.json、identity.key、tasks.json 由后台及离线生命周期工具按锁保护；配置在 composition，任务事实在 veytrane-files。',items:['revision 比较防止多个入口覆盖。','原子写、检查点和持久完成回执。','目录锁 + 身份租约 + 任务库锁约束单一所有权。'],sources:[['../crates/veytrane-management/src/paths.rs','路径'],['../src/node/composition/settings.rs','配置'],['../crates/veytrane-files/src/task_store.rs','任务库']]},
 peer:{tag:'REMOTE / SYMMETRIC',title:'远端节点',text:'远端运行同一套 Agent 核心。可以无界面常驻，也可以通过自己的桌面 / CLI 管理。',items:['一个节点可主动连接，也可接受授权连接。','远端声明服务，访问方按服务 ID 使用。','本机权限与远端权限分别生效。'],sources:[['../src/node/core/authorization.rs','资源策略'],['../crates/veytrane-tcp/src/services.rs','服务目录']]},
 signal:{tag:'INFRASTRUCTURE / DISCOVERY',title:'信令与地址探测',text:'veytrane-transport 提供客户端和共用报文。apps/signaling 提供服务端监听、Registry 与短 ID SQLite。局域网发现和已知 IP 直连可独立使用。',items:['设备仍需自行完成身份认证。','双栈候选、同端口探测与打洞服务于直连。','信令地址可以配置 TLS。短 ID 仅用于定位设备。'],sources:[['../crates/veytrane-transport/src/signal_client.rs','信令客户端'],['../crates/veytrane-transport/src/signal_wire.rs','共用线格式'],['../apps/signaling/src/server.rs','信令服务端'],['../src/discovery/short_id.rs','短 ID']]},
-relay:{tag:'INFRASTRUCTURE / OPTIONAL',title:'UDP Relay 兜底',text:'配置 Relay 后，Direct 未及时认证成功时，可延迟尝试中继。',items:['转发设备间端到端加密 QUIC 数据报。','票据、配对、超时及资源额度约束中继使用。','与信令基础设施可共同部署，业务授权仍在节点。'],sources:[['../src/relay/client.rs','Relay 客户端'],['../apps/signaling/src/relay.rs','Relay 服务端'],['../src/cli.rs','部署参数']]}
+relay:{tag:'INFRASTRUCTURE / OPTIONAL',title:'UDP Relay 兜底',text:'配置 Relay 后，Direct 未及时认证成功时，可延迟尝试中继。',items:['转发设备间端到端加密 QUIC 数据报。','传输包负责单地址 UDP 接入、QUIC 交接和身份认证准备。','与信令基础设施可共同部署，业务授权仍在节点。'],sources:[['../src/relay/client.rs','回退策略'],['../crates/veytrane-transport/src/quic/relay.rs','UDP 接入'],['../apps/signaling/src/relay.rs','Relay 服务端'],['../src/cli.rs','部署参数']]}
 };
 const flows={
 "restricted":{"name": "专用接入", "steps": [["BAT 启动", "Windows → 专用进程", "首次生成当前用户的设备身份并持锁。读取编译期嵌入 profile，只监听 127.0.0.1:18081，不提供配置入口。", "../src/bin/sub2api-client.rs"], ["信令与直连", "客户端 ↔ 信令 / STUN ↔ 专用网关", "登记设备并交换候选，完成同端口打洞与 QUIC 身份绑定。当前分发配置未启用 Relay。", "../src/node/core/session.rs"], ["专用凭证授权", "网关 → 当前连接的内存 ACL", "完成专用密码认证后，才将该设备加入 sub2api 的授权名单；认证断开后回收。", "../apps/sub2api/src/runtime.rs"], ["应用请求", "浏览器 → 18081 → Service 流 → 8080", "网关按 sub2api 服务 ID 再次检查权限并连接固定目标；Sub2API 自身继续检查应用账号。", "../crates/veytrane-tcp/src/services.rs"]]},"recover":{"name": "自动恢复", "steps": [["观察故障", "宿主监测 + 业务就绪探测", "区分信令、设备通道、服务目录、HTTP 后端；健康用户与健康通道优先保留。", "../apps/sub2api/src/runtime.rs"], ["有界决策", "ClientRecovery / GatewayRecovery", "客户端通道持续缺失或目录探测连续失败；网关无人在线时闲置刷新或连接失败刷新。认证失败不计入传输失败。", "../src/node/products/recovery.rs"], ["停止旧核心", "停止监听 / 会话 → 等待回收", "专用进程保留目录锁和设备身份，平台恢复在休眠唤醒、接口变化或核心退出后优雅收尾；外层重启后重新登记。通用 Agent 的会话恢复留在 core/session/recovery.rs。", "../src/node/products/platform_recovery.rs"], ["重新登记与服务恢复", "新候选 → 信令 → 授权 → 本地入口", "复用身份与凭证重新连接，恢复新业务请求；不透明续接已断开的 TCP 字节流，不改写持久配置。", "../apps/sub2api/src/runtime.rs"]]},
@@ -506,9 +506,14 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
       ],
       "parts": [
         {
-          "name": "客户端",
+          "name": "客户端回退策略",
           "path": "src/relay/client.rs",
-          "detail": "Relay admission 与直连竞速配合。"
+          "detail": "解析中继地址，与直连候选错峰竞速。"
+        },
+        {
+          "name": "UDP 接入与认证准备",
+          "path": "crates/veytrane-transport/src/quic/relay.rs",
+          "detail": "验证接入报文，并将同一 UDP socket 交给 QUIC。"
         },
         {
           "name": "服务端",
