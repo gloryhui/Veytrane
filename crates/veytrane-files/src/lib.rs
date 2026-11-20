@@ -43,6 +43,8 @@ pub mod task_recovery;
 pub mod task_snapshot;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod task_store;
+#[cfg(feature = "node-runtime")]
+pub mod transfer;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod transfer_files;
 

@@ -1,30 +1,24 @@
 use super::*;
-use crate::{
-    identity::Identity,
-    transport::{
-        handshake::{handshake_initiator, handshake_responder},
-        quic::{ChannelBinding, client_endpoint, server_endpoint},
-    },
-};
 use std::fs;
+use veytrane_transport::{
+    channel_binding::ChannelBinding,
+    handshake::{handshake_initiator, handshake_responder},
+    identity::Identity,
+    quic::{client_endpoint, server_endpoint},
+};
 
-fn ui_snapshot(
-    service: &TransferService,
-) -> crate::error::Result<crate::node::core::snapshot::Snapshot> {
-    service
-        .file_snapshot()
-        .map(crate::node::core::snapshot::Snapshot::from_file)
-}
-
-async fn write_speed_frame<W>(writer: &mut W, request_id: u64, control: protocol::SpeedControl)
-where
+async fn write_speed_frame<W>(
+    writer: &mut W,
+    request_id: u64,
+    control: veytrane_speed::control::SpeedControl,
+) where
     W: tokio::io::AsyncWrite + Unpin,
 {
-    let frame = crate::node::core::speed_wire::SpeedFrame {
+    let frame = veytrane_speed::wire::SpeedFrame {
         request_id,
         control,
     };
-    crate::protocol::frame::write_raw_frame(writer, &frame.encode().unwrap())
+    veytrane_transport::raw_frame::write_raw_frame(writer, &frame.encode().unwrap())
         .await
         .unwrap();
 }
@@ -32,17 +26,17 @@ where
 fn spawn_peer(
     tasks: &mut JoinSet<Result<()>>,
     service: TransferService,
-    speed: Option<crate::node::core::speed::SpeedService>,
+    speed: Option<veytrane_speed::runtime::SpeedService>,
     connection: Connection,
     local: NodeId,
     peer: NodeId,
 ) {
-    let (dispatcher, incoming) = crate::node::core::dispatch::Dispatcher::start(
+    let (dispatcher, incoming) = veytrane_node::dispatch::Dispatcher::start(
         connection.clone(),
-        crate::node::core::wire::capabilities(true, true, false),
+        veytrane_node::wire::capabilities(true, true, false),
     );
-    let (_, resources) = watch::channel(crate::node::core::authorization::ResourcePolicy {
-        peers: vec![crate::node::core::authorization::PeerResources {
+    let (_, resources) = watch::channel(veytrane_node::authorization::ResourcePolicy {
+        peers: vec![veytrane_node::authorization::PeerResources {
             node_id: peer.to_hex(),
             files: true,
             speed: true,
@@ -50,11 +44,11 @@ fn spawn_peer(
         }],
     });
     let budget = std::sync::Arc::new(tokio::sync::Semaphore::new(
-        crate::node::core::speed::DEFAULT_MAX_PEER_BUSINESS_STREAMS,
+        veytrane_speed::runtime::DEFAULT_MAX_PEER_BUSINESS_STREAMS,
     ));
-    let authorization: crate::node::core::remote_auth::LiveAuthorization =
-        crate::node::core::remote_auth::RemoteAuthorization::BOTH.into();
-    let crate::node::core::dispatch::Incoming {
+    let authorization: veytrane_node::live_authorization::LiveAuthorization =
+        veytrane_node::live_authorization::RemoteAuthorization::BOTH.into();
+    let veytrane_node::dispatch::Incoming {
         files,
         speed: speed_rx,
         ..
@@ -102,8 +96,8 @@ struct Pair {
     root: PathBuf,
     a: TransferService,
     b: TransferService,
-    speed_a: crate::node::core::speed::SpeedService,
-    speed_b: crate::node::core::speed::SpeedService,
+    speed_a: veytrane_speed::runtime::SpeedService,
+    speed_b: veytrane_speed::runtime::SpeedService,
     ca: Connection,
     cb: Connection,
     ia: NodeId,
@@ -133,9 +127,9 @@ impl Pair {
         let (activity_a, changed_a, frame_budget_a) = a.shared_parts();
         let (activity_b, changed_b, frame_budget_b) = b.shared_parts();
         let speed_a =
-            crate::node::core::speed::SpeedService::new(activity_a, changed_a, frame_budget_a);
+            veytrane_speed::runtime::SpeedService::new(activity_a, changed_a, frame_budget_a);
         let speed_b =
-            crate::node::core::speed::SpeedService::new(activity_b, changed_b, frame_budget_b);
+            veytrane_speed::runtime::SpeedService::new(activity_b, changed_b, frame_budget_b);
         let identity_a = Identity::generate();
         let identity_b = Identity::generate();
         let key_a = identity_a.clone();
@@ -158,16 +152,16 @@ impl Pair {
                 .unwrap();
             assert_eq!(outcome.peer_node_id, ia);
             send.finish().unwrap();
-            crate::node::core::wire::negotiate(
+            veytrane_node::wire::negotiate(
                 &connection,
                 false,
-                crate::node::core::wire::capabilities(true, true, true),
+                veytrane_node::wire::capabilities(true, true, true),
             )
             .await
             .unwrap();
             connection
         });
-        let ca = crate::transport::quic::connect(&ea, eb.local_addr().unwrap(), "p2pfile")
+        let ca = veytrane_transport::quic::connect(&ea, eb.local_addr().unwrap(), "p2pfile")
             .await
             .unwrap();
         let binding = ChannelBinding::from_connection(&ca).unwrap();
@@ -177,10 +171,10 @@ impl Pair {
             .unwrap();
         assert_eq!(outcome.peer_node_id, ib);
         send.finish().unwrap();
-        crate::node::core::wire::negotiate(
+        veytrane_node::wire::negotiate(
             &ca,
             true,
-            crate::node::core::wire::capabilities(true, true, true),
+            veytrane_node::wire::capabilities(true, true, true),
         )
         .await
         .unwrap();
@@ -254,17 +248,17 @@ impl Pair {
                 peer
             );
             send.finish().unwrap();
-            crate::node::core::wire::negotiate(
+            veytrane_node::wire::negotiate(
                 &connection,
                 false,
-                crate::node::core::wire::capabilities(true, true, true),
+                veytrane_node::wire::capabilities(true, true, true),
             )
             .await
             .unwrap();
             connection
         });
         self.ca =
-            crate::transport::quic::connect(&self.ea, self.eb.local_addr().unwrap(), "p2pfile")
+            veytrane_transport::quic::connect(&self.ea, self.eb.local_addr().unwrap(), "p2pfile")
                 .await
                 .unwrap();
         let binding = ChannelBinding::from_connection(&self.ca).unwrap();
@@ -277,10 +271,10 @@ impl Pair {
             self.ib
         );
         send.finish().unwrap();
-        crate::node::core::wire::negotiate(
+        veytrane_node::wire::negotiate(
             &self.ca,
             true,
-            crate::node::core::wire::capabilities(true, true, true),
+            veytrane_node::wire::capabilities(true, true, true),
         )
         .await
         .unwrap();
@@ -313,10 +307,10 @@ impl Pair {
             );
         }
     }
-    fn speed_a(&self) -> &crate::node::core::speed::SpeedService {
+    fn speed_a(&self) -> &veytrane_speed::runtime::SpeedService {
         &self.speed_a
     }
-    fn speed_b(&self) -> &crate::node::core::speed::SpeedService {
+    fn speed_b(&self) -> &veytrane_speed::runtime::SpeedService {
         &self.speed_b
     }
     async fn select(&self, length: usize) -> (TaskId, Vec<u8>) {
@@ -470,8 +464,8 @@ async fn receive_space_concurrent_transfers_release_on_completion_pause_and_disc
         let sender = pair.sender(id.clone());
         reached.await.unwrap();
         let held = pair.b.receive_space.summary().reserved;
-        assert!(held >= crate::node::core::space_budget::TASK_OVERHEAD);
-        assert!(held < bytes.len() as u64 + crate::node::core::space_budget::TASK_OVERHEAD);
+        assert!(held >= crate::space_budget::TASK_OVERHEAD);
+        assert!(held < bytes.len() as u64 + crate::space_budget::TASK_OVERHEAD);
         *pair.b.receive_space.probe_override.lock().unwrap() = Some(Ok(held));
         let other_path = pair.root.join("other.bin");
         fs::write(&other_path, b"another file").unwrap();
@@ -778,7 +772,8 @@ async fn cancelled_or_expired_receive_rpc_leaves_a_manually_recoverable_task() {
                 TaskState::Interrupted
             }
         );
-        assert!(ui_snapshot(&pair.b).unwrap().tasks[0].can_continue());
+        assert!(can_continue(&pair.b.task(id.clone()).await.unwrap()));
+        assert!(!pair.b.file_snapshot().unwrap().tasks[0].auto_waiting);
         assert!(!pair.root.join("b-receive/文件.bin").exists());
         pair.shutdown().await;
     }
@@ -892,7 +887,7 @@ async fn automatic_recovery_cannot_override_pause_restart_disabled_preference_or
                 .a
                 .revoke_authorization(
                     pair.ib,
-                    crate::node::core::remote_auth::RemoteAuthorization::default(),
+                    veytrane_node::live_authorization::RemoteAuthorization::default(),
                 )
                 .await
                 .unwrap(),
@@ -955,7 +950,7 @@ async fn file_limits_bound_real_upload_and_download_without_affecting_receipts()
     let pair = Pair::new().await;
     let (id, bytes) = pair.select(64 * 1024).await;
     pair.a
-        .set_file_limits(crate::node::core::bandwidth::FileLimits {
+        .set_file_limits(crate::bandwidth::FileLimits {
             upload_kib: 64,
             download_kib: 0,
         })
@@ -970,7 +965,7 @@ async fn file_limits_bound_real_upload_and_download_without_affecting_receipts()
     );
     pair.a.set_file_limits(Default::default()).unwrap();
     pair.b
-        .set_file_limits(crate::node::core::bandwidth::FileLimits {
+        .set_file_limits(crate::bandwidth::FileLimits {
             upload_kib: 0,
             download_kib: 64,
         })
@@ -986,7 +981,7 @@ async fn file_limits_bound_real_upload_and_download_without_affecting_receipts()
 async fn file_limits_heartbeat_keeps_slow_receiver_alive_past_frame_timeout() {
     let pair = Pair::new().await;
     pair.b
-        .set_file_limits(crate::node::core::bandwidth::FileLimits {
+        .set_file_limits(crate::bandwidth::FileLimits {
             upload_kib: 0,
             download_kib: 1,
         })
@@ -1002,7 +997,7 @@ async fn file_limits_heartbeat_keeps_slow_receiver_alive_past_frame_timeout() {
 async fn file_limits_slow_upload_uses_byte_progress_instead_of_whole_frame_timeout() {
     let pair = Pair::new().await;
     pair.a
-        .set_file_limits(crate::node::core::bandwidth::FileLimits {
+        .set_file_limits(crate::bandwidth::FileLimits {
             upload_kib: 1,
             download_kib: 0,
         })
@@ -1020,7 +1015,7 @@ async fn file_limits_runtime_disable_releases_upload_and_download_waits() {
         let pair = Pair::new().await;
         let service = if download { &pair.b } else { &pair.a };
         service
-            .set_file_limits(crate::node::core::bandwidth::FileLimits {
+            .set_file_limits(crate::bandwidth::FileLimits {
                 upload_kib: if download { 0 } else { 1 },
                 download_kib: if download { 1 } else { 0 },
             })
@@ -1046,7 +1041,7 @@ async fn file_limits_pause_and_runtime_unlimit_wake_in_flight_tasks() {
     for receiver_pause in [false, true] {
         let pair = Pair::new().await;
         pair.a
-            .set_file_limits(crate::node::core::bandwidth::FileLimits {
+            .set_file_limits(crate::bandwidth::FileLimits {
                 upload_kib: 1,
                 download_kib: 0,
             })
@@ -1082,7 +1077,7 @@ async fn file_limits_pause_and_runtime_unlimit_wake_in_flight_tasks() {
 async fn file_limits_pause_during_budget_wait_is_not_consumed_by_the_limiter() {
     let pair = Pair::new().await;
     pair.a
-        .set_file_limits(crate::node::core::bandwidth::FileLimits {
+        .set_file_limits(crate::bandwidth::FileLimits {
             upload_kib: 1,
             download_kib: 0,
         })
@@ -1111,7 +1106,7 @@ async fn file_limits_reject_peer_without_flow_capability() {
     let pair = Pair::new().await;
     pair.a.set_peer_flow_support(pair.ib, false);
     pair.a
-        .set_file_limits(crate::node::core::bandwidth::FileLimits {
+        .set_file_limits(crate::bandwidth::FileLimits {
             upload_kib: 1,
             download_kib: 0,
         })
@@ -1328,10 +1323,10 @@ fn process_worker_entry() {
                     peer
                 );
                 send.finish().unwrap();
-                crate::node::core::wire::negotiate(
+                veytrane_node::wire::negotiate(
                     &connection,
                     false,
-                    crate::node::core::wire::capabilities(true, true, true),
+                    veytrane_node::wire::capabilities(true, true, true),
                 )
                 .await
                 .unwrap();
@@ -1341,7 +1336,7 @@ fn process_worker_entry() {
                     .unwrap()
                     .parse()
                     .unwrap();
-                let connection = crate::transport::quic::connect(&endpoint, addr, "p2pfile")
+                let connection = veytrane_transport::quic::connect(&endpoint, addr, "p2pfile")
                     .await
                     .unwrap();
                 let binding = ChannelBinding::from_connection(&connection).unwrap();
@@ -1354,10 +1349,10 @@ fn process_worker_entry() {
                     peer
                 );
                 send.finish().unwrap();
-                crate::node::core::wire::negotiate(
+                veytrane_node::wire::negotiate(
                     &connection,
                     true,
-                    crate::node::core::wire::capabilities(true, true, true),
+                    veytrane_node::wire::capabilities(true, true, true),
                 )
                 .await
                 .unwrap();
@@ -1504,8 +1499,10 @@ fn real_process_kill_of_either_endpoint_resumes_verified_durable_chunks() {
         ));
         fs::create_dir(&root).unwrap();
         for role in ["a", "b"] {
-            crate::node::core::config::ensure_private_app_dir(&root.join(format!("{role}-state")))
-                .unwrap();
+            veytrane_transport::permissions::ensure_private_app_dir(
+                &root.join(format!("{role}-state")),
+            )
+            .unwrap();
             fs::create_dir(root.join(format!("{role}-receive"))).unwrap();
             Identity::load_or_create(&root.join(format!("{role}-state/identity.bin"))).unwrap();
         }
@@ -1552,12 +1549,12 @@ fn real_process_kill_of_either_endpoint_resumes_verified_durable_chunks() {
         let mut sender = child(&root, "a", "resume");
         await_success(&mut sender, &root, "a", "resume");
         await_success(&mut receiver, &root, "b", "resume");
-        let expected = crate::transfer::chunker::manifest_from_path(
+        let expected = crate::chunker::manifest_from_path(
             &root.join("source.bin"),
-            crate::protocol::manifest::DEFAULT_CHUNK_SIZE,
+            crate::manifest::DEFAULT_CHUNK_SIZE,
         )
         .unwrap();
-        let actual = crate::transfer::chunker::manifest_from_path(
+        let actual = crate::chunker::manifest_from_path(
             &root.join("b-receive/source.bin"),
             expected.chunk_size,
         )
@@ -1672,7 +1669,7 @@ async fn incremental_pending_request_cancellation_supersession_and_capacity_are_
     }
     assert!(pair.a.begin_preview(pair.ib, TaskId::generate()).is_err());
     for request in pair.a.preview_requests.lock().unwrap().values_mut() {
-        request.created = Instant::now() - crate::node::core::incremental::PREVIEW_LIFETIME;
+        request.created = Instant::now() - crate::incremental::PREVIEW_LIFETIME;
     }
     pair.a.begin_preview(pair.ib, TaskId::generate()).unwrap();
     assert_eq!(pair.a.preview_requests.lock().unwrap().len(), 1);
@@ -1776,8 +1773,7 @@ async fn incremental_preview_and_transfer_preserve_identical_files_and_back_up_c
     fs::write(target.join("empty.txt"), b"").unwrap();
     fs::write(target.join("extra.txt"), b"keep").unwrap();
     let identity =
-        crate::storage::secure_fs::identity(&std::fs::File::open(target.join("same.txt")).unwrap())
-            .unwrap();
+        crate::secure_fs::identity(&std::fs::File::open(target.join("same.txt")).unwrap()).unwrap();
     let preview = pair
         .a
         .preview_directory(&pair.ca, pair.ib, source)
@@ -1818,8 +1814,7 @@ async fn incremental_preview_and_transfer_preserve_identical_files_and_back_up_c
         2
     );
     assert_eq!(
-        crate::storage::secure_fs::identity(&std::fs::File::open(target.join("same.txt")).unwrap())
-            .unwrap(),
+        crate::secure_fs::identity(&std::fs::File::open(target.join("same.txt")).unwrap()).unwrap(),
         identity
     );
     assert!(target.join("空目录").is_dir());
@@ -1855,15 +1850,16 @@ async fn incremental_preview_and_transfer_preserve_identical_files_and_back_up_c
             .count(),
         2
     );
-    let detail = crate::node::core::task_details::project(
-        &received,
-        &crate::node::core::task_details::Selection::Group(received[0].group_id().unwrap().clone()),
-        |_| 0.,
-        |_| None,
-        |_| false,
-        system_time_unix_ms().unwrap(),
-    );
-    assert_eq!(detail.unwrap().saved_bytes, 4);
+    let skipped_bytes: u64 = received
+        .iter()
+        .filter_map(|record| {
+            record
+                .file_details()
+                .filter(|details| details.skipped_existing)
+        })
+        .map(|details| details.manifest.total_len)
+        .sum();
+    assert_eq!(skipped_bytes, 4);
     drop(reopened);
     pair.shutdown().await;
 }
@@ -1907,7 +1903,7 @@ async fn incremental_cancel_expiry_peer_and_connection_binding_never_admit_tasks
         .unwrap()
         .get_mut(&preview.id)
         .unwrap()
-        .created = Instant::now() - crate::node::core::incremental::PREVIEW_LIFETIME;
+        .created = Instant::now() - crate::incremental::PREVIEW_LIFETIME;
     assert!(
         pair.a
             .confirm_directory(&pair.ca, pair.ib, preview.id)
@@ -2248,16 +2244,39 @@ async fn authenticated_directory_preserves_structure_empty_entries_and_collision
             .iter()
             .all(|r| r.group_id() == records[0].group_id())
     );
-    use crate::node::core::task_details::Selection;
+    use crate::task_location::Selection;
     let selection = Selection::Group(records[0].group_id().unwrap().clone());
     for service in [&pair.a, &pair.b] {
-        let detail = service.task_detail(&selection).unwrap().unwrap();
-        assert_eq!(detail.members.len(), 5);
-        assert_eq!(detail.counts.files, 2);
-        assert_eq!(detail.counts.directories, 3);
-        assert_eq!(detail.counts.completed, 5);
-        assert_eq!(detail.total, b"new selected content".len() as u64);
-        for record in service.snapshot().await.unwrap() {
+        let records = service.snapshot().await.unwrap();
+        let selected = crate::task_location::records_for(&records, &selection);
+        assert_eq!(selected.len(), 5);
+        assert_eq!(
+            selected
+                .iter()
+                .filter(|record| record.file_details().is_some())
+                .count(),
+            2
+        );
+        assert_eq!(
+            selected
+                .iter()
+                .filter(|record| record.directory_details().is_some())
+                .count(),
+            3
+        );
+        assert!(
+            selected
+                .iter()
+                .all(|record| record.state() == TaskState::Completed)
+        );
+        assert_eq!(
+            selected
+                .iter()
+                .map(|record| record.manifest_identity().total_bytes())
+                .sum::<u64>(),
+            b"new selected content".len() as u64
+        );
+        for record in records {
             let target = service
                 .reveal_task(&Selection::Task(record.task_id().clone()))
                 .unwrap();
@@ -2330,7 +2349,7 @@ async fn directory_group_keeps_original_receive_root_after_settings_change() {
         assert_eq!(record.local_path(), pair.root.join("b-receive"));
         let target = pair
             .b
-            .reveal_task(&crate::node::core::task_details::Selection::Task(
+            .reveal_task(&crate::task_location::Selection::Task(
                 record.task_id().clone(),
             ))
             .unwrap();
@@ -2663,7 +2682,7 @@ async fn bounded_event_overflow_is_repaired_by_authoritative_lifecycle_snapshot(
                     disk::scan_selected_file(
                         peer,
                         path.clone(),
-                        &crate::node::core::files::ScanCancellation::default(),
+                        &crate::files::ScanCancellation::default(),
                     )
                 })
                 .collect::<Result<Vec<_>>>()?;
@@ -2785,8 +2804,8 @@ async fn full_queue_retains_new_selection_as_manually_retryable_interrupted_reco
         .lock()
         .unwrap()
         .enqueue(
-            (0..crate::node::core::queue::MAX_QUEUED)
-                .map(|_| crate::node::core::queue::QueueEntry {
+            (0..crate::queue::MAX_QUEUED)
+                .map(|_| crate::queue::QueueEntry {
                     id: TaskId::generate(),
                     peer: pair.ib,
                     metadata: false,
@@ -2802,10 +2821,7 @@ async fn full_queue_retains_new_selection_as_manually_retryable_interrupted_reco
     let record = &records[0];
     assert_eq!(record.state(), TaskState::Interrupted);
     assert!(can_continue(record));
-    assert_eq!(
-        pair.a.queue_metrics().pending,
-        crate::node::core::queue::MAX_QUEUED
-    );
+    assert_eq!(pair.a.queue_metrics().pending, crate::queue::MAX_QUEUED);
     let id = record.task_id().clone();
     pair.a.sender_queue.lock().unwrap().clear();
     pair.a
@@ -2898,8 +2914,8 @@ fn continue_after_paused_receipt_waits_for_previous_owned_slot_cleanup() {
 }
 #[tokio::test]
 async fn speed_uses_authenticated_connection_receiver_result_and_never_creates_file_tasks() {
-    use crate::node::core::protocol::SpeedDirection;
-    use crate::node::core::speed::SpeedStatus;
+    use veytrane_speed::control::SpeedDirection;
+    use veytrane_speed::runtime::SpeedStatus;
     let pair = Pair::new_inner(true).await;
     for direction in [SpeedDirection::Upload, SpeedDirection::Download] {
         let report = pair.speed_a().start(pair.ib, direction, 600).await.unwrap();
@@ -2945,7 +2961,7 @@ async fn speed_uses_authenticated_connection_receiver_result_and_never_creates_f
 }
 #[tokio::test]
 async fn speed_simultaneous_requests_have_one_grant_and_one_busy() {
-    use crate::node::core::protocol::SpeedDirection;
+    use veytrane_speed::control::SpeedDirection;
     let pair = Pair::new_inner(true).await;
     let (a, b) = tokio::join!(
         pair.speed_a().start(pair.ib, SpeedDirection::Upload, 30),
@@ -2968,7 +2984,7 @@ async fn speed_simultaneous_requests_have_one_grant_and_one_busy() {
 }
 #[tokio::test]
 async fn speed_and_file_activity_exclude_each_other_without_silent_pause() {
-    use crate::node::core::protocol::SpeedDirection;
+    use veytrane_speed::control::SpeedDirection;
     let pair = Pair::new_inner(true).await;
     let (id, _) = pair.select(1024).await;
     let connections = HashMap::from([(pair.ib, pair.ca.clone())]);
@@ -3033,8 +3049,8 @@ async fn speed_and_file_activity_exclude_each_other_without_silent_pause() {
 }
 #[tokio::test]
 async fn speed_cancel_and_stale_uni_token_do_not_pollute_next_test_or_file_transfer() {
-    use crate::node::core::protocol::{SpeedControl, SpeedDirection};
-    use crate::node::core::speed::SpeedStatus;
+    use veytrane_speed::control::{SpeedControl, SpeedDirection};
+    use veytrane_speed::runtime::SpeedStatus;
     for (direction, remote_cancel) in [
         (SpeedDirection::Upload, false),
         (SpeedDirection::Download, true),
@@ -3148,7 +3164,7 @@ async fn speed_cancel_and_stale_uni_token_do_not_pollute_next_test_or_file_trans
 }
 #[tokio::test]
 async fn speed_remote_busy_and_invalid_uni_headers_preserve_connection_and_next_lease() {
-    use crate::node::core::protocol::{SpeedControl, SpeedDirection};
+    use veytrane_speed::control::{SpeedControl, SpeedDirection};
     let pair = Pair::new_inner(true).await;
     let peer_file = pair.b.activity.shared(pair.ia).unwrap();
     let error = pair
@@ -3225,7 +3241,7 @@ async fn speed_remote_busy_and_invalid_uni_headers_preserve_connection_and_next_
 }
 #[tokio::test]
 async fn next_speed_request_waits_for_completed_peer_lease_cleanup() {
-    use crate::node::core::protocol::SpeedDirection;
+    use veytrane_speed::control::SpeedDirection;
     let pair = Pair::new_inner(true).await;
     let (cleanup_reached, cleanup_release) = pair.speed_b().peer(pair.ia).unwrap().gate_cleanup();
     let first = pair
@@ -3321,7 +3337,7 @@ async fn task_details_attempt_cleanup_fences_a_replacement_claim() {
 }
 #[tokio::test]
 async fn task_details_follow_real_pause_retry_receipts_and_history_removal() {
-    use crate::node::core::task_details::Selection;
+    use crate::task_location::Selection;
     let pair = Pair::new().await;
     let (id, bytes) = pair.select(8 * 1024 * 1024).await;
     let selected = Selection::Task(id.clone());
@@ -3338,14 +3354,15 @@ async fn task_details_follow_real_pause_retry_receipts_and_history_removal() {
     wait_state(&pair.b, &id, TaskState::Paused).await;
     for service in [&pair.a, &pair.b] {
         service.wait_previous_attempt(&id).await.unwrap();
-        let detail = service.task_detail(&selected).unwrap().unwrap();
-        assert_eq!(detail.rate, 0.);
-        assert_eq!(detail.eta, None);
-        assert_eq!(detail.run.attempts, 1);
+        let snapshot = service.file_snapshot().unwrap();
+        let task = snapshot.tasks.iter().find(|task| task.id == id).unwrap();
+        assert_eq!(task.rate, 0.);
         let measurements = service.measurements.lock().unwrap();
         let now = Instant::now();
+        let sample = measurements.sample(&id, now).unwrap();
+        assert_eq!(sample.attempts, 1);
         assert_eq!(
-            measurements.sample(&id, now).unwrap().elapsed,
+            sample.elapsed,
             measurements
                 .sample(&id, now + Duration::from_secs(100))
                 .unwrap()
@@ -3358,13 +3375,18 @@ async fn task_details_follow_real_pause_retry_receipts_and_history_removal() {
         service.wait_previous_attempt(&id).await.unwrap();
         let before = service.snapshot().await.unwrap();
         let changed = *service.changed.borrow();
-        let detail = service.task_detail(&selected).unwrap().unwrap();
-        assert_eq!(detail.confirmed, bytes.len() as u64);
-        assert_eq!(detail.run.attempts, 2);
-        assert_eq!(detail.run.retries, 1);
-        assert_eq!(detail.run.automatic, 0);
-        assert_eq!(detail.rate, 0.);
-        assert_eq!(detail.eta, None);
+        let snapshot = service.file_snapshot().unwrap();
+        let task = snapshot.tasks.iter().find(|task| task.id == id).unwrap();
+        assert_eq!(task.confirmed, bytes.len() as u64);
+        assert_eq!(task.rate, 0.);
+        let sample = service
+            .measurements
+            .lock()
+            .unwrap()
+            .sample(&id, Instant::now())
+            .unwrap();
+        assert_eq!(sample.attempts, 2);
+        assert_eq!(sample.automatic, 0);
         assert!(service.reveal_task(&selected).unwrap().is_file());
         assert_eq!(*service.changed.borrow(), changed);
         assert_eq!(service.snapshot().await.unwrap(), before);
@@ -3372,7 +3394,15 @@ async fn task_details_follow_real_pause_retry_receipts_and_history_removal() {
     let destination = pair.root.join("b-receive/文件.bin");
     assert_eq!(pair.b.reveal_task(&selected).unwrap(), destination);
     pair.b.remove_completed_task(&id).unwrap();
-    assert!(pair.b.task_detail(&selected).unwrap().is_none());
+    assert!(
+        !pair
+            .b
+            .file_snapshot()
+            .unwrap()
+            .tasks
+            .iter()
+            .any(|task| task.id == id)
+    );
     assert!(pair.b.reveal_task(&selected).is_err());
     assert_eq!(fs::read(destination).unwrap(), bytes);
     pair.shutdown().await;
@@ -3380,7 +3410,7 @@ async fn task_details_follow_real_pause_retry_receipts_and_history_removal() {
 #[cfg(unix)]
 #[tokio::test]
 async fn task_details_locator_rejects_replaced_source_parent_and_receive_leaf_links() {
-    use crate::node::core::task_details::Selection;
+    use crate::task_location::Selection;
     let pair = Pair::new().await;
     let folder = pair.root.join("source");
     fs::create_dir(&folder).unwrap();
@@ -3405,23 +3435,21 @@ async fn task_details_locator_rejects_replaced_source_parent_and_receive_leaf_li
     pair.shutdown().await;
 }
 #[tokio::test]
-async fn ui_projection_tracks_real_pause_and_receipts_without_rebinding_or_false_completion() {
+async fn file_snapshot_tracks_real_pause_and_receipts_without_rebinding_or_false_completion() {
     let pair = Pair::new().await;
     let (id, bytes) = pair.select(4096).await;
-    let snapshot = ui_snapshot(&pair.a).unwrap();
+    let snapshot = pair.a.file_snapshot().unwrap();
     let row = snapshot.tasks.iter().find(|r| r.id == id).unwrap();
     assert_eq!(row.peer, pair.ib);
     assert_eq!(row.state, TaskState::Queued);
     assert_eq!(row.confirmed, 0);
-    assert!(row.can_pause());
     pair.a.pause_task(id.clone()).await.unwrap();
-    let snapshot = ui_snapshot(&pair.a).unwrap();
+    let snapshot = pair.a.file_snapshot().unwrap();
     let row = snapshot.tasks.iter().find(|r| r.id == id).unwrap();
     assert_eq!(row.state, TaskState::Paused);
     assert_eq!(row.peer, pair.ib);
     assert_eq!(row.rate, 0.);
-    assert!(row.can_continue());
-    assert!(!row.can_pause());
+    assert!(!row.auto_waiting);
     pair.a
         .enqueue_tasks(pair.ib, vec![id.clone()])
         .await
@@ -3436,14 +3464,12 @@ async fn ui_projection_tracks_real_pause_and_receipts_without_rebinding_or_false
         .await
         .unwrap();
     for service in [&pair.a, &pair.b] {
-        let snapshot = ui_snapshot(service).unwrap();
+        let snapshot = service.file_snapshot().unwrap();
         let row = snapshot.tasks.iter().find(|r| r.id == id).unwrap();
         assert_eq!(row.state, TaskState::Completed);
         assert_eq!(row.confirmed, bytes.len() as u64);
-        assert_eq!(row.percent(), 100.);
+        assert_eq!(row.confirmed, row.total);
         assert_eq!(row.rate, 0.);
-        assert!(!row.can_pause());
-        assert!(!row.can_continue());
     }
     assert_eq!(
         fs::read(pair.root.join("b-receive/文件.bin")).unwrap(),
@@ -3453,9 +3479,9 @@ async fn ui_projection_tracks_real_pause_and_receipts_without_rebinding_or_false
 }
 #[tokio::test]
 async fn speed_revocation_uses_lease_owner_and_preserves_reverse_password_right() {
-    use crate::node::core::protocol::SpeedDirection;
-    use crate::node::core::remote_auth::{AuthorizationGrant, RemoteAuthorization};
-    use crate::node::core::speed::SpeedStatus;
+    use veytrane_node::live_authorization::{AuthorizationGrant, RemoteAuthorization};
+    use veytrane_speed::control::SpeedDirection;
+    use veytrane_speed::runtime::SpeedStatus;
     for revoke_request_direction in [false, true] {
         let pair = Pair::new_inner(true).await;
         pair.speed_a()

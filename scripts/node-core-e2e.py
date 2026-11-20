@@ -53,8 +53,8 @@ def main():
     cargo = ["cargo", "test", "--locked", "--offline", "--no-default-features"]
     test_args = ["--", "--nocapture", "--test-threads=4"]
     command = cargo + ["-p", "p2p_file", "--features", "node", "--lib", "node::core::"] + test_args
-    wire_command = cargo + ["-p", "veytrane-node", "--lib", "wire::"] + test_args
-    file_command = cargo + ["-p", "veytrane-files", "--features", "node-tasks,safe-storage", "--lib"] + test_args
+    wire_command = cargo + ["-p", "veytrane-node", "--lib"] + test_args
+    file_command = cargo + ["-p", "veytrane-files", "--features", "node-runtime", "--lib"] + test_args
     commands = (command, wire_command, file_command)
     started = datetime.datetime.now(datetime.timezone.utc).isoformat()
     begin = time.monotonic()

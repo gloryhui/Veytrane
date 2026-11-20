@@ -519,7 +519,7 @@ impl NodeControl {
         Ok(())
     }
     pub fn set_receive_safety_mib(&self, value: u16) -> Result<()> {
-        self.file_service()?.receive_space.set_safety_mib(value)
+        self.file_service()?.set_receive_safety_mib(value)
     }
     pub fn remove_completed_task(&self, task: &TaskId) -> Result<()> {
         self.file_service()?.remove_completed_task(task)

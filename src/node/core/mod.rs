@@ -2,7 +2,6 @@
 
 pub(crate) mod activity;
 pub mod authorization;
-pub(crate) mod auto_resume;
 pub mod bandwidth;
 pub mod config;
 pub mod connectivity;
@@ -10,12 +9,10 @@ pub mod control;
 pub mod diagnostics;
 pub mod dispatch;
 pub(crate) mod drop_send;
-pub(crate) mod files;
 pub(crate) mod frame_budget;
 pub(crate) mod incremental;
 pub(crate) mod network_state;
 pub mod protocol;
-pub(crate) mod publish;
 pub(crate) mod queue;
 pub mod receive_policy;
 pub mod remote_auth;

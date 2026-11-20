@@ -28,8 +28,7 @@ live = ["node", "dep:reqwest"]
 node = [
     "dep:veytrane-node",
     "veytrane-speed/node-runtime",
-    "veytrane-files/safe-storage",
-    "veytrane-files/node-tasks",
+    "veytrane-files/node-runtime",
     "veytrane-transport/private-storage",
     "dep:argon2",
     "dep:hmac",

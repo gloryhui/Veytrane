@@ -1982,9 +1982,7 @@ async fn run_session(
                     service.set_auto_resume(record.settings.auto_resume);
                     let _ = service.set_send_limit(record.settings.send_concurrency);
                     let _ = service.set_file_limits(record.settings.file_limits);
-                    let _ = service
-                        .receive_space
-                        .set_safety_mib(record.settings.receive_safety_mib);
+                    let _ = service.set_receive_safety_mib(record.settings.receive_safety_mib);
                 }
                 if options.restart {
                     session_shutdown = true;

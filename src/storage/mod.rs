@@ -6,7 +6,5 @@ pub mod chunk_bitmap;
 pub mod permissions;
 #[cfg(feature = "node")]
 pub mod relative_path;
-#[cfg(feature = "node")]
-pub(crate) mod secure_fs;
 
 pub use veytrane_files::download::PartialDownload;
