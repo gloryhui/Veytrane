@@ -221,31 +221,6 @@ pub struct NodeSessionConfig {
     pub tunnel_rules: Vec<crate::node::core::config::TunnelRule>,
     #[cfg(feature = "agent-files")]
     pub(crate) transfer: Option<crate::node::core::transfer::TransferService>,
-    pub(crate) shared_runtime: Option<SharedRuntime>,
-}
-
-#[derive(Clone)]
-pub(crate) struct SharedRuntime {
-    pub(crate) activity: crate::node::core::activity::Activity,
-    pub(crate) changed: watch::Sender<u64>,
-    pub(crate) frame_budget: crate::node::core::frame_budget::FrameBudget,
-}
-
-impl std::fmt::Debug for SharedRuntime {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SharedRuntime").finish_non_exhaustive()
-    }
-}
-
-impl SharedRuntime {
-    pub(crate) fn new() -> Self {
-        let (changed, _) = watch::channel(0);
-        Self {
-            activity: crate::node::core::activity::Activity::new(changed.clone()),
-            changed,
-            frame_budget: crate::node::core::frame_budget::FrameBudget::default(),
-        }
-    }
 }
 
 impl NodeSessionConfig {
@@ -276,7 +251,6 @@ impl NodeSessionConfig {
             tunnel_rules: Vec::new(),
             #[cfg(feature = "agent-files")]
             transfer: None,
-            shared_runtime: None,
         }
     }
 
@@ -1272,10 +1246,39 @@ struct RunningTunnel {
 type TunnelTaskResult = (String, std::result::Result<(), String>);
 type TunnelTaskJoin = Option<std::result::Result<TunnelTaskResult, tokio::task::JoinError>>;
 
-/// Start a dedicated Tokio runtime so GPUI's UI thread never performs network work.
-pub fn spawn(
+#[cfg(test)]
+pub(crate) fn spawn_for_test(
     identity: Identity,
-    mut config: NodeSessionConfig,
+    config: NodeSessionConfig,
+) -> std::io::Result<(NodeSessionHandle, mpsc::Receiver<SessionEvent>)> {
+    let speed = if config.enable_speed {
+        #[cfg(feature = "agent-files")]
+        if let Some(service) = config.transfer.as_ref() {
+            let (activity, changed, frame_budget) = service.shared_parts();
+            return spawn(
+                identity,
+                config,
+                Some(SpeedService::new(activity, changed, frame_budget)),
+            );
+        }
+        let (changed, _) = watch::channel(0);
+        let activity = crate::node::core::activity::Activity::new(changed.clone());
+        Some(SpeedService::new(
+            activity,
+            changed,
+            crate::node::core::frame_budget::FrameBudget::default(),
+        ))
+    } else {
+        None
+    };
+    spawn(identity, config, speed)
+}
+
+/// Start the assembled session on its dedicated Tokio runtime.
+pub(crate) fn spawn(
+    identity: Identity,
+    config: NodeSessionConfig,
+    speed: Option<SpeedService>,
 ) -> std::io::Result<(NodeSessionHandle, mpsc::Receiver<SessionEvent>)> {
     if config.service_ids.len() > 512 {
         return Err(std::io::Error::new(
@@ -1312,26 +1315,14 @@ pub fn spawn(
     }
     crate::node::core::trusted_devices::validate(&config.trusted_devices)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    if config.enable_speed && speed.is_none() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "测速服务未装配",
+        ));
+    }
     let max_peers = config.max_peers;
-    let shared_runtime = config.shared_runtime.take().unwrap_or_else(|| {
-        #[cfg(all(test, feature = "agent-files"))]
-        if let Some(service) = config.transfer.as_ref() {
-            let (activity, changed, frame_budget) = service.shared_parts();
-            return SharedRuntime {
-                activity,
-                changed,
-                frame_budget,
-            };
-        }
-        SharedRuntime::new()
-    });
-    let speed = config.enable_speed.then(|| {
-        SpeedService::new(
-            shared_runtime.activity.clone(),
-            shared_runtime.changed.clone(),
-            shared_runtime.frame_budget.clone(),
-        )
-    });
+    let speed = speed.filter(|_| config.enable_speed);
     #[cfg(feature = "agent-files")]
     let control = crate::node::core::control::ControlState::new_with_files(
         identity.node_id(),

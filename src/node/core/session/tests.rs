@@ -30,7 +30,7 @@ fn spawn(
             .service_ids
             .insert(rule.id.clone(), service_id(rule.target));
     }
-    super::spawn(identity, config)
+    super::spawn_for_test(identity, config)
 }
 async fn service_stream(connection: &quinn::Connection) -> (quinn::SendStream, quinn::RecvStream) {
     let stream = crate::node::core::dispatch::open_bi(

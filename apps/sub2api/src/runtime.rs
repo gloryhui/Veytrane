@@ -2,6 +2,7 @@
 //! Neither process starts the general Agent, file store, Web UI or IPC server.
 use super::runtime::{authorized_peers, log_connection_event, stop_control};
 use crate::node::composition::forwarding::{self, ForwardManager};
+use crate::node::composition::runtime;
 use crate::node::composition::settings::NodeSettings;
 use crate::node::core::config::{AllowedForwardTarget, TunnelRule};
 use crate::node::core::control;
@@ -156,7 +157,7 @@ pub async fn run_gateway(root: &Path) -> io::Result<()> {
     loop {
         generation = generation.saturating_add(1);
         let started = Instant::now();
-        let (control, mut events) = control::spawn(identity.clone(), gateway_session(&settings)?)?;
+        let (control, mut events) = runtime::spawn(identity.clone(), gateway_session(&settings)?)?;
         let mut allowed = BTreeSet::new();
         let mut policy = crate::node::products::recovery::GatewayRecovery::default();
         let mut interval = tokio::time::interval(Duration::from_millis(250));
@@ -230,7 +231,7 @@ pub async fn run_client(embedded_profile: &str) -> io::Result<()> {
     loop {
         let mut session = settings.session().map_err(error)?;
         session.tunnel_rules.clear();
-        let (control, mut events) = control::spawn(identity.clone(), session)?;
+        let (control, mut events) = runtime::spawn(identity.clone(), session)?;
         let mut forwards = ForwardManager::default();
         let prepared = match forwarding::prepare(&forwards, &settings, &control, None).await {
             Ok(plan) => plan,
@@ -465,7 +466,7 @@ mod tests {
         let password = SecretPassword::new("a7B8c9D0e1F2".into()).unwrap();
         let mut config = local();
         config.remote_auth = Some(RemoteVerifier::create(&password).unwrap());
-        let (gateway, mut events) = control::spawn(gateway_id, config).unwrap();
+        let (gateway, mut events) = runtime::spawn(gateway_id, config).unwrap();
         let authorizer = gateway.clone();
         let grants = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(20));
@@ -488,8 +489,8 @@ mod tests {
         let first = Identity::generate();
         let second = Identity::generate();
         assert_ne!(first.node_id(), second.node_id());
-        let (a, mut ea) = control::spawn(first, local()).unwrap();
-        let (b, mut eb) = control::spawn(second, local()).unwrap();
+        let (a, mut ea) = runtime::spawn(first, local()).unwrap();
+        let (b, mut eb) = runtime::spawn(second, local()).unwrap();
         let drain_a = tokio::spawn(async move { while ea.recv().await.is_some() {} });
         let drain_b = tokio::spawn(async move { while eb.recv().await.is_some() {} });
         tokio::time::timeout(Duration::from_secs(10), async {
@@ -555,7 +556,7 @@ mod tests {
             }
         }
         assert_eq!(authorized_peers(gateway.snapshot().unwrap()).len(), 2);
-        let (bad, mut bad_events) = control::spawn(Identity::generate(), local()).unwrap();
+        let (bad, mut bad_events) = runtime::spawn(Identity::generate(), local()).unwrap();
         let drain_bad = tokio::spawn(async move { while bad_events.recv().await.is_some() {} });
         tokio::time::timeout(Duration::from_secs(10), async {
             while bad.snapshot().unwrap().signal != "online" {
@@ -609,7 +610,7 @@ mod tests {
             .session()
             .unwrap();
         session.tunnel_rules.clear(); // No local listeners or existing Mac configuration.
-        let (control, mut events) = control::spawn(identity, session).unwrap();
+        let (control, mut events) = runtime::spawn(identity, session).unwrap();
         let drain = tokio::spawn(async move { while events.recv().await.is_some() {} });
         let mut updates = control.connection_updates(peer).await.unwrap();
         control

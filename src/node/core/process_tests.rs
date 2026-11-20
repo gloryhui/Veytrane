@@ -65,7 +65,7 @@ fn start(
         .map(|bytes| serde_json::from_slice(&bytes).unwrap())
         .unwrap_or_default();
     conf.transfer = Some(service);
-    session::spawn(identity, conf).unwrap()
+    session::spawn_for_test(identity, conf).unwrap()
 }
 fn actor(root: PathBuf) {
     config::ensure_private_app_dir(&root.join("state")).unwrap();

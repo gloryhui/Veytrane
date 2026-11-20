@@ -12,6 +12,12 @@ fn direct_config(family: crate::net::NetworkFamilies) -> NodeSessionConfig {
     c.network.stun_servers = vec!["invalid.invalid:3478".into()];
     c
 }
+fn spawn(
+    identity: Identity,
+    config: NodeSessionConfig,
+) -> std::io::Result<(NodeSessionHandle, tokio::sync::mpsc::Receiver<SessionEvent>)> {
+    super::spawn_for_test(identity, config)
+}
 async fn address(handle: &NodeSessionHandle, ipv6: bool) -> SocketAddr {
     time::timeout(Duration::from_secs(5), async {
         loop {

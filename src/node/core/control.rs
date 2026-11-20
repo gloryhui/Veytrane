@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 #[cfg(feature = "agent-files")]
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -363,36 +363,13 @@ impl ControlEvents {
     }
 }
 
-pub fn spawn(
+pub(crate) fn spawn(
     identity: Identity,
     config: NodeSessionConfig,
+    speed: Option<crate::node::core::speed::SpeedService>,
 ) -> std::io::Result<(NodeControl, ControlEvents)> {
-    let (handle, receiver) = crate::node::core::session::spawn(identity, config)?;
+    let (handle, receiver) = crate::node::core::session::spawn(identity, config, speed)?;
     Ok((handle, ControlEvents { receiver }))
-}
-
-#[cfg(feature = "agent-files")]
-/// Explicit persistent file service; capability negotiation is finalized in P3.
-pub fn spawn_with_storage(
-    identity: Identity,
-    mut config: NodeSessionConfig,
-    tasks: &Path,
-    receive_root: PathBuf,
-) -> Result<(NodeControl, ControlEvents)> {
-    let (store, _) = crate::node::core::task_store::TaskStore::open(tasks)
-        .map_err(|e| Error::Protocol(e.to_string()))?;
-    let shared_runtime = crate::node::core::session::SharedRuntime::new();
-    config.transfer = Some(
-        crate::node::core::transfer::TransferService::new_with_shared(
-            store,
-            receive_root,
-            shared_runtime.activity.clone(),
-            shared_runtime.changed.clone(),
-            shared_runtime.frame_budget.clone(),
-        ),
-    );
-    config.shared_runtime = Some(shared_runtime);
-    spawn(identity, config).map_err(Error::Io)
 }
 
 pub enum NodeCommand {

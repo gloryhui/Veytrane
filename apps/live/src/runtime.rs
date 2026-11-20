@@ -2,6 +2,7 @@
 //! are exported through the existing ID-scoped node TCP forwarding mechanism.
 use super::runtime::{authorized_peers, log_connection_event, stop_control};
 use crate::node::composition::forwarding::{self, ForwardManager};
+use crate::node::composition::runtime;
 use crate::node::composition::settings::NodeSettings;
 use crate::node::core::config::{AllowedForwardTarget, TunnelRule};
 use crate::node::core::control;
@@ -371,7 +372,7 @@ async fn gateway_loop(
     let shutdown = tokio::signal::ctrl_c();
     tokio::pin!(shutdown);
     loop {
-        let (control, mut events) = control::spawn(identity.clone(), session(&s, loopback_test)?)?;
+        let (control, mut events) = runtime::spawn(identity.clone(), session(&s, loopback_test)?)?;
         let mut allowed = BTreeSet::new();
         let mut policy = super::recovery::GatewayRecovery::default();
         let started = Instant::now();
@@ -436,7 +437,7 @@ pub async fn run_viewer(
     let mut opened = false;
     println!("Veytrane Live 观看端\n观看地址：{VIEWER_URL}\n保持此窗口运行，Ctrl+C 退出。");
     loop {
-        let (control, mut events) = control::spawn(identity.clone(), session(&s, loopback_test)?)?;
+        let (control, mut events) = runtime::spawn(identity.clone(), session(&s, loopback_test)?)?;
         let mut forwards = ForwardManager::default();
         let prepared = match forwarding::prepare(&forwards, &s, &control, None).await {
             Ok(plan) => plan,

@@ -1,5 +1,6 @@
 //! Headless node business runtime, configuration and durable task state. No host or UI dependencies.
 
+#[cfg(test)]
 pub(crate) mod activity;
 pub mod authorization;
 pub mod bandwidth;
@@ -10,6 +11,7 @@ pub mod diagnostics;
 pub mod dispatch;
 #[cfg(feature = "agent-files")]
 pub(crate) mod drop_send;
+#[cfg(test)]
 pub(crate) mod frame_budget;
 #[cfg(feature = "agent-files")]
 pub(crate) mod incremental;

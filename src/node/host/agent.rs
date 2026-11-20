@@ -2,6 +2,7 @@
 use crate::identity::{Identity, NodeId};
 use crate::node::api::protocol::{self as ipc, Command, Request, Response};
 use crate::node::composition::forwarding::{self, ForwardManager};
+use crate::node::composition::runtime;
 use crate::node::composition::settings::ConfigRecord;
 use crate::node::core::control::{self, NodeControl, SequencedEvent};
 use crate::node::local::paths::AgentPaths;
@@ -503,7 +504,7 @@ async fn run_with_recovery(
     #[cfg(feature = "agent-files")]
     let (control, mut raw) = if session.enable_files {
         crate::storage::permissions::ensure_directory(&record.settings.receive_root)?;
-        let (control, events) = control::spawn_with_storage(
+        let (control, events) = runtime::spawn_with_storage(
             identity,
             session,
             &paths.tasks(),
@@ -524,10 +525,10 @@ async fn run_with_recovery(
             .map_err(io::Error::other)?;
         (control, events)
     } else {
-        control::spawn(identity, session)?
+        runtime::spawn(identity, session)?
     };
     #[cfg(not(feature = "agent-files"))]
-    let (control, mut raw) = control::spawn(identity, session)?;
+    let (control, mut raw) = runtime::spawn(identity, session)?;
     control
         .configuration_committed(record.revision)
         .map_err(io::Error::other)?;
