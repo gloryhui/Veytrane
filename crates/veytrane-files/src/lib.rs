@@ -1,8 +1,11 @@
 //! File manifests, resumable downloads, and safe file storage for Veytrane.
 
 #[cfg(feature = "node-tasks")]
+pub mod auto_resume;
+#[cfg(feature = "node-tasks")]
 pub mod bandwidth;
 pub mod chunk_bitmap;
+pub mod chunker;
 pub mod download;
 #[cfg(feature = "node-tasks")]
 pub mod frame_budget;
