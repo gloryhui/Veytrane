@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import shutil
 import signal
 import socket
 import struct
@@ -26,13 +27,22 @@ def main():
         parser.error('requires an isolated Unix root test caller and the existing nobody account')
     account=pwd.getpwnam('nobody')
     with tempfile.TemporaryDirectory(prefix='node-ipc-uid-') as directory:
-        parent=Path(directory);os.chown(parent,account.pw_uid,account.pw_gid)
+        parent=Path(directory)
+        agent_binary=parent/'p2p-agent'
+        node_binary=parent/'p2p-node'
+        shutil.copy2(args.agent.resolve(strict=True),agent_binary)
+        shutil.copy2(args.node.resolve(strict=True),node_binary)
+        agent_binary.chmod(0o755)
+        node_binary.chmod(0o755)
+        os.chown(parent,account.pw_uid,account.pw_gid)
         data=parent/'node'
         prefix=['runuser','-u','nobody','--','env','HOME='+str(parent/'home')]
-        node=prefix+[str(args.node.resolve()),'--data-dir',str(data)]
-        subprocess.run(node+['init'],check=True,capture_output=True,timeout=10)
+        node=prefix+[str(node_binary),'--data-dir',str(data)]
+        initialized=subprocess.run(
+            node+['init'],capture_output=True,encoding='utf-8',errors='replace',timeout=10)
+        assert initialized.returncode==0,initialized.stderr
         log=open(parent/'agent.log','w',encoding='utf-8')
-        agent=subprocess.Popen(prefix+[str(args.agent.resolve()),'--data-dir',str(data)],stdout=log,stderr=log,start_new_session=True)
+        agent=subprocess.Popen(prefix+[str(agent_binary),'--data-dir',str(data)],stdout=log,stderr=log,start_new_session=True)
         try:
             until=time.monotonic()+15
             while True:
