@@ -1,5 +1,7 @@
 //! TCP stream budgets, listener supervision, and QUIC byte forwarding.
 
+#[cfg(feature = "node-runtime")]
+pub mod forwarding;
 pub mod rules;
 #[cfg(feature = "node-runtime")]
 pub mod services;
@@ -19,6 +21,7 @@ use veytrane_transport::error::{Error, Result};
 
 /// Maximum concurrent local TCP connections served by one forwarding rule.
 pub const DEFAULT_MAX_TUNNEL_STREAMS: usize = 32;
+pub const DEFAULT_MAX_NODE_TCP_STREAMS: usize = 256;
 
 /// Check the serve-side target allowlist before opening its TCP socket.
 pub async fn connect_allowed_target(

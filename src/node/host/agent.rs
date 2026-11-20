@@ -2,6 +2,7 @@
 use crate::identity::{Identity, NodeId};
 use crate::node::api::protocol::{self as ipc, Command, Request, Response};
 use crate::node::core::control::{self, NodeControl, SequencedEvent};
+use crate::node::core::forwarding::{self, ForwardManager};
 use crate::node::core::settings::ConfigRecord;
 use crate::node::local::paths::AgentPaths;
 use serde_json::{Value, json};
@@ -51,7 +52,7 @@ pub struct Agent {
     diagnostics: Mutex<VecDeque<String>>,
     pub(crate) restart_pending: std::sync::atomic::AtomicBool,
     pub(crate) last_error: Mutex<Option<String>>,
-    pub(crate) forwards: Mutex<crate::node::host::forwarding::ForwardManager>,
+    pub(crate) forwards: Mutex<ForwardManager>,
 }
 impl Agent {
     async fn execute(&self, command: Command, id: &str, digest: &str) -> Result<Value, String> {
@@ -73,7 +74,7 @@ impl Agent {
                 let last_error = self.last_error.lock().await.clone();
                 let diagnostics = self.diagnostics.lock().await.clone();
                 Ok(
-                    json!({"core_running":self.control.is_running(),"build":crate::node::api::build_info::value("p2p-agent"),"diagnostics":diagnostics,"restart_pending":self.restart_pending.load(std::sync::atomic::Ordering::Acquire),"budgets":{"peers":self.control.peer_capacity(),"pending_peers":8,"tcp_streams":256,"tcp_per_rule":32,"management_connections":32,"service_controls_per_peer":8},"data_dir":self.paths.root,"epoch":self.epoch,"revision":configuration.revision,"node":node,"last_error":last_error,"forwards":forwards}),
+                    json!({"core_running":self.control.is_running(),"build":crate::node::api::build_info::value("p2p-agent"),"diagnostics":diagnostics,"restart_pending":self.restart_pending.load(std::sync::atomic::Ordering::Acquire),"budgets":{"peers":self.control.peer_capacity(),"pending_peers":8,"tcp_streams":veytrane_tcp::DEFAULT_MAX_NODE_TCP_STREAMS,"tcp_per_rule":veytrane_tcp::DEFAULT_MAX_TUNNEL_STREAMS,"management_connections":32,"service_controls_per_peer":veytrane_tcp::services::MAX_PENDING_CONTROLS},"data_dir":self.paths.root,"epoch":self.epoch,"revision":configuration.revision,"node":node,"last_error":last_error,"forwards":forwards}),
                 )
             }
             Command::Nearby => Ok(serde_json::to_value(
@@ -234,8 +235,7 @@ impl Agent {
                     return Err("转发规则不存在或已禁用".into());
                 }
                 let mut forwards = self.forwards.lock().await;
-                let plan = forwards
-                    .prepare(&record.settings, &self.control, Some(&rule))
+                let plan = forwarding::prepare(&forwards, &record.settings, &self.control, Some(&rule))
                     .await
                     .map_err(|e| e.to_string())?;
                 let retired = forwards.commit(plan);
@@ -537,14 +537,13 @@ async fn run_with_recovery(
         diagnostics: Mutex::new(VecDeque::new()),
         restart_pending: std::sync::atomic::AtomicBool::new(false),
         last_error: Mutex::new(None),
-        forwards: Mutex::new(crate::node::host::forwarding::ForwardManager::default()),
+        forwards: Mutex::new(ForwardManager::default()),
     });
     let mut listener = crate::node::local::transport::Listener::bind(&paths)?;
     {
         let record = agent.config.lock().await;
         let mut forwards = agent.forwards.lock().await;
-        let plan = forwards
-            .prepare(&record.settings, &agent.control, None)
+        let plan = forwarding::prepare(&forwards, &record.settings, &agent.control, None)
             .await
             .map_err(io::Error::other)?;
         let _ = forwards.commit(plan);

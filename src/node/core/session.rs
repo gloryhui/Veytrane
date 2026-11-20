@@ -1490,7 +1490,9 @@ async fn run_session(
         services: config.service_ids.clone(),
     };
     let service_queries = Arc::new(Semaphore::new(16));
-    let forward_streams = Arc::new(veytrane_tcp::ForwardStreamOwner::new(256));
+    let forward_streams = Arc::new(veytrane_tcp::ForwardStreamOwner::new(
+        veytrane_tcp::DEFAULT_MAX_NODE_TCP_STREAMS,
+    ));
     #[cfg(feature = "agent-files")]
     let files_enabled = config.transfer.is_some() && config.enable_files;
     #[cfg(not(feature = "agent-files"))]

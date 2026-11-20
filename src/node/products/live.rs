@@ -3,9 +3,9 @@
 use super::runtime::{authorized_peers, log_connection_event, stop_control};
 use crate::node::core::config::{AllowedForwardTarget, TunnelRule};
 use crate::node::core::control;
+use crate::node::core::forwarding::{self, ForwardManager};
 use crate::node::core::remote_auth::{RemoteVerifier, SecretPassword};
 use crate::node::core::settings::NodeSettings;
-use crate::node::host::forwarding::ForwardManager;
 use crate::{
     identity::{Identity, NodeId},
     instance_lock::InstanceLock,
@@ -438,7 +438,7 @@ pub async fn run_viewer(
     loop {
         let (control, mut events) = control::spawn(identity.clone(), session(&s, loopback_test)?)?;
         let mut forwards = ForwardManager::default();
-        let prepared = match forwards.prepare(&s, &control, None).await {
+        let prepared = match forwarding::prepare(&forwards, &s, &control, None).await {
             Ok(plan) => plan,
             Err(e) => {
                 stop_control(control).await;

@@ -19,7 +19,7 @@ use veytrane_node::wire::{
 use veytrane_transport::error::{Error, Result};
 use veytrane_transport::identity::NodeId;
 
-const MAX_PENDING_CONTROLS: usize = 8;
+pub const MAX_PENDING_CONTROLS: usize = 8;
 const RPC_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn visible(entry: &AllowedForwardTarget, peer: NodeId) -> bool {

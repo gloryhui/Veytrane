@@ -1,5 +1,6 @@
 //! One revision coordinator for every management entry point.
 use crate::node::api::protocol as ipc;
+use crate::node::core::forwarding;
 use crate::node::core::settings::{ConfigRecord, NodeSettings};
 use crate::node::host::agent::Agent;
 use crate::node::local::paths::AgentPaths;
@@ -200,8 +201,7 @@ impl Agent {
             }
         }
         let mut forwards = self.forwards.lock().await;
-        let prepared = forwards
-            .prepare(&settings, &self.control, None)
+        let prepared = forwarding::prepare(&forwards, &settings, &self.control, None)
             .await
             .map_err(|e| e.to_string())?;
         let record = ConfigRecord {

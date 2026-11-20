@@ -10,6 +10,7 @@ pub mod diagnostics;
 pub mod dispatch;
 #[cfg(feature = "agent-files")]
 pub(crate) mod drop_send;
+pub(crate) mod forwarding;
 pub(crate) mod frame_budget;
 #[cfg(feature = "agent-files")]
 pub(crate) mod incremental;

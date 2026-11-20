@@ -3,9 +3,9 @@
 use super::runtime::{authorized_peers, log_connection_event, stop_control};
 use crate::node::core::config::{AllowedForwardTarget, TunnelRule};
 use crate::node::core::control;
+use crate::node::core::forwarding::{self, ForwardManager};
 use crate::node::core::remote_auth::{RemoteVerifier, SecretPassword};
 use crate::node::core::settings::NodeSettings;
-use crate::node::host::forwarding::ForwardManager;
 use crate::storage::permissions as private_access;
 use crate::{
     identity::{Identity, NodeId},
@@ -232,7 +232,7 @@ pub async fn run_client(embedded_profile: &str) -> io::Result<()> {
         session.tunnel_rules.clear();
         let (control, mut events) = control::spawn(identity.clone(), session)?;
         let mut forwards = ForwardManager::default();
-        let prepared = match forwards.prepare(&settings, &control, None).await {
+        let prepared = match forwarding::prepare(&forwards, &settings, &control, None).await {
             Ok(plan) => plan,
             Err(_) => {
                 stop_control(control).await;

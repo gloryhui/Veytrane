@@ -1,13 +1,13 @@
-//! Agent-owned listeners. Preparing is inert; committed route updates affect
-//! only future accepts. Established streams are owned by the node task group.
-use crate::node::core::control::NodeControl;
-use crate::node::core::settings::NodeSettings;
+//! Transactional TCP listeners. Accepted flows outlive individual rule stops.
+
 use crate::{
-    error::{Error, Result},
-    identity::NodeId,
+    DEFAULT_MAX_NODE_TCP_STREAMS, DEFAULT_MAX_TUNNEL_STREAMS, ForwardStreamOwner, bridge_tcp,
+    rules::TunnelRule,
 };
+use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
+    future::Future,
     net::SocketAddr,
     sync::Arc,
     time::Duration,
@@ -17,12 +17,48 @@ use tokio::{
     sync::{Semaphore, watch},
     task::JoinHandle,
 };
+use veytrane_transport::{
+    error::{Error, Result},
+    identity::NodeId,
+};
+
+#[derive(Clone)]
+pub struct PeerConnection {
+    updates: watch::Receiver<Option<quinn::Connection>>,
+    reconnect: Arc<dyn Fn() -> Result<()> + Send + Sync>,
+}
+
+impl PeerConnection {
+    pub fn new(
+        updates: watch::Receiver<Option<quinn::Connection>>,
+        reconnect: impl Fn() -> Result<()> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            updates,
+            reconnect: Arc::new(reconnect),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct ForwardSnapshot {
+    active_streams: usize,
+    manually_stopped: HashSet<String>,
+    rules: Vec<RuleStatus>,
+}
+
+#[derive(Serialize)]
+struct RuleStatus {
+    id: String,
+    listen: SocketAddr,
+    listening: bool,
+    peer_ready: bool,
+    last_error: Option<String>,
+}
 
 #[derive(Clone)]
 struct Route {
-    control: NodeControl,
-    peer: NodeId,
-    connection: watch::Receiver<Option<quinn::Connection>>,
+    peer: PeerConnection,
     service: String,
 }
 struct Running {
@@ -32,61 +68,56 @@ struct Running {
     task: JoinHandle<()>,
     error: Arc<std::sync::Mutex<Option<String>>>,
 }
-pub(crate) struct Prepared {
+pub struct Prepared {
     known: HashSet<String>,
     forced_start: Option<String>,
     desired: HashMap<String, (SocketAddr, Route)>,
     additions: HashMap<String, TcpListener>,
 }
-pub(crate) struct ForwardManager {
+pub struct ForwardManager {
     suppressed: HashSet<String>,
     active: HashMap<String, Running>,
-    owner: Arc<veytrane_tcp::ForwardStreamOwner>,
+    owner: Arc<ForwardStreamOwner>,
 }
 impl Default for ForwardManager {
     fn default() -> Self {
         Self {
             active: HashMap::new(),
             suppressed: HashSet::new(),
-            owner: Arc::new(veytrane_tcp::ForwardStreamOwner::new(256)),
+            owner: Arc::new(ForwardStreamOwner::new(DEFAULT_MAX_NODE_TCP_STREAMS)),
         }
     }
 }
 impl ForwardManager {
-    pub async fn prepare(
+    pub async fn prepare<Resolve, ResolveFuture>(
         &self,
-        settings: &NodeSettings,
-        control: &NodeControl,
+        rules: &[TunnelRule],
+        service_ids: &HashMap<String, String>,
         start: Option<&str>,
-    ) -> Result<Prepared> {
+        resolve: Resolve,
+    ) -> Result<Prepared>
+    where
+        Resolve: Fn(NodeId) -> ResolveFuture,
+        ResolveFuture: Future<Output = Result<PeerConnection>>,
+    {
         let mut plan = Prepared {
-            known: settings.forwards.iter().map(|r| r.id.clone()).collect(),
+            known: rules.iter().map(|r| r.id.clone()).collect(),
             forced_start: start.map(str::to_owned),
             desired: HashMap::new(),
             additions: HashMap::new(),
         };
-        for rule in settings.forwards.iter().filter(|r| {
+        for rule in rules.iter().filter(|r| {
             r.enabled
                 && (start == Some(r.id.as_str())
                     || (!self.suppressed.contains(&r.id)
                         && (r.auto_start || self.active.contains_key(&r.id))))
         }) {
-            let peer = NodeId::from_hex(&rule.peer_node_id)?;
-            let connection = control
-                .connection_updates(peer)
-                .await
-                .map_err(Error::Protocol)?;
-            let service = settings
-                .service_ids
+            let peer = resolve(NodeId::from_hex(&rule.peer_node_id)?).await?;
+            let service = service_ids
                 .get(&rule.id)
                 .ok_or_else(|| Error::Protocol("转发缺少服务 ID".into()))?
                 .clone();
-            let route = Route {
-                control: control.clone(),
-                peer,
-                connection,
-                service,
-            };
+            let route = Route { peer, service };
             if self
                 .active
                 .get(&rule.id)
@@ -133,22 +164,41 @@ impl ForwardManager {
             let error = Arc::new(std::sync::Mutex::new(None));
             let errors = error.clone();
             let owner = self.owner.clone();
-            let slots = Arc::new(Semaphore::new(32));
-            let status_error = error.clone();
+            let slots = Arc::new(Semaphore::new(DEFAULT_MAX_TUNNEL_STREAMS));
             let task = tokio::spawn(async move {
                 loop {
-                    tokio::select! {biased;
-                        _=stopped.changed()=>break,
-                        changed=current.changed()=>{if changed.is_err(){break;}},
-                        accepted=listener.accept()=>{
-                            let (tcp,_)=match accepted{Ok(value)=>value,Err(e)=>{*errors.lock().unwrap()=Some(e.to_string().chars().take(256).collect());break;}};
-                            let Ok(permit)=slots.clone().try_acquire_owned()else{*errors.lock().unwrap()=Some("单规则TCP并发已满".into());continue;};
-                            let route=current.borrow().clone();let errors=errors.clone();
+                    tokio::select! {
+                        biased;
+                        _ = stopped.changed() => break,
+                        changed = current.changed() => {
+                            if changed.is_err() {
+                                break;
+                            }
+                        }
+                        accepted = listener.accept() => {
+                            let (tcp, _) = match accepted {
+                                Ok(connection) => connection,
+                                Err(error) => {
+                                    *errors.lock().unwrap() =
+                                        Some(error.to_string().chars().take(256).collect());
+                                    break;
+                                }
+                            };
+                            let Ok(permit) = slots.clone().try_acquire_owned() else {
+                                *errors.lock().unwrap() = Some("单规则TCP并发已满".into());
+                                continue;
+                            };
+                            let route = current.borrow().clone();
+                            let flow_errors = errors.clone();
                             if !owner.spawn(async move {
-                                let _permit=permit;
-                                let result=open(tcp,route).await;
-                                if let Err(e)=result{*errors.lock().unwrap()=Some(e.to_string().chars().take(256).collect());}
-                            }){*error.lock().unwrap()=Some("节点TCP并发已满或正在退出".into());}
+                                let _permit = permit;
+                                if let Err(error) = open(tcp, route).await {
+                                    *flow_errors.lock().unwrap() =
+                                        Some(error.to_string().chars().take(256).collect());
+                                }
+                            }) {
+                                *errors.lock().unwrap() = Some("节点TCP并发已满或正在退出".into());
+                            }
                         }
                     }
                 }
@@ -160,7 +210,7 @@ impl ForwardManager {
                     route: routes,
                     stop,
                     task,
-                    error: status_error,
+                    error,
                 },
             );
         }
@@ -174,8 +224,29 @@ impl ForwardManager {
         }
         Ok(())
     }
-    pub fn snapshot(&self) -> serde_json::Value {
-        serde_json::json!({"active_streams":self.owner.active(),"manually_stopped":self.suppressed,"rules":self.active.iter().map(|(id,r)|serde_json::json!({"id":id,"listen":r.listen,"listening":!r.task.is_finished(),"peer_ready":r.route.borrow().connection.borrow().as_ref().is_some_and(|c|c.close_reason().is_none()),"last_error":*r.error.lock().unwrap()})).collect::<Vec<_>>()})
+    pub fn snapshot(&self) -> ForwardSnapshot {
+        ForwardSnapshot {
+            active_streams: self.owner.active(),
+            manually_stopped: self.suppressed.clone(),
+            rules: self
+                .active
+                .iter()
+                .map(|(id, running)| RuleStatus {
+                    id: id.clone(),
+                    listen: running.listen,
+                    listening: !running.task.is_finished(),
+                    peer_ready: running
+                        .route
+                        .borrow()
+                        .peer
+                        .updates
+                        .borrow()
+                        .as_ref()
+                        .is_some_and(|connection| connection.close_reason().is_none()),
+                    last_error: running.error.lock().unwrap().clone(),
+                })
+                .collect(),
+        }
     }
     pub async fn shutdown(&mut self) {
         for (_, old) in self.active.drain() {
@@ -185,22 +256,18 @@ impl ForwardManager {
         self.owner.shutdown().await;
     }
 }
-async fn open(tcp: tokio::net::TcpStream, mut route: Route) -> Result<()> {
-    if route
-        .connection
+async fn open(tcp: tokio::net::TcpStream, route: Route) -> Result<()> {
+    let mut updates = route.peer.updates;
+    if updates
         .borrow()
         .as_ref()
         .is_none_or(|c| c.close_reason().is_some())
     {
-        route
-            .control
-            .request_peer_connection(route.peer)
-            .map_err(Error::Protocol)?;
+        (route.peer.reconnect)()?;
     }
     let connection = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
-            if let Some(connection) = route
-                .connection
+            if let Some(connection) = updates
                 .borrow()
                 .as_ref()
                 .filter(|c| c.close_reason().is_none())
@@ -208,8 +275,7 @@ async fn open(tcp: tokio::net::TcpStream, mut route: Route) -> Result<()> {
             {
                 return Ok::<_, Error>(connection);
             }
-            route
-                .connection
+            updates
                 .changed()
                 .await
                 .map_err(|_| Error::Transport("节点连接已停止".into()))?;
@@ -217,6 +283,6 @@ async fn open(tcp: tokio::net::TcpStream, mut route: Route) -> Result<()> {
     })
     .await
     .map_err(|_| Error::Transport("等待对端认证超时，请先连接设备".into()))??;
-    let stream = crate::node::core::services::open_tcp(&connection, &route.service).await?;
-    veytrane_tcp::bridge_tcp(tcp, stream.send, stream.recv).await
+    let stream = crate::services::open_tcp(&connection, &route.service).await?;
+    bridge_tcp(tcp, stream.send, stream.recv).await
 }
