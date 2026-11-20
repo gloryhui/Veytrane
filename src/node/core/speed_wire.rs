@@ -17,7 +17,7 @@ mod tests {
     }
 
     #[test]
-    fn fixed_speed_bytes_and_old_new_interop() {
+    fn fixed_speed_bytes_match_legacy_p2pf_layout_independently() {
         let control = SpeedControl::Busy { test_id: task() };
         let frame = SpeedFrame {
             request_id: 1,
@@ -26,18 +26,12 @@ mod tests {
         let mut expected = b"P2PF\x01\x01\x07\x02\x20".to_vec();
         expected.extend_from_slice(task().as_str().as_bytes());
         assert_eq!(frame.encode().unwrap(), expected);
-
-        let old = Frame {
-            request_id: 1,
-            message: Message::Speed(control.clone()),
-        };
-        assert_eq!(frame.encode().unwrap(), old.encode().unwrap());
-        assert_eq!(SpeedFrame::decode(&old.encode().unwrap()).unwrap(), frame);
-        assert_eq!(Frame::decode(&frame.encode().unwrap()).unwrap(), old);
+        assert_eq!(SpeedFrame::decode(&expected).unwrap(), frame);
+        assert!(Frame::decode(&expected).is_err());
     }
 
     #[test]
-    fn leased_speed_control_matches_old_frame_bytes() {
+    fn leased_speed_control_roundtrips_while_file_protocol_rejects_tag7() {
         let control = SpeedControl::Result {
             lease: SpeedLease {
                 test_id: task(),
@@ -51,15 +45,11 @@ mod tests {
         };
         let new = SpeedFrame {
             request_id: 2,
-            control: control.clone(),
+            control,
         };
-        let old = Frame {
-            request_id: 2,
-            message: Message::Speed(control),
-        };
-        assert_eq!(new.encode().unwrap(), old.encode().unwrap());
-        assert_eq!(SpeedFrame::decode(&old.encode().unwrap()).unwrap(), new);
-        assert_eq!(Frame::decode(&new.encode().unwrap()).unwrap(), old);
+        let bytes = new.encode().unwrap();
+        assert_eq!(SpeedFrame::decode(&bytes).unwrap(), new);
+        assert!(Frame::decode(&bytes).is_err());
     }
 
     #[test]

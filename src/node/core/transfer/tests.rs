@@ -8,6 +8,19 @@ use crate::{
 };
 use std::fs;
 
+async fn write_speed_frame<W>(writer: &mut W, request_id: u64, control: protocol::SpeedControl)
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    let frame = crate::node::core::speed_wire::SpeedFrame {
+        request_id,
+        control,
+    };
+    crate::protocol::frame::write_raw_frame(writer, &frame.encode().unwrap())
+        .await
+        .unwrap();
+}
+
 fn spawn_peer(
     tasks: &mut JoinSet<Result<()>>,
     service: TransferService,
@@ -3096,15 +3109,7 @@ async fn speed_cancel_and_stale_uni_token_do_not_pollute_next_test_or_file_trans
         .await
         .unwrap();
         let mut stale = pair.ca.open_uni().await.unwrap();
-        protocol::write(
-            &mut stale,
-            &Frame {
-                request_id: 1,
-                message: Message::Speed(SpeedControl::Granted(old.clone())),
-            },
-        )
-        .await
-        .unwrap();
+        write_speed_frame(&mut stale, 1, SpeedControl::Granted(old.clone())).await;
         let _ = stale.write_all(b"old payload must not be consumed").await;
         let _ = stale.finish();
         let report = next.await.unwrap().unwrap();
@@ -3175,15 +3180,7 @@ async fn speed_remote_busy_and_invalid_uni_headers_preserve_connection_and_next_
     let mut forged = pair.speed_b().peer(pair.ia).unwrap().test_lease().unwrap();
     forged.stream_token[0] ^= 1;
     let mut bad = pair.ca.open_uni().await.unwrap();
-    protocol::write(
-        &mut bad,
-        &Frame {
-            request_id: 1,
-            message: Message::Speed(SpeedControl::Granted(forged)),
-        },
-    )
-    .await
-    .unwrap();
+    write_speed_frame(&mut bad, 1, SpeedControl::Granted(forged)).await;
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(5), bad.stopped())
             .await

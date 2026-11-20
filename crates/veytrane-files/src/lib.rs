@@ -6,6 +6,8 @@ pub mod chunk_bitmap;
 pub mod download;
 pub mod manifest;
 #[cfg(feature = "node-tasks")]
+pub mod protocol;
+#[cfg(feature = "node-tasks")]
 pub mod queue;
 #[cfg(feature = "node-tasks")]
 pub mod receive_policy;

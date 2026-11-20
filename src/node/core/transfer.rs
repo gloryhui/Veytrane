@@ -2147,14 +2147,23 @@ impl TransferService {
                     streams.spawn(async move {
                         let _permit = permit;
                         authorization.guard(true, async {
-                        let buffered=tokio::time::timeout(Duration::from_secs(5),read_file_frame(&service.frame_budget, &mut recv,None)).await.map_err(|_|disk::failure("文件流首帧超时"))??;
+                        let buffered = match tokio::time::timeout(
+                            Duration::from_secs(5),
+                            read_file_frame(&service.frame_budget, &mut recv, None),
+                        )
+                        .await
+                        {
+                            Ok(Ok(buffered)) => buffered,
+                            Ok(Err(error)) => {
+                                let code = crate::node::core::dispatch::RESET_INVALID;
+                                let _ = send.reset(code.into());
+                                let _ = recv.stop(code.into());
+                                return Err(error);
+                            }
+                            Err(_) => return Err(disk::failure("文件流首帧超时")),
+                        };
                         let crate::node::core::frame_budget::BufferedFrame {frame:mut first,_lease}=buffered;
                         let allowed = resources.borrow().for_peer(peer);
-                        if matches!(&first.message, Message::Speed(_)) {
-                            let code = crate::node::core::dispatch::RESET_INVALID;
-                            let _ = send.reset(code.into()); let _ = recv.stop(code.into());
-                            return Err(disk::failure("节点业务类型或资源权限拒绝"));
-                        }
                         if allowed.disabled || !allowed.files {
                             let code = crate::node::core::dispatch::RESET_UNAUTHORIZED;
                             let _ = send.reset(code.into()); let _ = recv.stop(code.into());
@@ -2189,7 +2198,6 @@ impl TransferService {
                                 send.finish().map_err(disk::local_error)?;
                                 Ok(())
                             },
-                            Message::Speed(_)=> Err(disk::failure("文件流收到测速消息")),
                             Message::Offer{..} => service.receive_offer(send,recv,&connection,peer,crate::node::core::frame_budget::BufferedFrame{frame:first,_lease},ReceiveMode {automatic,incremental}).await,
                             Message::ResumeTask{task_id} if first.request_id==1 => {
                                 // This recovery path initiates a new Offer stream, so it also
