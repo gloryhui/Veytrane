@@ -68,8 +68,12 @@ def violations(root):
                 line = code.count("\n", 0, match.start()) + 1
                 errors.append(f"{relative}:{line}: {reason}")
 
+        layer = None
         if parts[:2] == ("src", "node") and len(parts) > 3:
             layer = parts[2]
+        elif parts[:4] == ("apps", "agent", "src", "host"):
+            layer = "host"
+        if layer is not None:
             if layer not in LAYERS:
                 errors.append(f"{relative}: unknown node layer {layer}")
                 continue

@@ -6,6 +6,7 @@ pub mod adapters;
 pub mod api;
 pub mod composition;
 pub mod core;
+#[path = "../../apps/agent/src/host/mod.rs"]
 pub mod host;
 pub mod local;
 #[cfg(any(feature = "live", feature = "sub2api-runtime"))]

@@ -187,7 +187,7 @@
       "id": "host",
       "title": "Agent 唯一宿主",
       "tag": "SINGLE OWNER",
-      "path": "src/node/host/agent.rs",
+      "path": "apps/agent/src/host/agent.rs",
       "summary": "一个 Agent 独占一个节点目录与身份，协调业务核心和管理请求。",
       "rules": [
         "配置按 revision 协调，不允许多入口覆盖。",
@@ -201,12 +201,12 @@
         },
         {
           "name": "进程宿主",
-          "path": "src/node/host/agent.rs",
+          "path": "apps/agent/src/host/agent.rs",
           "detail": "启动、所有权、命令执行和请求去重。"
         },
         {
           "name": "配置协调",
-          "path": "src/node/host/configuration.rs",
+          "path": "apps/agent/src/host/configuration.rs",
           "detail": "幂等配置事务与运行状态发布。"
         },
         {
