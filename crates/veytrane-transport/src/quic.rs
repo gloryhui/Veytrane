@@ -4,6 +4,8 @@
 //! the Ed25519 application handshake, bound to the current TLS session. Every
 //! connection must still complete that handshake before its peer is trusted.
 
+pub mod relay;
+
 use std::net::SocketAddr;
 use std::sync::{Arc, OnceLock};
 

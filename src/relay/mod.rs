@@ -6,8 +6,7 @@ pub mod server;
 mod wire;
 
 pub const RELAY_FALLBACK_DELAY: std::time::Duration = std::time::Duration::from_millis(2500);
-pub const RELAY_BIND_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
-pub const RELAY_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(18);
+pub use veytrane_transport::quic::relay::{RELAY_ATTEMPT_TIMEOUT, RELAY_BIND_TIMEOUT};
 
 #[cfg(test)]
 pub(crate) mod tests;

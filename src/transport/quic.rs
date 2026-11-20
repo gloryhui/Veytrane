@@ -60,13 +60,6 @@ pub use veytrane_transport::quic::{
     install_crypto_provider, server_endpoint,
 };
 
-pub(crate) fn endpoint_from_socket_with_config(
-    socket: std::net::UdpSocket,
-    endpoint_config: quinn::EndpointConfig,
-) -> Result<Endpoint> {
-    veytrane_transport::quic::endpoint_from_socket_with_config(socket, endpoint_config)
-}
-
 /// A send-only view of the UDP socket whose receive side is owned by Quinn.
 ///
 /// Desktop punch traffic is demultiplexed inside Quinn's `AsyncUdpSocket::poll_recv`
