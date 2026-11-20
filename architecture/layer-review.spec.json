@@ -51,7 +51,7 @@
     {"from":"host.b","to":"core.t","flow":"call","label":"NodeControl","labelPos":[478,651]},
     {"from":"products.l","to":"core.r","flow":"call","via":[[810,204],[810,735]],"label":"实例化","labelPos":[844,650]},
     {"from":"core.b@0.224","to":"network.t","flow":"call","label":"建连 / 认证","labelPos":[271,830]},
-    {"from":"core.b@0.777","to":"io.t","flow":"call","label":"收发 / 落盘","labelPos":[676,830]},
+    {"from":"core.b@0.777","to":"io.t","flow":"call","label":"收发 / 落盘","labelPos":[638,820]},
     {"from":"legacy.b","to":"tunnel.t","flow":"call","label":"serve / forward","labelPos":[1081,830]},
     {"from":"core.b@0.948","to":"tunnel.t@0.2","flow":"call","mid":845,"label":"监听与字节转送","labelPos":[812,831]}
   ]

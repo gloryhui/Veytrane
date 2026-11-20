@@ -35,3 +35,7 @@
 `cargo metadata --locked --offline --no-deps` 确认当前是一个 Cargo 包、八个二进制目标。`python3 scripts/check-architecture.py` 返回 1，报告两项。第一项是 `src/node/host/agent.rs:501` 的 `host → adapters`。第二项是 `src/node/products/live.rs:4` 使用 `crate::node::{...}` 分组导入；展开后指向 `core` 和 `host`，两者都在产品层许可范围内。后者属于检查脚本对导入写法的要求。
 
 脚本按显式路径匹配。它能指出某些模块引用，却无法判断 `detail_selection` 应归谁、某段文字属于哪个客户端、feature 是否改变了通用 Agent 的容量，或共享类型是否放错位置。以上判断均另行追到了字段、调用方或构建条件。[分层检查脚本](../scripts/check-architecture.py)
+
+## 查看与重建
+
+打开同目录的 `layer-review.html`，在图表工具栏选择亮色或暗色，使用 PNG 按钮保存当前配色的完整图。`layer-review.png` 是已导出的暗色版。修改 `layer-review.spec.json` 后，在安装了 arch-diagram、Node.js 和 Chrome 的开发机上，从仓库根目录运行 `node architecture/build-layer-review.mjs` 可重新生成两项产物。
