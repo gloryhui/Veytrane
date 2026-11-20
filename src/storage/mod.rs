@@ -14,6 +14,7 @@
 //! 这些调用挪进 `tokio::task::spawn_blocking`（TODO）。
 
 pub(crate) mod atomic;
+pub mod chunk_bitmap;
 #[cfg(feature = "node")]
 pub mod permissions;
 #[cfg(feature = "node")]
@@ -26,9 +27,9 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use self::chunk_bitmap::ChunkBitmap;
 use crate::error::{Error, Result};
 use crate::protocol::manifest::{FileManifest, safe_file_name};
-use crate::transfer::resume::ChunkBitmap;
 
 /// 临时文件后缀。
 const PART_SUFFIX: &str = "part";

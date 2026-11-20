@@ -9,8 +9,8 @@ use crate::error::{Error, Result};
 use crate::identity::{Identity, NodeId};
 use crate::protocol::frame::{read_frame, write_frame};
 use crate::protocol::message::ControlMessage;
+use crate::storage::chunk_bitmap::ChunkBitmap;
 use crate::transfer::chunker::{manifest_from_path, read_chunk};
-use crate::transfer::resume::ChunkBitmap;
 use crate::transport::handshake::handshake_initiator;
 use crate::transport::quic::{
     ACCEPT_FIRST_BI_STREAM_TIMEOUT, ChannelBinding, TRANSFER_IDLE_TIMEOUT,
