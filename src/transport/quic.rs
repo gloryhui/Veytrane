@@ -1,9 +1,12 @@
-//! QUIC 端点与连接。
+//! QUIC 打洞 UDP 复用与诊断。
+//!
+//! 通用 TLS/ALPN、端点构建和基础连接链位于 `veytrane_transport::quic`，
+//! 这里保留旧公开路径并只承载打洞专用的接收分发。
 //!
 //! # 关于跳过 TLS 证书校验
 //!
 //! P2P 场景里没有 CA，也不该有：节点身份由 Ed25519 公钥决定，公钥到节点 ID
-//! 的映射是自证的。所以这里**故意**装了一个不校验证书的 verifier，信任建立
+//! 的映射是自证的。所以传输层**故意**使用不校验证书的 verifier，信任建立
 //! 推迟到应用层握手（见 [`crate::transport::handshake`]）。
 //!
 //! 成立的前提是：**任何连接都必须先跑完应用层握手**。QUIC 提供的是加密和
@@ -20,16 +23,11 @@ use std::io::{self, IoSliceMut};
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, ready};
 use std::time::Duration;
 
-use quinn::rustls;
-use quinn::rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
-use quinn::{
-    AsyncUdpSocket, ClientConfig, Endpoint, IdleTimeout, Runtime, ServerConfig, TransportConfig,
-    UdpPoller, VarIntBoundsExceeded,
-};
+use quinn::{AsyncUdpSocket, Endpoint, UdpPoller};
 use tokio::io::Interest;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
@@ -41,15 +39,6 @@ const PUNCH_PROBE_PADDING_LEN: usize = 16;
 const PUNCH_EVENT_CAPACITY: usize = 4;
 const MAX_PUNCH_SOURCES_PER_ROUTE: usize = 8;
 const MAX_AUTHORIZED_PUNCH_SOURCES: usize = 128;
-
-/// ALPN 标识，防止连到别的 QUIC 服务上。
-pub const ALPN: &[u8] = b"p2pfile/1";
-
-/// 空闲多久发一次 keepalive。NAT 映射通常 30~120 秒超时，10 秒足够稳。
-pub const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
-
-/// 空闲超时。超过这个时间没有任何活动就认为连接死了。
-pub const MAX_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// 等待 QUIC transport handshake 完成的最大时间；与应用层四阶段握手分开计时。
 pub const QUIC_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -65,107 +54,16 @@ pub use veytrane_transport::channel_binding::{
     CHANNEL_BINDING_LABEL, CHANNEL_BINDING_LEN, ChannelBinding,
 };
 pub use veytrane_transport::handshake::APPLICATION_HANDSHAKE_TIMEOUT;
-
-static CRYPTO_PROVIDER: OnceLock<()> = OnceLock::new();
-
-/// 安装 rustls 的默认加密后端。
-///
-/// rustls 要求进程内只装一次。重复调用是安全的：已经装过就什么也不做。
-pub fn install_crypto_provider() {
-    CRYPTO_PROVIDER.get_or_init(|| {
-        // 失败只可能是别的库先装过了，那也算装好了。
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    });
-}
-
-/// 共享的传输参数：keepalive + 空闲超时。
-fn transport_config() -> Result<TransportConfig> {
-    let mut transport = TransportConfig::default();
-    // Last-mile UDP loss must not collapse every mapped TCP/WebSocket stream
-    // to Cubic's minimum window. BBR paces against measured delivery bandwidth
-    // and RTT while retaining Quinn's loss detection and reliable delivery.
-    transport.congestion_controller_factory(Arc::new(quinn::congestion::BbrConfig::default()));
-    transport.keep_alive_interval(Some(KEEP_ALIVE_INTERVAL));
-    let idle: IdleTimeout = MAX_IDLE_TIMEOUT
-        .try_into()
-        .map_err(|err: VarIntBoundsExceeded| Error::Transport(format!("空闲超时非法: {err}")))?;
-    transport.max_idle_timeout(Some(idle));
-    Ok(transport)
-}
-
-/// 构造服务端 TLS/QUIC 配置。
-///
-/// 每次调用生成一张新的自签证书。这不影响身份安全——身份由应用层握手保证。
-fn server_config() -> Result<ServerConfig> {
-    let certified = rcgen::generate_simple_self_signed(vec!["p2pfile".to_string()])
-        .map_err(|err| Error::Transport(format!("生成自签证书失败: {err}")))?;
-    let cert_der: CertificateDer<'static> = certified.cert.der().clone();
-    let key_der = PrivatePkcs8KeyDer::from(certified.signing_key.serialize_der());
-
-    let mut tls = rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(vec![cert_der], key_der.into())
-        .map_err(|err| Error::Transport(format!("TLS 服务端配置失败: {err}")))?;
-    tls.alpn_protocols = vec![ALPN.to_vec()];
-
-    let crypto = quinn::crypto::rustls::QuicServerConfig::try_from(tls)
-        .map_err(|err| Error::Transport(format!("QUIC 服务端配置失败: {err}")))?;
-
-    let mut config = ServerConfig::with_crypto(Arc::new(crypto));
-    config.transport_config(Arc::new(transport_config()?));
-    Ok(config)
-}
-
-/// 构造客户端 TLS/QUIC 配置。
-fn client_config() -> Result<ClientConfig> {
-    let mut tls = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(SkipServerVerification::new())
-        .with_no_client_auth();
-    tls.alpn_protocols = vec![ALPN.to_vec()];
-
-    let crypto = quinn::crypto::rustls::QuicClientConfig::try_from(tls)
-        .map_err(|err| Error::Transport(format!("QUIC 客户端配置失败: {err}")))?;
-
-    let mut config = ClientConfig::new(Arc::new(crypto));
-    config.transport_config(Arc::new(transport_config()?));
-    Ok(config)
-}
-
-/// 用**现成的** UDP socket 建一个 QUIC 端点。
-///
-/// 这是打洞能真正生效的关键：NAT 映射是按「本地端口」分配的，只有让 QUIC
-/// 复用那个刚刚打过洞、已经建立了映射的 socket，数据才会走直连。
-/// 换一个新 socket 就等于重新开一条 NAT 映射，洞白打了。
-///
-/// 端点同时装了服务端和客户端配置，所以两边都既能 accept 也能 connect——
-/// 打洞是对称的，谁先连谁后连由上层角色决定。
-pub fn endpoint_from_socket(socket: std::net::UdpSocket) -> Result<Endpoint> {
-    endpoint_from_socket_with_config(socket, quinn::EndpointConfig::default())
-}
+pub use veytrane_transport::quic::{
+    ALPN, KEEP_ALIVE_INTERVAL, MAX_IDLE_TIMEOUT, client_endpoint, connect, endpoint_from_socket,
+    install_crypto_provider, server_endpoint,
+};
 
 pub(crate) fn endpoint_from_socket_with_config(
     socket: std::net::UdpSocket,
     endpoint_config: quinn::EndpointConfig,
 ) -> Result<Endpoint> {
-    install_crypto_provider();
-
-    // quinn 内部会用 tokio 的 from_std 接管这个 socket，而它要求 socket 处于
-    // 非阻塞模式。从 tokio UdpSocket 转出来的本来就是非阻塞的，这里再设一次
-    // 是为了不依赖上层的调用方式。
-    socket
-        .set_nonblocking(true)
-        .map_err(|err| Error::Transport(format!("设置非阻塞失败: {err}")))?;
-
-    let runtime = quinn::default_runtime()
-        .ok_or_else(|| Error::Transport("当前没有可用的异步运行时".into()))?;
-
-    let config = server_config()?;
-    let mut endpoint = Endpoint::new(endpoint_config, Some(config), socket, runtime)
-        .map_err(|err| Error::Transport(format!("用已有 socket 创建 QUIC 端点失败: {err}")))?;
-
-    endpoint.set_default_client_config(client_config()?);
-    Ok(endpoint)
+    veytrane_transport::quic::endpoint_from_socket_with_config(socket, endpoint_config)
 }
 
 /// A send-only view of the UDP socket whose receive side is owned by Quinn.
@@ -618,23 +516,8 @@ pub fn endpoint_from_socket_with_punch_dispatcher(
     });
     let runtime = quinn::default_runtime()
         .ok_or_else(|| Error::Transport("当前没有可用的异步运行时".into()))?;
-    let mut endpoint = endpoint_from_abstract_socket(adapter, runtime)?;
-    endpoint.set_default_client_config(client_config()?);
+    let endpoint = veytrane_transport::quic::endpoint_from_abstract_socket(adapter, runtime)?;
     Ok((endpoint, PunchSocketHandle { io, router }))
-}
-
-fn endpoint_from_abstract_socket(
-    socket: Arc<dyn AsyncUdpSocket>,
-    runtime: Arc<dyn Runtime>,
-) -> Result<Endpoint> {
-    let config = server_config()?;
-    Endpoint::new_with_abstract_socket(
-        quinn::EndpointConfig::default(),
-        Some(config),
-        socket,
-        runtime,
-    )
-    .map_err(|err| Error::Transport(format!("用已有 socket 创建 QUIC 端点失败: {err}")))
 }
 
 #[derive(Debug)]
@@ -771,47 +654,6 @@ impl UdpPoller for PunchUdpPoller {
     }
 }
 
-/// 创建服务端端点，绑定到 `bind`。
-pub fn server_endpoint(bind: SocketAddr) -> Result<Endpoint> {
-    install_crypto_provider();
-    Endpoint::new(
-        quinn::EndpointConfig::default(),
-        Some(server_config()?),
-        crate::net::family::bind_udp(bind)?,
-        Arc::new(quinn::TokioRuntime),
-    )
-    .map_err(|err| Error::Transport(format!("绑定 {bind} 失败: {err}")))
-}
-
-/// 创建客户端端点，绑定到 `bind`（通常写 `0.0.0.0:0`）。
-pub fn client_endpoint(bind: SocketAddr) -> Result<Endpoint> {
-    install_crypto_provider();
-    let mut endpoint = Endpoint::new(
-        quinn::EndpointConfig::default(),
-        None,
-        crate::net::family::bind_udp(bind)?,
-        Arc::new(quinn::TokioRuntime),
-    )
-    .map_err(|err| Error::Transport(format!("绑定 {bind} 失败: {err}")))?;
-    endpoint.set_default_client_config(client_config()?);
-    Ok(endpoint)
-}
-
-/// 连到 `remote`。`server_name` 只用于 TLS SNI，因为不校验证书，随便传。
-pub async fn connect(
-    endpoint: &Endpoint,
-    remote: SocketAddr,
-    server_name: &str,
-) -> Result<quinn::Connection> {
-    let connecting = endpoint
-        .connect(remote, server_name)
-        .map_err(|err| Error::Transport(format!("发起连接到 {remote} 失败: {err}")))?;
-
-    connecting
-        .await
-        .map_err(|err| Error::Transport(format!("与 {remote} 建立连接失败: {err}")))
-}
-
 /// Dedicated identity streams are already finished by existing CLI/Desktop
 /// initiators after Ready. Only the racing winner sends that FIN; responders
 /// must observe it before exposing capabilities, authorization or handlers.
@@ -827,63 +669,6 @@ pub async fn await_identity_commit(recv: &mut quinn::RecvStream) -> Result<()> {
         ));
     }
     Ok(())
-}
-
-/// **不安全**的证书校验器：一律放行。
-///
-/// 见本模块顶部的说明——身份确认靠应用层握手，不靠证书链。
-#[derive(Debug)]
-struct SkipServerVerification(Arc<rustls::crypto::CryptoProvider>);
-
-impl SkipServerVerification {
-    fn new() -> Arc<Self> {
-        Arc::new(Self(Arc::new(rustls::crypto::ring::default_provider())))
-    }
-}
-
-impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
 }
 
 #[cfg(test)]
@@ -1027,32 +812,11 @@ mod tests {
     use crate::nat::punch::{PunchToken, probe_packet};
     use crate::protocol::frame::{read_frame, write_frame};
     use crate::protocol::message::ControlMessage;
-    use crate::transport::handshake::{handshake_initiator, handshake_responder};
 
     #[test]
     fn 加密后端可以重复安装() {
         install_crypto_provider();
         install_crypto_provider();
-    }
-
-    #[test]
-    fn 传输参数合法() {
-        // 字段是 crate 私有的，只能确认构造本身不失败。
-        assert!(transport_config().is_ok());
-    }
-
-    #[tokio::test]
-    async fn 端点保持原有本地端口() {
-        // 这是打洞能生效的前提：交给 QUIC 的必须是刚打过洞的那个本地端口，
-        // 换了端口就等于换了 NAT 映射，洞白打。
-        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-        let expected = socket.local_addr().unwrap();
-        let endpoint = endpoint_from_socket(socket).unwrap();
-        assert_eq!(
-            endpoint.local_addr().unwrap(),
-            expected,
-            "必须复用同一个本地端口"
-        );
     }
 
     #[tokio::test]
@@ -1193,47 +957,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn 关闭连接并释放端点后固定端口可以重新绑定() {
-        let probe = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
-        let bind = probe.local_addr().unwrap();
-        drop(probe);
-
-        let server = server_endpoint(bind).unwrap();
-        let server_addr = server.local_addr().unwrap();
-        let client = client_endpoint("127.0.0.1:0".parse().unwrap()).unwrap();
-        let server_for_accept = server.clone();
-        let server_accept = tokio::spawn(async move {
-            server_for_accept
-                .accept()
-                .await
-                .expect("服务端应接受连接")
-                .await
-                .expect("服务端 QUIC 握手应成功")
-        });
-        let connection = connect(&client, server_addr, "127.0.0.1").await.unwrap();
-        let server_connection = server_accept.await.unwrap();
-
-        connection.close(0u32.into(), b"release");
-        server_connection.close(0u32.into(), b"release");
-        connection.closed().await;
-        server_connection.closed().await;
-        drop(server_connection);
-        drop(connection);
-        server.close(0u32.into(), b"release endpoint");
-        client.wait_idle().await;
-        server.wait_idle().await;
-        drop(client);
-        drop(server);
-        for _ in 0..3 {
-            tokio::task::yield_now().await;
-        }
-
-        let rebound = server_endpoint(bind).expect("固定端口必须在完整释放后重新绑定");
-        rebound.close(0u32.into(), b"done");
-        rebound.wait_idle().await;
-    }
-
-    #[tokio::test]
     async fn 用现成_socket_建的端点能连上() {
         let server_socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
         let server_addr = server_socket.local_addr().unwrap();
@@ -1324,118 +1047,5 @@ mod tests {
         connection.close(0u32.into(), b"bye");
         client.wait_idle().await;
         server_task.await.unwrap();
-    }
-
-    /// 同一条 QUIC/TLS 会话上，两侧导出的绑定值必须一致，握手才能成功。
-    ///
-    /// 这是 channel binding 的基本前提：TLS exporter 是对称的。若两侧拿到的
-    /// 绑定值不同，签名载荷就不同，正常握手都会被拒。
-    #[tokio::test]
-    async fn 同一条连接两侧绑定值一致且能完成握手() {
-        let alice = Identity::generate();
-        let bob = Identity::generate();
-        let bob_id = bob.node_id();
-
-        let server = server_endpoint("127.0.0.1:0".parse().unwrap()).unwrap();
-        let server_addr = server.local_addr().unwrap();
-
-        let server_task = tokio::spawn(async move {
-            let incoming = server.accept().await.expect("应当收到连接");
-            let connection = incoming.await.expect("握手应当成功");
-
-            // 绑定值只能从当前会话导出，双方各导一份。
-            let binding = ChannelBinding::from_connection(&connection).expect("导出绑定值");
-            let (mut send, mut recv) = connection.accept_bi().await.expect("应当收到握手流");
-            let outcome = handshake_responder(&mut send, &mut recv, &bob, &binding)
-                .await
-                .expect("接收方认证应当成功");
-            let _ = send.finish();
-
-            connection.closed().await;
-            server.wait_idle().await;
-            (binding, outcome)
-        });
-
-        let client = client_endpoint("127.0.0.1:0".parse().unwrap()).unwrap();
-        let connection = connect(&client, server_addr, "127.0.0.1").await.unwrap();
-        let client_binding = ChannelBinding::from_connection(&connection).expect("导出绑定值");
-
-        let (mut send, mut recv) = connection.open_bi().await.unwrap();
-        let outcome = handshake_initiator(&mut send, &mut recv, &alice, &client_binding)
-            .await
-            .expect("发起方认证应当成功");
-        let _ = send.finish();
-
-        connection.close(0u32.into(), b"bye");
-        client.wait_idle().await;
-
-        let (server_binding, server_outcome) = server_task.await.unwrap();
-
-        assert_eq!(
-            client_binding.as_bytes(),
-            server_binding.as_bytes(),
-            "同一条连接两侧导出的绑定值必须一致"
-        );
-        assert_eq!(outcome.peer_node_id, bob_id);
-        assert_eq!(server_outcome.peer_node_id, alice.node_id());
-    }
-
-    /// 两条不同的 QUIC/TLS 会话必须导出不同的绑定值。
-    ///
-    /// 这是防透明 MITM 的核心：攻击者的 A↔M、M↔B 是两条独立会话，绑定值不同，
-    /// 原样转发的签名必然验不过。
-    #[tokio::test]
-    async fn 不同连接导出的绑定值不同() {
-        let server = server_endpoint("127.0.0.1:0".parse().unwrap()).unwrap();
-        let server_addr = server.local_addr().unwrap();
-
-        let server_task = tokio::spawn(async move {
-            let first = server.accept().await.expect("应当收到第一条连接");
-            let first = first.await.expect("第一条握手应当成功");
-            let first_binding = ChannelBinding::from_connection(&first).expect("导出第一条绑定值");
-
-            let second = server.accept().await.expect("应当收到第二条连接");
-            let second = second.await.expect("第二条握手应当成功");
-            let second_binding =
-                ChannelBinding::from_connection(&second).expect("导出第二条绑定值");
-
-            first.closed().await;
-            second.closed().await;
-            server.wait_idle().await;
-            (first_binding, second_binding)
-        });
-
-        let client = client_endpoint("127.0.0.1:0".parse().unwrap()).unwrap();
-        let first = connect(&client, server_addr, "127.0.0.1").await.unwrap();
-        let first_binding = ChannelBinding::from_connection(&first).expect("导出绑定值");
-        let second = connect(&client, server_addr, "127.0.0.1").await.unwrap();
-        let second_binding = ChannelBinding::from_connection(&second).expect("导出绑定值");
-
-        assert_ne!(
-            first_binding.as_bytes(),
-            second_binding.as_bytes(),
-            "不同会话必须导出不同的绑定值"
-        );
-
-        first.close(0u32.into(), b"bye");
-        second.close(0u32.into(), b"bye");
-        client.wait_idle().await;
-
-        let (server_first, server_second) = server_task.await.unwrap();
-        assert_eq!(
-            first_binding.as_bytes(),
-            server_first.as_bytes(),
-            "第一条连接两侧绑定值必须一致"
-        );
-        assert_eq!(
-            second_binding.as_bytes(),
-            server_second.as_bytes(),
-            "第二条连接两侧绑定值必须一致"
-        );
-        assert_ne!(
-            server_first.as_bytes(),
-            server_second.as_bytes(),
-            "服务端侧两条会话的绑定值也必须不同"
-        );
     }
 }

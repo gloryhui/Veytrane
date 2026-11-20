@@ -82,18 +82,7 @@ pub fn usable_address(addr: SocketAddr) -> bool {
 
 /// Set IPV6_V6ONLY before bind on every platform; do not release/rebind the port.
 pub fn bind_udp(bind: SocketAddr) -> std::io::Result<std::net::UdpSocket> {
-    let domain = if bind.is_ipv4() {
-        socket2::Domain::IPV4
-    } else {
-        socket2::Domain::IPV6
-    };
-    let socket = socket2::Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))?;
-    if bind.is_ipv6() {
-        socket.set_only_v6(true)?;
-    }
-    socket.set_nonblocking(true)?;
-    socket.bind(&bind.into())?;
-    Ok(socket.into())
+    veytrane_transport::udp::bind_udp(bind)
 }
 
 #[cfg(test)]
