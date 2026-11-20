@@ -5,7 +5,7 @@
 ## 入口与依赖方向
 
 ```text
-src/bin/p2p-desktop.rs → desktop/agent_shell → veytrane-management
+src/bin/p2p-desktop.rs → apps/desktop → veytrane-management
 src/bin/p2p-node.rs → apps/node-cli → veytrane-management
                        ├─ 离线命令 → Agent 宿主
                        └─ web → apps/web-management → veytrane-management
@@ -31,15 +31,15 @@ src/main.rs → apps/standalone-cli
 | `apps/web-management` | `p2p-node web` 管理页和 Agent 默认 `3001` 导航。两个入口经同一 IPC 使用 Agent。内置导航与 Agent 同进程，核心重建时导航继续运行。 |
 | `crates/veytrane-http-auth` | 旧独立管理页与节点管理页共用的回环 Host、Origin、Bearer 和令牌文件逻辑。 |
 | `apps/live`、`apps/sub2api` | 专用产品各自的装配、授权、容量和界面。共用恢复退避及节点事件辅助仍在 `src/node/products/`。 |
-| `src/desktop/agent_shell/` | 唯一 IPC 桌面及其工作台、窗口、托盘宿主。 |
-| `src/desktop/ui/` | 工作台与二级窗口共用控件、文本输入、视觉主题、品牌。无业务运行时所有权。 |
-| `src/desktop/platform/` | 桌面共用托盘、窗口隐藏/显示、展示状态；不反向引用任一窗口所有者。 |
+| `apps/desktop/src/agent_shell/` | 唯一 IPC 桌面及其工作台、窗口、托盘宿主。 |
+| `apps/desktop/src/ui/` | 工作台与二级窗口共用控件、文本输入、视觉主题、品牌。 |
+| `apps/desktop/src/platform/` | 托盘、窗口显隐和平台状态。 |
 | `src/storage/` | 基础存储和独立 CLI 文件存储的兼容入口。 |
-| `src/discovery/`、`nat/`、`net/`、`transport/`、`relay/` | 共用发现客户端、打洞、连接竞速、QUIC 和 Relay 客户端。服务端模块只在 `signaling-server` 及测试构建启用。 |
+| `src/discovery/`、`nat/`、`net/`、`transport/`、`relay/` | 共用发现客户端、STUN、连接竞速和 Relay 客户端。旧打洞、QUIC 导入指向传输包。服务端模块只在 `signaling-server` 及测试构建启用。 |
 | `apps/signaling` | `p2p_file signal-server` 的启动、TLS 监听、设备登记与短 ID SQLite，以及可选 Relay 服务端。 |
 | `apps/standalone-cli` | `p2p_file` 的命令编排、进程退出、交互输出及配置热加载。根二进制入口和公开参数解析路径继续供现有调用方使用。 |
 | `src/protocol/`、`transfer/`、`tunnel/`、`admin/` | 原独立 CLI 仍在使用的协议与执行路径；不能因与 node 同名就删除。 |
-| `crates/veytrane-transport` | 身份、绑定到 QUIC 会话的握手、端点、有界原始帧和 OS 存储原语。 |
+| `crates/veytrane-transport` | 身份、QUIC 握手和端点、有界原始帧、共享信令报文与签名载荷、UDP 地址校验、打洞和 OS 存储原语。 |
 | `crates/veytrane-node` | P2PN 协商、双向流分发、会话授权、设备容量、连接代际及活动许可。 |
 | `crates/veytrane-files` | P2PF 文件协议、文件收发、调度、限速、落盘、回执、任务库及断点恢复。 |
 | `crates/veytrane-file-policy` | 限速值、接收余量及路径批次格式校验，供配置、文件服务和桌面共用。 |
@@ -67,7 +67,7 @@ cargo build --locked --no-default-features --features standalone --bin p2p_file
 
 裁剪 Agent 初始化时把 `enable_files` 设为 `false`。读取或提交明确启用文件的配置时返回能力错误，保留当前配置文件。文件命令返回 `capability_disabled`，`Tasks` 仍返回空文件列表、空预览、可空队列与测速结果。
 
-`Status.capabilities` 表示当前 Agent 本机已装配的业务。GPUI 根据它控制文件与测速入口，设备连接状态独立读取 peer 快照。`Tasks` 的文件事实来自 `veytrane-files`，IPC 宿主维持现有分页、脱敏和诊断投影。
+`Status.capabilities` 表示当前 Agent 本机已装配的业务。GPUI 根据它控制文件与测速入口，设备连接状态独立读取 peer 快照。IPC 宿主持有可选文件服务句柄，`Tasks` 直接读取文件事实并维持现有分页、脱敏和诊断投影。会话 actor 串行处理依赖实时对端授权和连接代际的发送、暂停、续传与目录操作。
 
 ## 本次审阅后的处置
 
