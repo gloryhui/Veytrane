@@ -9,6 +9,7 @@ pub mod handshake;
 pub mod identity;
 pub mod identity_wire;
 pub mod instance_lock;
+pub mod operation_id;
 #[cfg(feature = "private-storage")]
 pub mod permissions;
 #[cfg(feature = "quic")]
