@@ -30,7 +30,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             executable: p2p-desktop.exe
             packages: ""
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             executable: p2p-desktop
             packages: ""
