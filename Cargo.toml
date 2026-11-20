@@ -98,6 +98,7 @@ embed-resource = "=3.0.11"
 
 [dev-dependencies]
 tower = { version = "=0.5.3", features = ["util"] }
+veytrane-files = { path = "crates/veytrane-files", features = ["test-support"] }
 veytrane-node = { path = "crates/veytrane-node", features = ["test-support"] }
 veytrane-speed = { path = "crates/veytrane-speed", default-features = false, features = ["test-support"] }
 

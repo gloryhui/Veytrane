@@ -12,6 +12,8 @@ pub mod receive_policy;
 pub mod relative_path;
 #[cfg(feature = "safe-storage")]
 pub mod secure_fs;
+#[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
+pub mod space_budget;
 #[cfg(feature = "node-tasks")]
 pub mod task_model;
 
