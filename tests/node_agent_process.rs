@@ -594,12 +594,31 @@ async fn three_agent_processes_unified_files_directory_four_forwards_and_revocat
         fs::read(home.root.join("receive/payload.bin")).unwrap(),
         bytes
     );
-    let location = home
-        .ok(Api::TaskLocation {
+    let tasks = home.ok(Api::Tasks { offset: 0 }).await;
+    let earlier = tasks["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|task| task["name"] == "payload.bin" && task["state"] == "completed")
+        .unwrap();
+    let other_client = AgentClient::new(AgentPaths::new(&home.root).unwrap());
+    let (location, previous_location) = tokio::join!(
+        home.ok(Api::TaskLocation {
             task: serde_json::from_value(received.clone()).unwrap(),
+        }),
+        other_client.execute(Api::TaskLocation {
+            task: serde_json::from_value(earlier["id"].clone()).unwrap(),
         })
-        .await;
-    assert!(Path::new(location["path"].as_str().unwrap()).starts_with(&new_root));
+    );
+    assert_eq!(
+        fs::canonicalize(location["path"].as_str().unwrap()).unwrap(),
+        fs::canonicalize(new_root.join("new-location.txt")).unwrap()
+    );
+    let previous_location = previous_location.unwrap().result.unwrap();
+    assert_eq!(
+        fs::canonicalize(previous_location["path"].as_str().unwrap()).unwrap(),
+        fs::canonicalize(home.root.join("receive/payload.bin")).unwrap()
+    );
     home.ok(Api::DeleteReceivedFile {
         task: serde_json::from_value(received).unwrap(),
     })
