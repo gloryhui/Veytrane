@@ -24,7 +24,7 @@ pub fn project_peer_path(
     {
         return false;
     }
-    if paths.len() >= crate::node::core::network_state::MAX_PEERS
+    if paths.len() >= crate::node::core::network_state::DEFAULT_MAX_PEERS
         && !paths.contains_key(&peer)
         && let Some(oldest) = paths
             .iter()
@@ -339,7 +339,7 @@ impl SpeedViews {
                 },
             );
         }
-        while self.0.len() > crate::node::core::network_state::MAX_PEERS {
+        while self.0.len() > crate::node::core::network_state::DEFAULT_MAX_PEERS {
             let oldest = self
                 .0
                 .iter()
@@ -564,7 +564,7 @@ mod tests {
             rtt: Duration::ZERO,
         };
         views.update(HashMap::from([(oldest, template.clone())]), now);
-        for n in 1..=crate::node::core::network_state::MAX_PEERS {
+        for n in 1..=crate::node::core::network_state::DEFAULT_MAX_PEERS {
             let peer = crate::identity::Identity::generate().node_id();
             let mut s = template.clone();
             s.test_id = TaskId::generate();
@@ -578,7 +578,10 @@ mod tests {
         s.test_id = TaskId::generate();
         s.status = SpeedStatus::Running;
         views.update(HashMap::from([(active, s)]), now + Duration::from_secs(30));
-        assert_eq!(views.0.len(), crate::node::core::network_state::MAX_PEERS);
+        assert_eq!(
+            views.0.len(),
+            crate::node::core::network_state::DEFAULT_MAX_PEERS
+        );
         assert!(!views.0.contains_key(&oldest));
         assert_eq!(views.0[&active].snapshot.status, SpeedStatus::Running);
     }
@@ -688,7 +691,7 @@ mod network_path_tests {
     #[test]
     fn gui_peer_path_diagnostics_remain_bounded() {
         let mut paths = HashMap::new();
-        let capacity = crate::node::core::network_state::MAX_PEERS;
+        let capacity = crate::node::core::network_state::DEFAULT_MAX_PEERS;
         for generation in 1..=(2 * capacity) as u64 {
             let peer = Identity::generate().node_id();
             assert!(project_peer_path(
@@ -699,7 +702,10 @@ mod network_path_tests {
                 "IPv6 / IPv4 候选".into()
             ));
         }
-        assert_eq!(paths.len(), crate::node::core::network_state::MAX_PEERS);
+        assert_eq!(
+            paths.len(),
+            crate::node::core::network_state::DEFAULT_MAX_PEERS
+        );
         assert!(
             paths
                 .values()

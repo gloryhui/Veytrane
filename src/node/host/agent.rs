@@ -61,7 +61,7 @@ impl Agent {
                 let last_error = self.last_error.lock().await.clone();
                 let diagnostics = self.diagnostics.lock().await.clone();
                 Ok(
-                    json!({"core_running":self.control.is_running(),"build":crate::node::api::build_info::value("p2p-agent"),"diagnostics":diagnostics,"restart_pending":self.restart_pending.load(std::sync::atomic::Ordering::Acquire),"budgets":{"peers":16,"pending_peers":8,"tcp_streams":256,"tcp_per_rule":32,"management_connections":32,"service_controls_per_peer":8},"data_dir":self.paths.root,"epoch":self.epoch,"revision":configuration.revision,"node":node,"last_error":last_error,"forwards":forwards}),
+                    json!({"core_running":self.control.is_running(),"build":crate::node::api::build_info::value("p2p-agent"),"diagnostics":diagnostics,"restart_pending":self.restart_pending.load(std::sync::atomic::Ordering::Acquire),"budgets":{"peers":self.control.peer_capacity(),"pending_peers":8,"tcp_streams":256,"tcp_per_rule":32,"management_connections":32,"service_controls_per_peer":8},"data_dir":self.paths.root,"epoch":self.epoch,"revision":configuration.revision,"node":node,"last_error":last_error,"forwards":forwards}),
                 )
             }
             Command::Nearby => Ok(serde_json::to_value(

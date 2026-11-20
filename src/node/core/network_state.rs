@@ -6,13 +6,10 @@ use std::time::Duration;
 use crate::identity::NodeId;
 use crate::node::core::remote_auth::RemoteAuthorization;
 
-// The isolated distribution gateway serves many recipients. General desktop
-// and Agent builds retain their existing 16-device bound.
-pub const MAX_PEERS: usize = if cfg!(feature = "sub2api-gateway") {
-    128
-} else {
-    16
-};
+/// Default peer capacity when an instance does not select a larger value.
+pub const DEFAULT_MAX_PEERS: usize = 16;
+/// Neutral upper bound for an instance-selected peer capacity.
+pub const MAX_PEER_CAPACITY: usize = 128;
 pub const MAX_PENDING_PEERS: usize = 8;
 pub const PEER_LOOKUP_TIMEOUT: Duration = Duration::from_secs(15);
 pub const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
@@ -125,13 +122,22 @@ struct PeerRecord {
 }
 
 /// A small registry that prevents duplicate work and rejects stale callbacks.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct PeerRegistry {
     peers: HashMap<NodeId, PeerRecord>,
     next_generation: u64,
+    capacity: usize,
 }
 
 impl PeerRegistry {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            peers: HashMap::new(),
+            next_generation: 0,
+            capacity,
+        }
+    }
+
     pub fn begin_attempt(&mut self, peer: NodeId) -> BeginPeerAttempt {
         if let Some(record) = self.peers.get(&peer)
             && record.state.is_active()
@@ -148,7 +154,7 @@ impl PeerRegistry {
             return BeginPeerAttempt::AtCapacity;
         }
 
-        if self.peers.len() >= MAX_PEERS {
+        if self.peers.len() >= self.capacity {
             let oldest_terminal = self
                 .peers
                 .iter()
@@ -159,7 +165,7 @@ impl PeerRegistry {
                 self.peers.remove(&oldest_terminal);
             }
         }
-        if self.peers.len() >= MAX_PEERS {
+        if self.peers.len() >= self.capacity {
             return BeginPeerAttempt::AtCapacity;
         }
 
@@ -235,6 +241,12 @@ impl PeerRegistry {
     }
 }
 
+impl Default for PeerRegistry {
+    fn default() -> Self {
+        Self::new(DEFAULT_MAX_PEERS)
+    }
+}
+
 /// Deterministically choose the lower NodeId as the QUIC dialer.
 pub fn should_initiate_quic(local: NodeId, peer: NodeId) -> bool {
     local < peer
@@ -295,7 +307,7 @@ mod tests {
     #[test]
     fn configured_peer_capacity_is_enforced_and_a_retired_slot_is_reusable() {
         let mut peers = PeerRegistry::default();
-        for index in 0..MAX_PEERS {
+        for index in 0..DEFAULT_MAX_PEERS {
             let peer = node(index as u8);
             let BeginPeerAttempt::Started(generation) = peers.begin_attempt(peer) else {
                 panic!("configured connected-device capacity was not available")
@@ -306,7 +318,7 @@ mod tests {
                 PeerLifecycle::Connected(RemoteAuthorization::BOTH)
             ));
         }
-        assert_eq!(peers.connected_count(), MAX_PEERS);
+        assert_eq!(peers.connected_count(), DEFAULT_MAX_PEERS);
         assert_eq!(peers.begin_attempt(node(250)), BeginPeerAttempt::AtCapacity);
         let old = peers.generation(node(0)).unwrap();
         assert!(peers.transition(node(0), old, PeerLifecycle::Disconnected));
@@ -314,6 +326,43 @@ mod tests {
             peers.begin_attempt(node(250)),
             BeginPeerAttempt::Started(_)
         ));
+    }
+
+    #[test]
+    fn default_and_extended_capacity_are_independent() {
+        let mut general = PeerRegistry::new(DEFAULT_MAX_PEERS);
+        let mut gateway = PeerRegistry::new(MAX_PEER_CAPACITY);
+        for index in 0..MAX_PEER_CAPACITY {
+            let peer = node(index as u8);
+            let BeginPeerAttempt::Started(generation) = gateway.begin_attempt(peer) else {
+                panic!("gateway capacity was not available at {index}")
+            };
+            assert!(gateway.transition(
+                peer,
+                generation,
+                PeerLifecycle::Connected(RemoteAuthorization::BOTH)
+            ));
+            if index < DEFAULT_MAX_PEERS {
+                let BeginPeerAttempt::Started(generation) = general.begin_attempt(peer) else {
+                    panic!("general capacity was not available at {index}")
+                };
+                assert!(general.transition(
+                    peer,
+                    generation,
+                    PeerLifecycle::Connected(RemoteAuthorization::BOTH)
+                ));
+            }
+        }
+        assert_eq!(general.connected_count(), DEFAULT_MAX_PEERS);
+        assert_eq!(gateway.connected_count(), MAX_PEER_CAPACITY);
+        assert_eq!(
+            general.begin_attempt(node(250)),
+            BeginPeerAttempt::AtCapacity
+        );
+        assert_eq!(
+            gateway.begin_attempt(node(250)),
+            BeginPeerAttempt::AtCapacity
+        );
     }
 
     #[test]

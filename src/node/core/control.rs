@@ -113,6 +113,7 @@ pub(crate) struct ControlState {
     snapshot: Arc<Mutex<NodeSnapshot>>,
     events: broadcast::Sender<SequencedEvent>,
     trust_sources: Arc<Mutex<BTreeMap<String, crate::node::core::authorization::TrustSource>>>,
+    max_peers: usize,
     pub(crate) transfer: Option<crate::node::core::transfer::TransferService>,
 }
 
@@ -158,6 +159,7 @@ impl ControlState {
     pub(crate) fn new(
         identity: NodeId,
         transfer: Option<crate::node::core::transfer::TransferService>,
+        max_peers: usize,
     ) -> Self {
         let (events, _) = broadcast::channel(256);
         Self {
@@ -168,6 +170,7 @@ impl ControlState {
             })),
             events,
             trust_sources: Default::default(),
+            max_peers,
             transfer,
         }
     }
@@ -214,9 +217,7 @@ impl ControlState {
                 {
                     return;
                 }
-                if !state.peers.contains_key(&id)
-                    && state.peers.len() >= crate::node::core::network_state::MAX_PEERS
-                {
+                if !state.peers.contains_key(&id) && state.peers.len() >= self.max_peers {
                     let retired = state
                         .peers
                         .iter()
@@ -297,7 +298,7 @@ impl ControlState {
             SessionEvent::ShortIdResolved { short_id, peer } => {
                 let key = short_id.to_string();
                 if let Some(peer) = peer {
-                    if state.short_peers.len() < crate::node::core::network_state::MAX_PEERS
+                    if state.short_peers.len() < self.max_peers
                         || state.short_peers.contains_key(&key)
                     {
                         state.short_peers.insert(key, peer.to_hex());
@@ -535,7 +536,11 @@ mod transport_tests {
     #[test]
     fn transport_counters_cannot_cross_peer_generations() {
         let id = Identity::generate().node_id();
-        let state = ControlState::new(id, None);
+        let state = ControlState::new(
+            id,
+            None,
+            crate::node::core::network_state::DEFAULT_MAX_PEERS,
+        );
         state.snapshot.lock().unwrap().peers.insert(
             id.to_hex(),
             PeerSnapshot {
@@ -581,6 +586,29 @@ mod transport_tests {
                 .mtu,
             0
         );
+    }
+
+    #[test]
+    fn peer_snapshot_and_short_id_cache_follow_instance_capacity() {
+        let local = Identity::generate().node_id();
+        let capacity = 3;
+        let state = ControlState::new(local, None, capacity);
+        for generation in 1..=capacity as u64 + 1 {
+            state.observe(&SessionEvent::PeerState {
+                peer: Identity::generate().node_id(),
+                generation,
+                state: crate::node::core::network_state::PeerLifecycle::Disconnected,
+            });
+        }
+        assert_eq!(state.snapshot.lock().unwrap().peers.len(), capacity);
+
+        for index in 0..capacity as u32 + 1 {
+            state.observe(&SessionEvent::ShortIdResolved {
+                short_id: crate::discovery::short_id::ShortId::new(100_000_000 + index).unwrap(),
+                peer: Some(Identity::generate().node_id()),
+            });
+        }
+        assert_eq!(state.snapshot.lock().unwrap().short_peers.len(), capacity);
     }
 
     #[test]

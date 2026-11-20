@@ -25,6 +25,7 @@ pub const LOCAL_URL: &str = "http://127.0.0.1:18081/";
 const LISTEN: &str = "127.0.0.1:18081";
 const TARGET: &str = "127.0.0.1:8080";
 const SERVICE: &str = "sub2api";
+const GATEWAY_MAX_PEERS: usize = 128;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -61,6 +62,13 @@ fn fixed_settings(root: PathBuf, signal: String) -> NodeSettings {
     settings.enable_tcp = true;
     settings.auto_resume = false;
     settings
+}
+
+fn gateway_session(settings: &NodeSettings) -> io::Result<control::NodeSessionConfig> {
+    settings
+        .session()
+        .map(|config| config.with_peer_capacity(GATEWAY_MAX_PEERS))
+        .map_err(error)
 }
 
 impl ClientProfile {
@@ -215,8 +223,7 @@ pub async fn run_gateway(root: &Path) -> io::Result<()> {
     loop {
         generation = generation.saturating_add(1);
         let started = Instant::now();
-        let (control, mut events) =
-            control::spawn(identity.clone(), settings.session().map_err(error)?)?;
+        let (control, mut events) = control::spawn(identity.clone(), gateway_session(&settings)?)?;
         let mut allowed = BTreeSet::new();
         let mut policy = crate::node::products::recovery::GatewayRecovery::default();
         let mut interval = tokio::time::interval(Duration::from_millis(250));
@@ -432,6 +439,19 @@ mod tests {
             altered[key] = serde_json::json!("override");
             assert!(serde_json::from_value::<ClientProfile>(altered).is_err());
         }
+    }
+
+    #[test]
+    fn gateway_gets_large_instance_capacity_while_other_sessions_keep_default() {
+        let settings = fixed_settings(std::env::temp_dir(), "127.0.0.1:8900".into());
+        assert_eq!(
+            settings.session().unwrap().max_peers,
+            crate::node::core::network_state::DEFAULT_MAX_PEERS
+        );
+        assert_eq!(
+            gateway_session(&settings).unwrap().max_peers,
+            GATEWAY_MAX_PEERS
+        );
     }
 
     #[test]

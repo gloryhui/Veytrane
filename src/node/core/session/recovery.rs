@@ -193,9 +193,15 @@ pub(super) struct Recovery {
     pending_change: Option<RefreshReason>,
     last_refresh: Duration,
     attempts: HashMap<NodeId, Attempt>,
+    capacity: usize,
 }
 impl Default for Recovery {
     fn default() -> Self {
+        Self::new(crate::node::core::network_state::DEFAULT_MAX_PEERS)
+    }
+}
+impl Recovery {
+    pub(super) fn new(capacity: usize) -> Self {
         Self {
             started: time::Instant::now(),
             last_tick: time::Instant::now(),
@@ -205,6 +211,7 @@ impl Default for Recovery {
             pending_change: None,
             last_refresh: Duration::ZERO,
             attempts: HashMap::new(),
+            capacity,
         }
     }
 }
@@ -225,9 +232,9 @@ impl Recovery {
         else {
             return;
         };
-        if !self.attempts.contains_key(peer) && self.attempts.len() >= MAX_PEERS {
+        if !self.attempts.contains_key(peer) && self.attempts.len() >= self.capacity {
             self.attempts.retain(|_, a| a.connected_before);
-            if self.attempts.len() >= MAX_PEERS {
+            if self.attempts.len() >= self.capacity {
                 return;
             }
         }
@@ -282,7 +289,7 @@ impl Recovery {
     }
     pub fn retry_due(&mut self, peer: NodeId) -> bool {
         let now = self.started.elapsed();
-        if !self.attempts.contains_key(&peer) && self.attempts.len() >= MAX_PEERS {
+        if !self.attempts.contains_key(&peer) && self.attempts.len() >= self.capacity {
             return false;
         }
         let a = self.attempts.entry(peer).or_default();
@@ -748,11 +755,11 @@ mod tests {
     #[test]
     fn rotation_history_is_bounded_by_the_attempt_registry() {
         let mut r = Recovery::default();
-        for _ in 0..MAX_PEERS * 3 {
+        for _ in 0..crate::node::core::network_state::DEFAULT_MAX_PEERS * 3 {
             let peer = Identity::generate().node_id();
             transport_failure(&mut r, peer, 1);
         }
-        assert!(r.attempts.len() <= MAX_PEERS);
+        assert!(r.attempts.len() <= crate::node::core::network_state::DEFAULT_MAX_PEERS);
         assert_eq!(
             r.attempts
                 .values()
@@ -760,6 +767,17 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    #[test]
+    fn extended_recovery_capacity_is_instance_selected() {
+        let capacity = crate::node::core::network_state::MAX_PEER_CAPACITY;
+        let mut r = Recovery::new(capacity);
+        for _ in 0..capacity * 3 {
+            transport_failure(&mut r, Identity::generate().node_id(), 1);
+        }
+        assert_eq!(r.attempts.len(), capacity);
+        assert!(r.attempts.len() > crate::node::core::network_state::DEFAULT_MAX_PEERS);
     }
 
     #[test]

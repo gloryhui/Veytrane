@@ -778,7 +778,9 @@ async fn agent_process_config_transaction_idempotency_restart_and_ownership() {
         assert!(Instant::now() < until, "duplicate Agent acquired ownership");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert_eq!(node.ok(Api::Status).await["node"]["node_id"], identity);
+    let status = node.ok(Api::Status).await;
+    assert_eq!(status["node"]["node_id"], identity);
+    assert_eq!(status["budgets"]["peers"], 16);
     assert!(!cli(&node.root, &["ownership-status"]).status.success());
     // Bypass client-side validation to exercise the actual host boundary.
     let paths = AgentPaths::new(&node.root).unwrap();

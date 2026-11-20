@@ -42,8 +42,8 @@ use crate::node::core::remote_auth::{
 };
 
 use crate::node::core::network_state::{
-    BeginPeerAttempt, MAX_PEERS, MAX_PENDING_PEERS, NetworkLifecycle, PeerLifecycle, PeerRegistry,
-    reconnect_delay, should_initiate_quic,
+    BeginPeerAttempt, DEFAULT_MAX_PEERS, MAX_PEER_CAPACITY, MAX_PENDING_PEERS, NetworkLifecycle,
+    PeerLifecycle, PeerRegistry, reconnect_delay, should_initiate_quic,
 };
 
 mod direct;
@@ -204,6 +204,7 @@ pub struct NodeSessionConfig {
     pub enable_files: bool,
     pub enable_speed: bool,
     pub enable_tcp: bool,
+    pub max_peers: usize,
     pub signal_server: String,
     pub signal_tls: Option<crate::discovery::signal_tls::SignalTlsClient>,
     pub remote_auth: Option<RemoteVerifier>,
@@ -232,6 +233,7 @@ impl NodeSessionConfig {
             enable_files: true,
             enable_speed: true,
             enable_tcp: true,
+            max_peers: DEFAULT_MAX_PEERS,
             signal_server: signal_server.into(),
             signal_tls: None,
             remote_auth: None,
@@ -246,6 +248,11 @@ impl NodeSessionConfig {
             tunnel_rules: Vec::new(),
             transfer: None,
         }
+    }
+
+    pub fn with_peer_capacity(mut self, max_peers: usize) -> Self {
+        self.max_peers = max_peers;
+        self
     }
 }
 
@@ -362,12 +369,13 @@ impl SessionEvents {
         sender: mpsc::Sender<SessionEvent>,
         shutdown: watch::Receiver<bool>,
         control: crate::node::core::control::ControlState,
+        max_peers: usize,
     ) -> Self {
         Self {
             sender,
             shutdown,
             control,
-            recovery: Default::default(),
+            recovery: Arc::new(std::sync::Mutex::new(recovery::Recovery::new(max_peers))),
         }
     }
 
@@ -397,6 +405,7 @@ impl SessionEvents {
 #[derive(Clone)]
 pub struct NodeSessionHandle {
     pub(crate) control: crate::node::core::control::ControlState,
+    peer_capacity: usize,
     resources: watch::Sender<crate::node::core::authorization::ResourcePolicy>,
     commands: mpsc::Sender<SessionCommand>,
     allowed_forward_targets: watch::Sender<Vec<crate::node::core::config::AllowedForwardTarget>>,
@@ -502,6 +511,9 @@ impl NodeSessionHandle {
     }
     pub fn resource_policy(&self) -> crate::node::core::authorization::ResourcePolicy {
         self.resources.borrow().clone()
+    }
+    pub fn peer_capacity(&self) -> usize {
+        self.peer_capacity
     }
     #[cfg(test)]
     pub fn connect_peer(&self, peer: NodeId) -> std::result::Result<(), String> {
@@ -1195,6 +1207,18 @@ pub fn spawn(
         .resources
         .validate()
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    if config.max_peers == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "节点容量必须大于零",
+        ));
+    }
+    if config.max_peers > MAX_PEER_CAPACITY {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "节点容量超出支持上限",
+        ));
+    }
     if config.trust_sources.len() > 128 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -1203,8 +1227,12 @@ pub fn spawn(
     }
     crate::node::core::trusted_devices::validate(&config.trusted_devices)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    let control =
-        crate::node::core::control::ControlState::new(identity.node_id(), config.transfer.clone());
+    let max_peers = config.max_peers;
+    let control = crate::node::core::control::ControlState::new(
+        identity.node_id(),
+        config.transfer.clone(),
+        max_peers,
+    );
     control.set_trust_sources(&config.trust_sources);
     let runtime_control = control.clone();
     let (resources, _) = watch::channel(config.resources.clone());
@@ -1239,7 +1267,12 @@ pub fn spawn(
                                 resources: runtime_resources,
                             },
                             stopped,
-                            SessionEvents::new(event_tx.clone(), event_shutdown, runtime_control),
+                            SessionEvents::new(
+                                event_tx.clone(),
+                                event_shutdown,
+                                runtime_control,
+                                max_peers,
+                            ),
                         )
                         .await;
                         if let Some(transfer) = transfer {
@@ -1261,6 +1294,7 @@ pub fn spawn(
     Ok((
         NodeSessionHandle {
             control,
+            peer_capacity: max_peers,
             resources,
             commands: command_tx,
             allowed_forward_targets,
@@ -1292,6 +1326,7 @@ async fn run_session(
         targets: allowed_forward_targets,
         resources: resource_policy,
     } = policies;
+    let max_peers = config.max_peers;
     let _ = events
         .send(SessionEvent::SignalSecurity {
             tls: config.signal_tls.is_some(),
@@ -1453,7 +1488,7 @@ async fn run_session(
     let selection_jobs = Arc::new(Semaphore::new(64));
     let continuation_jobs = Arc::new(Semaphore::new(3));
     let mut queue_changes = config.transfer.as_ref().map(|service| service.subscribe());
-    let mut peers = PeerRegistry::default();
+    let mut peers = PeerRegistry::new(max_peers);
     let mut connections: HashMap<NodeId, (u64, quinn::Connection)> = HashMap::new();
     let mut reconnect_probes: HashMap<NodeId, VecDeque<ReconnectProbe>> = HashMap::new();
     let mut peer_capabilities: HashMap<NodeId, u64> = HashMap::new();
@@ -1748,13 +1783,13 @@ async fn run_session(
                 let _ = reply.send(connections.clone());
             }
             Wake::Command(Some(SessionCommand::ConnectionUpdates { peer, done })) => {
-                if peer_connection_updates.len() >= MAX_PEERS
+                if peer_connection_updates.len() >= max_peers
                     && !peer_connection_updates.contains_key(&peer)
                 {
                     peer_connection_updates.retain(|_, sender| sender.receiver_count() > 0);
                 }
                 if peer == local_node
-                    || (peer_connection_updates.len() >= MAX_PEERS
+                    || (peer_connection_updates.len() >= max_peers
                         && !peer_connection_updates.contains_key(&peer))
                 {
                     let _ = done.send(Err("转发对端超出上限或指向本机".into()));
@@ -2645,13 +2680,11 @@ async fn run_session(
                 let _ = done.send(result);
             }
             Wake::Command(Some(SessionCommand::ConnectAuthenticated { peer, password })) => {
-                if requested_peers.len() < MAX_PEERS {
+                if requested_peers.len() < max_peers {
                     requested_peers.insert(peer);
                 }
                 manually_disconnected.remove(&peer);
-                if credentials.len() >= crate::node::core::network_state::MAX_PEERS
-                    && !credentials.contains_key(&peer)
-                {
+                if credentials.len() >= max_peers && !credentials.contains_key(&peer) {
                     let _ = events
                         .send(SessionEvent::Diagnostic(
                             "连接凭据数量已达上限，请重启会话后重试".into(),
@@ -2757,7 +2790,7 @@ async fn run_session(
                     .await;
             }
             Wake::Command(Some(SessionCommand::ConnectTrusted(peer))) => {
-                if requested_peers.len() < MAX_PEERS {
+                if requested_peers.len() < max_peers {
                     requested_peers.insert(peer);
                 }
                 manually_disconnected.remove(&peer);
@@ -3040,7 +3073,7 @@ async fn run_session(
                     prepared.close();
                     continue;
                 }
-                if !recovery_networks.contains_key(&peer) && recovery_networks.len() >= MAX_PEERS {
+                if !recovery_networks.contains_key(&peer) && recovery_networks.len() >= max_peers {
                     prepared.close();
                     warn!(peer = %peer.short(), "peer recovery deferred at network resource limit");
                     continue;
@@ -3900,14 +3933,13 @@ async fn run_session(
                             })
                             .await;
                         if let Some(peer) = node_id {
-                            if resolved_short_ids.len()
-                                < crate::node::core::network_state::MAX_PEERS
+                            if resolved_short_ids.len() < max_peers
                                 || resolved_short_ids.contains_key(&peer)
                             {
                                 resolved_short_ids.insert(peer, short_id);
                             }
                             if peer != local_node
-                                && (credentials.len() < crate::node::core::network_state::MAX_PEERS
+                                && (credentials.len() < max_peers
                                     || credentials.contains_key(&peer))
                             {
                                 let _ = command_tx.try_send(match password {

@@ -1,6 +1,6 @@
 //! Typed, bounded connection evidence. Raw errors, endpoints and credentials
 //! never enter this model; exports are generated from an explicit whitelist.
-use crate::node::core::network_state::{MAX_PEERS, NetworkLifecycle, PeerLifecycle};
+use crate::node::core::network_state::{DEFAULT_MAX_PEERS, NetworkLifecycle, PeerLifecycle};
 use crate::{identity::NodeId, net::AddressFamily};
 use std::{
     collections::{HashMap, VecDeque},
@@ -213,7 +213,7 @@ impl Diagnostics {
             if generation <= self.retired {
                 return None;
             }
-            if self.peers.len() >= MAX_PEERS {
+            if self.peers.len() >= DEFAULT_MAX_PEERS {
                 let oldest = self
                     .peers
                     .iter()
@@ -607,7 +607,7 @@ mod tests {
         );
         assert!(model.text(now).contains("网络准备/信令尝试耗时：3.0s"));
         let first = Identity::generate().node_id();
-        for n in 1..=MAX_PEERS + 3 {
+        for n in 1..=DEFAULT_MAX_PEERS + 3 {
             let id = if n == 1 {
                 first
             } else {
@@ -620,7 +620,7 @@ mod tests {
                 now,
             );
         }
-        assert_eq!(model.peers.len(), MAX_PEERS);
+        assert_eq!(model.peers.len(), DEFAULT_MAX_PEERS);
         model.transport(first, 1, true, AddressFamily::Ipv4, now);
         assert!(!model.peers.contains_key(&first));
         let id = Identity::generate().node_id();
@@ -637,7 +637,7 @@ mod tests {
             );
         }
         assert_eq!(model.peers[&id].history.len(), MAX_STAGES);
-        assert!(model.text(now).len() < MAX_PEERS * 2 * 1024);
+        assert!(model.text(now).len() < DEFAULT_MAX_PEERS * 2 * 1024);
     }
     #[test]
     fn diagnostic_export_never_overwrites_an_existing_file() {
