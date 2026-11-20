@@ -15,6 +15,7 @@ pub mod permissions;
 #[cfg(feature = "quic")]
 pub mod quic;
 pub mod raw_frame;
+pub mod short_id;
 #[cfg(feature = "quic")]
 pub mod udp;
 
