@@ -99,7 +99,7 @@ def violations(root):
 
 def metadata(root, *arguments):
     output = subprocess.check_output(
-        ["cargo", "metadata", "--locked", "--offline", "--format-version", "1", *arguments],
+        ["cargo", "metadata", "--locked", "--format-version", "1", *arguments],
         cwd=root,
         text=True,
     )
@@ -126,7 +126,7 @@ def cargo_violations(root):
 
     for features, excluded in PROFILE_EXCLUSIONS.items():
         command = [
-            "cargo", "tree", "--locked", "--offline", "-p", "p2p_file",
+            "cargo", "tree", "--locked", "-p", "p2p_file",
             "--no-default-features", "--features", features, "-e", "normal",
             "--prefix", "none", "--format", "{p}",
         ]
