@@ -41,6 +41,7 @@ pub enum SpeedtestDirection {
     Download,
 }
 
+#[cfg(test)]
 impl SpeedtestDirection {
     pub fn label(self) -> &'static str {
         match self {
@@ -51,6 +52,7 @@ impl SpeedtestDirection {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SettingsDraft {
     pub signal_tls: Option<crate::discovery::signal_tls::SignalTlsClient>,
@@ -72,6 +74,7 @@ pub struct SettingsDraft {
 
 pub use veytrane_tcp::rules::{AllowedForwardTarget, TunnelRule};
 
+#[cfg(test)]
 impl SettingsDraft {
     pub fn defaults(downloads_dir: Option<PathBuf>) -> Self {
         Self {
@@ -445,10 +448,12 @@ impl DesktopConfig {
     }
 }
 
+#[cfg(test)]
 pub fn restore_saved_settings(config: DesktopConfig) -> (SettingsDraft, String, bool) {
     restore_saved_settings_with_validator(config, validate_receive_directory)
 }
 
+#[cfg(test)]
 fn restore_saved_settings_with_validator(
     config: DesktopConfig,
     validate: impl FnOnce(&Path) -> Result<(), ConfigError>,
@@ -516,6 +521,7 @@ pub fn validate_signal_host(host: &str) -> Result<(), ConfigError> {
     Ok(())
 }
 
+#[cfg(test)]
 pub fn parse_signal_port(port: &str) -> Result<u16, ConfigError> {
     if port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(ConfigError::Invalid(
