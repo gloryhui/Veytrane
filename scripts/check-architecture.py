@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Check explicit Rust layer dependencies without building or touching node state.
+"""Check source layers and Cargo production dependencies without building.
 
-This is a source-level guard, not a Rust parser. Compilation remains responsible
-for name resolution; code in these layers uses canonical crate-qualified imports
-so the same guard covers tests and platform-specific branches on every CI host.
+The source scan checks canonical imports. Cargo metadata checks internal package
+ownership and the resolved production graph for each distribution profile.
 """
+import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +23,30 @@ ALLOWED = {
 }
 FOUNDATION = {"storage", "identity.rs", "instance_lock.rs", "nat", "net",
               "transport", "protocol", "discovery", "relay"}
+WORKSPACE_DEPENDENCIES = {
+    "veytrane-transport": set(),
+    "veytrane-node": {"veytrane-transport"},
+    "veytrane-file-policy": set(),
+    "veytrane-files": {"veytrane-file-policy", "veytrane-node", "veytrane-transport"},
+    "veytrane-speed": {"veytrane-node", "veytrane-transport"},
+    "veytrane-tcp": {"veytrane-node", "veytrane-transport"},
+    "veytrane-management": {"veytrane-transport"},
+    "veytrane-http-auth": {"veytrane-transport"},
+    "veytrane-web-management": {
+        "veytrane-http-auth", "veytrane-management", "veytrane-transport"
+    },
+}
+PROFILE_EXCLUSIONS = {
+    "agent-base": {"veytrane-files", "veytrane-web-management", "axum", "gpui", "rusqlite"},
+    "agent-base,agent-web": {"veytrane-files", "gpui", "rusqlite"},
+    "agent-full": {"gpui", "rusqlite"},
+    "desktop-client": {"veytrane-files", "veytrane-web-management", "axum", "rusqlite"},
+    "live": {"veytrane-files", "veytrane-web-management", "gpui", "rusqlite"},
+    "sub2api-client,sub2api-gateway": {
+        "veytrane-files", "veytrane-web-management", "axum", "gpui", "rusqlite"
+    },
+    "standalone": {"veytrane-management", "veytrane-web-management", "gpui"},
+}
 
 
 def violations(root):
@@ -60,9 +85,49 @@ def violations(root):
     return errors
 
 
+def metadata(root, *arguments):
+    output = subprocess.check_output(
+        ["cargo", "metadata", "--locked", "--offline", "--format-version", "1", *arguments],
+        cwd=root,
+        text=True,
+    )
+    return json.loads(output)
+
+
+def cargo_violations(root):
+    errors = []
+    declared = metadata(root, "--no-deps")
+    internal = {package["name"] for package in declared["packages"]}
+    for package in declared["packages"]:
+        name = package["name"]
+        if name == "p2p_file":
+            continue
+        if name not in WORKSPACE_DEPENDENCIES:
+            errors.append(f"{name}: missing workspace dependency policy")
+            continue
+        actual = {
+            dependency["name"] for dependency in package["dependencies"]
+            if dependency["kind"] is None and dependency["name"] in internal
+        }
+        for dependency in sorted(actual - WORKSPACE_DEPENDENCIES[name]):
+            errors.append(f"{name} -> {dependency}: forbidden production dependency")
+
+    for features, excluded in PROFILE_EXCLUSIONS.items():
+        command = [
+            "cargo", "tree", "--locked", "--offline", "-p", "p2p_file",
+            "--no-default-features", "--features", features, "-e", "normal",
+            "--prefix", "none", "--format", "{p}",
+        ]
+        output = subprocess.check_output(command, cwd=root, text=True)
+        dependencies = {line.split()[0] for line in output.splitlines() if line.strip()}
+        for dependency in sorted(dependencies & excluded):
+            errors.append(f"{features} links forbidden production dependency {dependency}")
+    return errors
+
+
 if __name__ == "__main__":
-    errors = violations(ROOT)
+    errors = violations(ROOT) + cargo_violations(ROOT)
     if errors:
         print("\n".join(errors), file=sys.stderr)
         sys.exit(1)
-    print("Architecture boundaries OK: core, local, API, host, adapters, products and desktop.")
+    print("Architecture boundaries OK: source layers and Cargo production profiles.")

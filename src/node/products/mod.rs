@@ -5,4 +5,5 @@ pub mod live;
 pub(crate) mod platform_recovery;
 pub(crate) mod recovery;
 pub(crate) mod runtime;
+#[cfg(feature = "sub2api-runtime")]
 pub mod sub2api;

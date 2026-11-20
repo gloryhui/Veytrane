@@ -100,7 +100,9 @@ python.exe scripts\package-desktop-tests.py
 if errorlevel 1 goto :failed
 
 echo Building the Windows x64 desktop app...
-cargo build --locked --release --features gui --bin p2p-desktop --target %P2P_TARGET%
+cargo build --locked --release --no-default-features --features desktop-client --bin p2p-desktop --target %P2P_TARGET%
+if errorlevel 1 goto :failed
+cargo build --locked --release --no-default-features --features agent-full --bin p2p-agent --bin p2p-node --target %P2P_TARGET%
 if errorlevel 1 goto :failed
 
 for /f "usebackq delims=" %%D in (`powershell.exe -NoLogo -NoProfile -Command "[Environment]::GetFolderPath('Desktop')"`) do set "P2P_DESKTOP=%%D"

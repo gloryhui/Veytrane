@@ -27,10 +27,12 @@ resolver = "3"
 
 [features]
 default = ["node"]
-sub2api-client = ["node"]
-sub2api-gateway = ["node"]
-live = ["node", "dep:reqwest"]
-node = ["agent-base", "agent-files", "agent-web", "standalone"]
+sub2api-client = ["sub2api-runtime"]
+sub2api-gateway = ["sub2api-runtime"]
+sub2api-runtime = ["agent-base"]
+live = ["agent-base", "dep:axum", "dep:reqwest"]
+node = ["agent-full", "standalone", "sub2api-runtime"]
+agent-full = ["agent-base", "agent-files", "agent-web", "node-cli"]
 agent-base = [
     "dep:veytrane-file-policy",
     "dep:veytrane-management",
@@ -45,6 +47,7 @@ agent-base = [
 ]
 agent-files = ["agent-base", "dep:veytrane-files", "veytrane-files/node-runtime"]
 agent-web = ["agent-base", "dep:veytrane-web-management"]
+node-cli = ["agent-base", "agent-web"]
 standalone = ["dep:veytrane-files", "dep:veytrane-http-auth", "dep:axum", "signaling-server"]
 signaling-server = ["dep:rusqlite"]
 gui = ["node", "desktop-client"]
@@ -130,7 +133,7 @@ required-features = ["standalone"]
 [[bin]]
 name = "p2p-node"
 path = "src/bin/p2p-node.rs"
-required-features = ["node"]
+required-features = ["node-cli"]
 
 [[bin]]
 name = "sub2api-client"
@@ -145,7 +148,7 @@ required-features = ["sub2api-gateway"]
 [[example]]
 name = "sub2api-client-harness"
 path = "examples/sub2api-client-harness.rs"
-required-features = ["node"]
+required-features = ["sub2api-runtime"]
 
 [[bin]]
 name = "live-viewer"

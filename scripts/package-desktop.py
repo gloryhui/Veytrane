@@ -76,10 +76,10 @@ def native_host(target):
             raise ValueError('Rosetta cannot supply native Mac packaging/validation evidence')
 
 
-def dependency_bundle(destination, features='gui'):
+def dependency_bundle(destination, features='desktop-client,agent-full'):
     # Conservatively retain every resolved package, including build/optional and
     # other-target packages. Do not mislabel this inventory as a linked SBOM.
-    metadata = json.loads(run(['cargo', 'metadata', '--locked', '--features', features, '--format-version', '1']))
+    metadata = json.loads(run(['cargo', 'metadata', '--locked', '--no-default-features', '--features', features, '--format-version', '1']))
     lock = tomllib.loads((REPO / 'Cargo.lock').read_text(encoding='utf-8'))
     checksums = {(p['name'], p['version']): p.get('checksum') for p in lock['package']}
     records = []
@@ -125,7 +125,7 @@ def dependency_bundle(destination, features='gui'):
 
 def dependency_licenses(destination):
     """Bundle dependency license/notice text without copying full crate sources."""
-    metadata = json.loads(run(['cargo', 'metadata', '--locked', '--features', 'gui', '--format-version', '1']))
+    metadata = json.loads(run(['cargo', 'metadata', '--locked', '--no-default-features', '--features', 'desktop-client,agent-full', '--format-version', '1']))
     count = 0
     notices = destination / 'licenses'
     notices.mkdir()

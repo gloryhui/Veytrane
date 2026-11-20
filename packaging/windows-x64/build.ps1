@@ -153,7 +153,8 @@ try {
     Push-Location $RepoRoot
     try {
         Invoke-NativeChecked -Executable $python.Path $packageTests
-        Invoke-NativeChecked -Executable $cargo.Source 'build' '--locked' '--release' '--features' 'gui' '--bin' 'p2p-desktop' '--bin' 'p2p-agent' '--bin' 'p2p-node' '--target' $Target
+        Invoke-NativeChecked -Executable $cargo.Source 'build' '--locked' '--release' '--no-default-features' '--features' 'desktop-client' '--bin' 'p2p-desktop' '--target' $Target
+        Invoke-NativeChecked -Executable $cargo.Source 'build' '--locked' '--release' '--no-default-features' '--features' 'agent-full' '--bin' 'p2p-agent' '--bin' 'p2p-node' '--target' $Target
         Invoke-NativeChecked -Executable $python.Path $packageScript '--binary' $binaryPath '--target' $Target '--output' $outputPath
         $candidatePath = Join-Path $outputPath 'candidate.json'
         Invoke-NativeChecked -Executable $python.Path $verifyScript $candidatePath
