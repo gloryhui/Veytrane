@@ -24,6 +24,8 @@ pub mod space_budget;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod task_events;
 #[cfg(feature = "node-tasks")]
+pub mod task_measurements;
+#[cfg(feature = "node-tasks")]
 pub mod task_model;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod task_recovery;
