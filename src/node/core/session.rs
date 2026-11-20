@@ -4591,28 +4591,44 @@ async fn run_session(
                 }
                 #[cfg(feature = "agent-files")]
                 let transfer = config.transfer.clone();
-                let negotiated_speed = speed_service.clone().filter(|_| {
-                    capabilities & veytrane_node::capability::CAP_SPEED_EXECUTION != 0
-                });
+                let speed_service = speed_service.clone();
                 let business_connection = connection.clone();
                 let allowed_targets = allowed_forward_targets.subscribe();
                 let resources = resource_policy.subscribe();
                 let business_events = events.clone();
                 let service_tcp_streams = forward_streams.clone();
                 peer_tasks.spawn(async move {
-                    let (_dispatcher, incoming) = crate::node::core::dispatch::Dispatcher::start(
+                    use veytrane_node::{
+                        capability::{CAP_FILE_TRANSFER, CAP_SPEED_EXECUTION, CAP_TCP_TUNNEL},
+                        dispatch::Dispatcher,
+                        wire::StreamKind,
+                    };
+
+                    let registered = [
+                        (CAP_FILE_TRANSFER, StreamKind::File),
+                        (CAP_TCP_TUNNEL, StreamKind::Service),
+                        (CAP_SPEED_EXECUTION, StreamKind::Speed),
+                    ]
+                    .into_iter()
+                    .filter_map(|(bit, kind)| (capabilities & bit != 0).then_some(kind))
+                    .collect::<Vec<_>>();
+                    let (_dispatcher, incoming) = match Dispatcher::start_registered(
                         business_connection.clone(),
-                        capabilities,
-                    );
-                    let crate::node::core::dispatch::Incoming {
-                        files,
-                        services,
-                        speed,
-                    } = incoming;
-                    let business_budget =
-                        Arc::new(Semaphore::new(DEFAULT_MAX_PEER_BUSINESS_STREAMS));
+                        &registered,
+                    ) {
+                        Ok(dispatch) => dispatch,
+                        Err(error) => {
+                            warn!(%error, "节点业务流注册失败");
+                            business_connection.close(0u32.into(), b"stream registration failed");
+                            return;
+                        }
+                    };
+                    let business_budget = (incoming.files.is_some() || incoming.speed.is_some())
+                        .then(|| Arc::new(Semaphore::new(DEFAULT_MAX_PEER_BUSINESS_STREAMS)));
                     let handle_speed = async {
-                        if let Some(service) = negotiated_speed {
+                        if let (Some(service), Some(streams), Some(budget)) =
+                            (speed_service, incoming.speed, &business_budget)
+                        {
                             service
                                 .serve_peer(
                                     business_connection.clone(),
@@ -4620,52 +4636,61 @@ async fn run_session(
                                     local_node,
                                     live.clone(),
                                     resources.clone(),
-                                    business_budget.clone(),
-                                    speed,
+                                    budget.clone(),
+                                    streams,
                                 )
                                 .await
                         } else {
-                            drop(speed);
                             Ok(())
                         }
                     };
                     let handle_file = async {
                         #[cfg(feature = "agent-files")]
                         {
-                        if let Some(service) = transfer {
-                            service
-                                .serve_files_dispatched(
-                                    business_connection.clone(),
-                                    peer,
-                                    live.clone(),
-                                    files,
-                                    resources.clone(),
-                                    business_budget.clone(),
-                                )
-                                .await
-                        } else {
-                            drop(files);
-                            Ok(())
-                        }
+                            if let (Some(service), Some(streams), Some(budget)) =
+                                (transfer, incoming.files, &business_budget)
+                            {
+                                service
+                                    .serve_files_dispatched(
+                                        business_connection.clone(),
+                                        peer,
+                                        live.clone(),
+                                        streams,
+                                        resources.clone(),
+                                        budget.clone(),
+                                    )
+                                    .await
+                            } else {
+                                Ok(())
+                            }
                         }
                         #[cfg(not(feature = "agent-files"))]
                         {
-                            drop(files);
+                            drop(incoming.files);
                             Ok::<(), Error>(())
                         }
                     };
-                    let (speed_result, file_result, _tcp_result) = tokio::join!(
+                    let handle_tcp = async {
+                        if let Some(streams) = incoming.services {
+                            crate::node::core::services::serve(
+                                peer,
+                                live.clone(),
+                                allowed_targets,
+                                resources.clone(),
+                                streams,
+                                service_tcp_streams,
+                            )
+                            .await
+                        } else {
+                            Ok(())
+                        }
+                    };
+                    let (speed_result, file_result, _tcp_result, _) = tokio::join!(
                         biased;
                         handle_speed,
                         handle_file,
-                        crate::node::core::services::serve(
-                            peer,
-                            live.clone(),
-                            allowed_targets,
-                            resources.clone(),
-                            services,
-                            service_tcp_streams
-                        ),
+                        handle_tcp,
+                        business_connection.closed(),
                     );
                     if speed_result.is_err() || file_result.is_err() {
                         let _ = business_events
