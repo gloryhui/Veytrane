@@ -27,7 +27,7 @@
     {"id":"products","layer":"app","x":878,"y":158,"w":318,"h":100,"title":"Live / Sub2API","sub":"专用客户端和网关","lines":["各自装配节点与 TCP 转发","各自选择准入、容量和恢复策略"]},
     {"id":"ipc","layer":"management","x":45,"y":326,"w":344,"h":100,"title":"本机管理 IPC","sub":"crates/veytrane-management","lines":["IPC v1 DTO · AgentClient","Unix socket / Windows pipe"]},
     {"id":"nav","layer":"management","x":455,"y":326,"w":330,"h":100,"title":"内置服务导航","sub":"apps/web-management","lines":["导航和管理页经 IPC 使用节点","入口负责启动、重建通知与退出"]},
-    {"id":"host","layer":"management","x":45,"y":488,"w":740,"h":100,"title":"Agent 宿主与能力装配","sub":"apps/agent · src/node/{host,composition}","lines":["进程所有权、配置 revision、请求去重与能力构造","同一会话提交点先持久化，再发布策略"]},
+    {"id":"host","layer":"management","x":45,"y":488,"w":740,"h":100,"title":"Agent 宿主与能力装配","sub":"apps/agent/src/host · src/node/composition","lines":["进程所有权、配置 revision、请求去重与能力构造","同一会话提交点先持久化，再发布策略"]},
     {"id":"standalone","layer":"standalone","x":878,"y":326,"w":318,"h":100,"title":"独立命令行","sub":"p2p_file · apps/standalone-cli","lines":["独立收发、服务、隧道与测速","沿用独立协议和身份锁"]},
     {"id":"signal","layer":"standalone","x":878,"y":488,"w":318,"h":100,"title":"信令与可选 Relay 服务端","sub":"apps/signaling · signaling-server","lines":["维护登记、短 ID SQLite 和中继租约","由 p2p_file signal-server 启动"]},
     {"id":"core","layer":"core","x":45,"y":665,"w":1151,"h":100,"title":"节点会话编排","sub":"src/node/core","lines":["建立已认证会话、维护连接代际与重连、协调强撤销","接收已装配能力，按协商结果注册有界业务流"]},
@@ -35,7 +35,7 @@
     {"id":"speed","layer":"capability","x":455,"y":840,"w":330,"h":100,"title":"测速","sub":"crates/veytrane-speed","lines":["控制协议、数据流、租约与统计","与文件服务共用每 peer 活动许可"]},
     {"id":"tcp","layer":"capability","x":878,"y":840,"w":318,"h":100,"title":"TCP 服务与转发","sub":"crates/veytrane-tcp","lines":["服务 ID、目录、ACL、监听与桥接","Agent、Live、Sub2API 复用"]},
     {"id":"node","layer":"core","x":45,"y":1015,"w":520,"h":100,"title":"节点基础机制","sub":"crates/veytrane-node","lines":["P2PN 协商、双向流分发、peer 容量与活动许可","按认证状态和当前代际撤销资源"]},
-    {"id":"transport","layer":"core","x":675,"y":1015,"w":521,"h":100,"title":"传输基础与网络客户端","sub":"veytrane-transport · src/{net,discovery,nat,relay}","lines":["传输包拥有身份、QUIC、打洞及 UDP 地址校验","根网络模块协调发现客户端、路径选择和 Relay"]}
+    {"id":"transport","layer":"core","x":675,"y":1015,"w":521,"h":100,"title":"传输基础与网络客户端","sub":"veytrane-transport · src/{net,discovery,nat,relay}","lines":["身份、QUIC、打洞、信令客户端与共用报文","根网络模块协调发现、路径选择和 Relay"]}
   ],
   "edges": [
     {"from":"clients.b","to":"ipc.t","flow":"ipc","label":"AgentClient","labelPos":[278,282]},

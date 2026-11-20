@@ -59,7 +59,7 @@ Veytrane 的核心是可信节点之间建立、维持和恢复连接的机制�
 
 ## 4. 接口和共享状态怎么拆
 
-首遍阅读按真实调用链走一遍：[初始化与入口组装](../src/bin/p2p-agent.rs) → [宿主和 IPC 命令执行](../src/node/host/agent.rs) → [节点控制与文件服务构造](../src/node/core/control.rs) → [协商及会话](../src/node/core/session.rs) → [双向流分发](../src/node/core/dispatch.rs) → [文件与测速的现有组合](../src/node/core/transfer.rs)。配置变更另从[配置事务](../src/node/host/configuration.rs)读到 actor 的 `commit_agent_policy`。这些是基线源码路径，移动后同步修订现行分层文档。
+首遍阅读可沿现行生产调用链追踪：[入口组装](../apps/agent/src/application.rs) → [宿主和 IPC 命令执行](../apps/agent/src/host/agent.rs) → [能力构造](../src/node/composition/runtime.rs) → [协商及会话](../src/node/core/session.rs) → [双向流分发](../crates/veytrane-node/src/dispatch.rs)。配置变更可从[配置事务](../apps/agent/src/host/configuration.rs)追到会话 actor 的策略提交点。
 
 ### 4.1 能力装配与连接生命周期
 
@@ -205,6 +205,17 @@ Veytrane 的核心是可信节点之间建立、维持和恢复连接的机制�
 - `04a3175` 将文件快照、本地任务操作以及配置事务所用的文件句柄交给 Agent，使用同一个文件服务实例。需要对端授权的文件命令仍由会话 actor 串行执行。完整与裁剪 Agent 编译及 9 项 Agent 进程用例通过。
 - 干净 `04a3175` 在 Apple Silicon 重新运行 `scripts/node-core-e2e.py`。15 个场景全部通过，采集 21 条进程证据。最小 node 包、源码与 Cargo 分层检查、离线源码索引检查通过。该矩阵包含流注册、限额、互斥、收发恢复和授权验证。
 - `7606b2a` 修正本轮文件快照迁移引入的 Clippy `let_and_return`，文件包严格 Clippy 验证通过。Linux `18d114b` 工作流仍是失败记录。该作业另报告 64 条 Web 导航 lint，其中 55 条指向同一大错误类型，`Problem` 的结构及 `Result` 别名与施工前 `0b0d77b` 一致。尚未重跑 Linux 整个工作流。
+
+### S6 宿主与能力装配复验（2026-11-21）
+
+- `af4457a` 将网络生命周期状态归入最小节点包，并移除无仓内调用的显示文案方法。最小节点、专用产品和三项网络状态投影检查通过。
+- `3629fc0` 让 Agent 直接读取测速服务快照，会话 actor 使用同一实例处理需要对端授权的操作。`e76f1d1` 移除无仓内调用的混合命令入口 `NodeCommand` 和 `NodeControl::execute`，保留管理协议及具体命令提交方法。
+- `5456346` 分离信令 TLS 客户端和服务端编译范围。`agent-base` 只启用客户端 TLS，原服务端入口按 feature 编译私钥和 acceptor。TLS 底层用例、独立 CLI 互通和裁剪依赖检查通过。
+- 干净 `5456346` 的裁剪二进制与同提交完整发行版通过四组互联。双裁剪与裁剪/完整版两组完成 30 秒测速、TCP 与重连，仅 TCP 和基础会话两组验证相应能力边界。
+- `c285800` 将 Agent IPC 宿主、配置事务与本地文件操作迁入 `apps/agent/src/host`，保留旧 Rust 导入。裁剪和完整 Agent 编译、分层和源码索引检查通过。
+- 干净 `c285800` 通过隔离原生导航。核心重建期间连续 11 次读取页面，单条规则、revision、身份和 HTTP 监听检查通过，未向已安装 Agent 发出请求。
+- `845c9b0` 提供 `node-runtime`，Live 和 Sub2API 的生产构建不再编译 Agent IPC 与宿主。独立构建及依赖检查通过。干净 `845c9b0` 的专用产品测试 16 项通过，1 项已部署网关用例按标记忽略。
+- `ce67e8e` 将信令客户端的登记、心跳、查询和任务清理移到传输包，沿用服务端入口及根导入。59 项信令、5 项 TLS、独立 TLS CLI 进程和纯 QUIC 构建通过。
 
 ## 7. 新增或移除业务时的操作示例
 

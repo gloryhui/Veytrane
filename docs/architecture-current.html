@@ -111,10 +111,10 @@ cli:{tag:'LOCAL / MANAGEMENT',title:'管理命令行',text:'p2p-node 管理同�
 web:{tag:'LOCAL / OPTIONAL',title:'可选 Web 网关',text:'apps/web-management 提供本机 Web 网关与导航管理，HTTP 请求通过 AgentClient 桥接 IPC。',items:['仅绑定 loopback，管理 API 需私有 token。','不拥有身份、任务库或 peer 连接。','浏览器关闭不等于停止 Agent。'],sources:[['../apps/web-management/src/web.rs','Web 网关'],['../apps/web-management/src/web.html','管理页面']]},
 agent:{tag:'LOCAL / SINGLE OWNER',title:'唯一后台宿主',text:'p2p-agent 是当前正式后台形态，独占一个数据目录及身份，装配无 GUI 的节点核心。',items:['启动、IPC、配置 revision、幂等请求与事件日志。','协调资源策略、文件任务与转发监听。','管理端可附着或重开，业务状态由后台负责。'],sources:[['../apps/agent/src/host/agent.rs','Agent 宿主'],['../apps/agent/src/host/configuration.rs','配置协调'],['../src/node/core/control.rs','NodeControl']]},
 session:{tag:'CORE / CONNECTION',title:'会话与流分发',text:'Session 管理多 peer、认证、代际、候选和重连。统一连接只有一个入站双向流接纳者。',items:['NodeId 身份认证与密码 / 信任证明。','统一能力协商，再进行资源权限检查。','File / Service / Speed 分流，接纳队列有界。'],sources:[['../src/node/core/session.rs','会话循环'],['../src/node/core/wire.rs','统一协议'],['../src/node/core/dispatch.rs','流分发']]},
-business:{tag:'CORE / DOMAIN',title:'三类核心业务',text:'文件 / 目录、TCP 转发与测速共享认证连接；执行分别位于 veytrane-files、veytrane-tcp 与 veytrane-speed。',items:['文件：清单、分片、续传、队列、限速、安全发布。','TCP：按服务 ID 开流，本地 loopback 监听。','测速：独立流统计传输率与 RTT。'],sources:[['../crates/veytrane-files/src/transfer.rs','文件服务'],['../crates/veytrane-tcp/src/services.rs','TCP 服务'],['../crates/veytrane-speed/src/runtime.rs','测速']]},
+business:{tag:'CAPABILITIES',title:'三类业务能力',text:'文件 / 目录、TCP 转发与测速共享认证连接；执行分别位于 veytrane-files、veytrane-tcp 与 veytrane-speed。',items:['文件：清单、分片、续传、队列、限速、安全发布。','TCP：按服务 ID 开流，本地 loopback 监听。','测速：独立流统计传输率与 RTT。'],sources:[['../crates/veytrane-files/src/transfer.rs','文件服务'],['../crates/veytrane-tcp/src/services.rs','TCP 服务'],['../crates/veytrane-speed/src/runtime.rs','测速']]},
 state:{tag:'LOCAL / PERSISTENCE',title:'配置与任务状态',text:'node.json、identity.key、tasks.json 由后台及离线生命周期工具按锁保护；配置在 composition，任务事实在 veytrane-files。',items:['revision 比较防止多个入口覆盖。','原子写、检查点和持久完成回执。','目录锁 + 身份租约 + 任务库锁约束单一所有权。'],sources:[['../crates/veytrane-management/src/paths.rs','路径'],['../src/node/composition/settings.rs','配置'],['../crates/veytrane-files/src/task_store.rs','任务库']]},
 peer:{tag:'REMOTE / SYMMETRIC',title:'远端节点',text:'远端运行同一套 Agent 核心。可以无界面常驻，也可以通过自己的桌面 / CLI 管理。',items:['一个节点可主动连接，也可接受授权连接。','远端声明服务，访问方按服务 ID 使用。','本机权限与远端权限分别生效。'],sources:[['../src/node/core/authorization.rs','资源策略'],['../crates/veytrane-tcp/src/services.rs','服务目录']]},
-signal:{tag:'INFRASTRUCTURE / DISCOVERY',title:'信令与地址探测',text:'客户端与共享线格式位于 discovery。信令监听、Registry 与短 ID SQLite 归 apps/signaling，在 signaling-server feature 下编译。局域网发现和已知 IP 直连可独立使用。',items:['设备仍需自行完成身份认证。','双栈候选、同端口探测与打洞服务于直连。','信令地址可以配置 TLS。短 ID 仅用于定位设备。'],sources:[['../src/discovery/signal.rs','共享与客户端'],['../apps/signaling/src/server.rs','信令服务端'],['../src/discovery/short_id.rs','短 ID'],['../src/net/mod.rs','网络路径']]},
+signal:{tag:'INFRASTRUCTURE / DISCOVERY',title:'信令与地址探测',text:'veytrane-transport 提供客户端和共用报文。apps/signaling 提供服务端监听、Registry 与短 ID SQLite。局域网发现和已知 IP 直连可独立使用。',items:['设备仍需自行完成身份认证。','双栈候选、同端口探测与打洞服务于直连。','信令地址可以配置 TLS。短 ID 仅用于定位设备。'],sources:[['../crates/veytrane-transport/src/signal_client.rs','信令客户端'],['../crates/veytrane-transport/src/signal_wire.rs','共用线格式'],['../apps/signaling/src/server.rs','信令服务端'],['../src/discovery/short_id.rs','短 ID']]},
 relay:{tag:'INFRASTRUCTURE / OPTIONAL',title:'UDP Relay 兜底',text:'配置 Relay 后，Direct 未及时认证成功时，可延迟尝试中继。',items:['转发设备间端到端加密 QUIC 数据报。','票据、配对、超时及资源额度约束中继使用。','与信令基础设施可共同部署，业务授权仍在节点。'],sources:[['../src/relay/client.rs','Relay 客户端'],['../apps/signaling/src/relay.rs','Relay 服务端'],['../src/cli.rs','部署参数']]}
 };
 const flows={
@@ -418,9 +418,14 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
           "detail": "签名绑定当前会话。"
         },
         {
-          "name": "STUN / 打洞",
-          "path": "src/nat/mod.rs",
-          "detail": "地址探测与 UDP 同端口穿透。"
+          "name": "STUN",
+          "path": "src/nat/stun.rs",
+          "detail": "UDP 外部地址探测。"
+        },
+        {
+          "name": "UDP 打洞",
+          "path": "crates/veytrane-transport/src/punch.rs",
+          "detail": "同端口候选探测与映射保活。"
         }
       ],
       "section": "protocol"
@@ -453,8 +458,8 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
       "id": "signal",
       "title": "信令 / 短 ID",
       "tag": "DISCOVERY",
-      "path": "src/discovery/signal.rs",
-      "summary": "客户端与共享线格式常驻 discovery；服务端 Registry/监听在 signaling-server feature 下编译，旧 p2p_file signal-server 命令继续保留。",
+      "path": "crates/veytrane-transport/src/signal_client.rs",
+      "summary": "传输包持有信令客户端与共用报文。apps/signaling 的 Registry 与监听只在 signaling-server 和测试组合编译，沿用 p2p_file signal-server 入口。",
       "rules": [
         "直连成功时不承载文件或 TCP 业务字节。",
         "短 ID 是寻址工具，不是访问凭据。",
@@ -462,9 +467,14 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
       ],
       "parts": [
         {
-          "name": "共享与客户端",
-          "path": "src/discovery/signal.rs",
-          "detail": "SignalMessage、客户端登记、心跳、查找与候选交换。"
+          "name": "信令客户端",
+          "path": "crates/veytrane-transport/src/signal_client.rs",
+          "detail": "登记、心跳、查找与候选交换。"
+        },
+        {
+          "name": "共用线格式",
+          "path": "crates/veytrane-transport/src/signal_wire.rs",
+          "detail": "SignalMessage、协议判别值与签名载荷。"
         },
         {
           "name": "信令服务端",

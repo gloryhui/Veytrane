@@ -280,9 +280,14 @@
           "detail": "签名绑定当前会话。"
         },
         {
-          "name": "STUN / 打洞",
-          "path": "src/nat/mod.rs",
-          "detail": "地址探测与 UDP 同端口穿透。"
+          "name": "STUN",
+          "path": "src/nat/stun.rs",
+          "detail": "UDP 外部地址探测。"
+        },
+        {
+          "name": "UDP 打洞",
+          "path": "crates/veytrane-transport/src/punch.rs",
+          "detail": "同端口候选探测与映射保活。"
         }
       ],
       "section": "protocol"
@@ -315,8 +320,8 @@
       "id": "signal",
       "title": "信令 / 短 ID",
       "tag": "DISCOVERY",
-      "path": "src/discovery/signal.rs",
-      "summary": "客户端与共享线格式常驻 discovery；服务端 Registry/监听在 signaling-server feature 下编译，旧 p2p_file signal-server 命令继续保留。",
+      "path": "crates/veytrane-transport/src/signal_client.rs",
+      "summary": "传输包持有信令客户端与共用报文。apps/signaling 的 Registry 与监听只在 signaling-server 和测试组合编译，沿用 p2p_file signal-server 入口。",
       "rules": [
         "直连成功时不承载文件或 TCP 业务字节。",
         "短 ID 是寻址工具，不是访问凭据。",
@@ -324,9 +329,14 @@
       ],
       "parts": [
         {
-          "name": "共享与客户端",
-          "path": "src/discovery/signal.rs",
-          "detail": "SignalMessage、客户端登记、心跳、查找与候选交换。"
+          "name": "信令客户端",
+          "path": "crates/veytrane-transport/src/signal_client.rs",
+          "detail": "登记、心跳、查找与候选交换。"
+        },
+        {
+          "name": "共用线格式",
+          "path": "crates/veytrane-transport/src/signal_wire.rs",
+          "detail": "SignalMessage、协议判别值与签名载荷。"
         },
         {
           "name": "信令服务端",

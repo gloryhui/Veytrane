@@ -11,7 +11,7 @@ src/bin/p2p-node.rs → apps/node-cli → veytrane-management
                        └─ web → apps/web-management → veytrane-management
 src/bin/p2p-agent.rs → apps/agent → Agent 宿主与可选 Web 导航
                    └─ node/composition → node/core → 节点、传输及能力包
-Live / Sub2API → 各自的产品组装 → node/composition、TCP
+Live / Sub2API → 各自的产品组装 → node-runtime、TCP
 src/main.rs → apps/standalone-cli
            └─ signal-server → apps/signaling → 信令、短 ID 注册库和可选 Relay
 ```
@@ -24,8 +24,8 @@ src/main.rs → apps/standalone-cli
 | --- | --- |
 | `src/node/core/` | 会话、连接代际、网络恢复及已认证流生命周期。根会话接收已装配的服务，在每条连接上为双方已协商的业务注册有界队列，协调关闭与撤销。各能力的执行代码由对应包持有。 |
 | `src/node/composition/` | `NodeSettings`、持久配置记录、配置到会话策略的投影，以及 TCP 转发连接适配器。`runtime.rs` 供 Agent、Live 与 Sub2API 组装会话及所需的测速、文件服务。 |
-| `src/node/host/` | Agent 进程所有权、IPC 服务端命令、配置 revision、请求去重、事件聚合与关停。 |
 | `apps/agent` | `p2p-agent` 的启动参数、可选导航与宿主装配，以及核心重建和退出协调。 |
+| `apps/agent/src/host/` | Agent 进程所有权、IPC 服务端命令、配置 revision、请求去重、事件聚合与关停。根包保留 `node::host` 导入。 |
 | `crates/veytrane-management` | IPC v1 请求和响应、AgentClient、当前用户路径、Unix socket 和 Windows pipe。`node/api` 给旧 Rust 调用方转出契约和客户端，并提供根二进制版本信息。 |
 | `apps/node-cli` | `p2p-node` 的命令编排，正常请求直接使用管理 IPC 契约，离线操作调用宿主配置入口。`node/adapters` 保留已有 Rust 导入路径。 |
 | `apps/web-management` | `p2p-node web` 管理页和 Agent 默认 `3001` 导航。两个入口经同一 IPC 使用 Agent。内置导航与 Agent 同进程，核心重建时导航继续运行。 |
@@ -35,11 +35,11 @@ src/main.rs → apps/standalone-cli
 | `apps/desktop/src/ui/` | 工作台与二级窗口共用控件、文本输入、视觉主题、品牌。 |
 | `apps/desktop/src/platform/` | 托盘、窗口显隐和平台状态。 |
 | `src/storage/` | 基础存储和独立 CLI 文件存储的兼容入口。 |
-| `src/discovery/`、`nat/`、`net/`、`transport/`、`relay/` | 共用发现客户端、STUN、连接竞速和 Relay 客户端。旧打洞、QUIC 导入指向传输包。服务端模块只在 `signaling-server` 及测试构建启用。 |
+| `src/discovery/`、`nat/`、`net/`、`transport/`、`relay/` | mDNS、STUN、连接竞速和 Relay 客户端。旧信令客户端、打洞、QUIC 导入指向传输包。服务端模块只在 `signaling-server` 及测试构建启用。 |
 | `apps/signaling` | `p2p_file signal-server` 的启动、TLS 监听、设备登记与短 ID SQLite，以及可选 Relay 服务端。 |
 | `apps/standalone-cli` | `p2p_file` 的命令编排、进程退出、交互输出及配置热加载。根二进制入口和公开参数解析路径继续供现有调用方使用。 |
 | `src/protocol/`、`transfer/`、`tunnel/`、`admin/` | 原独立 CLI 仍在使用的协议与执行路径；不能因与 node 同名就删除。 |
-| `crates/veytrane-transport` | 身份、QUIC 握手和端点、有界原始帧、共享信令报文与签名载荷、UDP 地址校验、打洞和 OS 存储原语。 |
+| `crates/veytrane-transport` | 身份、QUIC 握手和端点、有界原始帧、信令客户端、共享信令报文与签名载荷、UDP 地址校验、打洞和 OS 存储原语。 |
 | `crates/veytrane-node` | P2PN 协商、双向流分发、会话授权、设备容量、连接代际及活动许可。 |
 | `crates/veytrane-files` | P2PF 文件协议、文件收发、调度、限速、落盘、回执、任务库及断点恢复。 |
 | `crates/veytrane-file-policy` | 限速值、接收余量及路径批次格式校验，供配置、文件服务和桌面共用。 |
@@ -65,9 +65,11 @@ cargo build --locked --no-default-features --features standalone --bin p2p_file
 
 `node` 保留完整发行组合和独立命令。`agent-full` 构建完整 Agent 和管理 CLI，排除旧 CLI、信令服务端及其 SQLite。`agent-base` 内置测速与 TCP，排除文件执行、GPUI 和 HTTP 管理。`agent-files` 增加文件能力，`agent-web` 增加同进程导航。`desktop-client` 可单独构建桌面。`standalone` 提供旧 CLI，保留原信令启动命令。Live 和 Sub2API 可用各自 feature 构建。
 
+`node-runtime` 提供可复用的节点会话及能力装配所需的配置。Live 和 Sub2API 各自使用它组装 TCP。单独构建两种专用产品时，生产依赖图排除管理 IPC 包、Agent 宿主和文件执行。
+
 裁剪 Agent 初始化时把 `enable_files` 设为 `false`。读取或提交明确启用文件的配置时返回能力错误，保留当前配置文件。文件命令返回 `capability_disabled`，`Tasks` 仍返回空文件列表、空预览、可空队列与测速结果。
 
-`Status.capabilities` 表示当前 Agent 本机已装配的业务。GPUI 根据它控制文件与测速入口，设备连接状态独立读取 peer 快照。IPC 宿主持有可选文件服务句柄，`Tasks` 直接读取文件事实并维持现有分页、脱敏和诊断投影。会话 actor 串行处理依赖实时对端授权和连接代际的发送、暂停、续传与目录操作。
+`Status.capabilities` 表示当前 Agent 本机已装配的业务。GPUI 根据它控制文件与测速入口，设备连接状态独立读取 peer 快照。IPC 宿主持有可选文件和测速句柄，`Tasks` 从各自服务读取事实并维持现有分页、脱敏和诊断投影。会话 actor 串行处理依赖实时对端授权和连接代际的文件与测速操作。
 
 ## 本次审阅后的处置
 
