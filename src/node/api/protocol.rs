@@ -1,7 +1,7 @@
-use crate::node::core::task_model::TaskId;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{io, path::PathBuf};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use veytrane_node::operation_id::TaskId;
 
 pub const API_VERSION: u16 = 1;
 pub const FRAME_LIMIT: usize = 1024 * 1024;

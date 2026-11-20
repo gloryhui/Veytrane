@@ -4453,6 +4453,7 @@ dependencies = [
  "unicode-segmentation",
  "veytrane-files",
  "veytrane-node",
+ "veytrane-speed",
  "veytrane-transport",
  "webpki-roots",
  "windows-sys 0.59.0",
@@ -7125,10 +7126,24 @@ dependencies = [
 name = "veytrane-node"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "postcard",
  "quinn",
+ "rand 0.10.3",
  "serde",
+ "thiserror 2.0.20",
  "tokio",
+ "veytrane-transport",
+]
+
+[[package]]
+name = "veytrane-speed"
+version = "0.1.0"
+dependencies = [
+ "postcard",
+ "rand 0.10.3",
+ "serde",
+ "veytrane-node",
  "veytrane-transport",
 ]
 

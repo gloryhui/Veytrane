@@ -4,12 +4,7 @@ use crate::node::core::activity::{Activity, ExclusivePermit};
 use crate::node::core::authorization::ResourcePolicy;
 use crate::node::core::dispatch::{BiStream, RESET_INVALID, RESET_UNAUTHORIZED};
 use crate::node::core::frame_budget::{BufferedBytes, FrameBudget};
-use crate::node::core::protocol::{
-    MAX_FRAME_BYTES, SpeedArbiter, SpeedControl, SpeedDirection, SpeedLease,
-};
 use crate::node::core::remote_auth::{LiveAuthorization, RemoteAuthorization};
-use crate::node::core::speed_wire::SpeedFrame;
-use crate::node::core::task_model::TaskId;
 use crate::protocol::raw_frame::{read_raw_frame_limited, write_raw_frame_limited};
 use crate::{
     error::{Error, Result},
@@ -24,6 +19,11 @@ use std::{
 use tokio::{
     sync::{Semaphore, mpsc, oneshot, watch},
     task::JoinSet,
+};
+use veytrane_node::{operation_id::TaskId, p2pf::MAX_FRAME_BYTES};
+use veytrane_speed::{
+    control::{SpeedArbiter, SpeedControl, SpeedDirection, SpeedLease},
+    wire::SpeedFrame,
 };
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(5);
 const IDLE: Duration = Duration::from_secs(30);

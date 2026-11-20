@@ -19,8 +19,6 @@ pub const TASK_RECORD_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum TaskModelError {
-    #[error("task ID must be 32 lowercase hexadecimal characters")]
-    InvalidTaskId,
     #[error("peer ID is invalid")]
     InvalidPeerId,
     #[error("manifest identity is invalid")]
@@ -51,52 +49,7 @@ pub enum TaskModelError {
     ClockOutOfRange,
 }
 
-/// Stable, random 128-bit task identifier, rendered as canonical lowercase hex.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct TaskId(String);
-
-impl TaskId {
-    pub fn generate() -> Self {
-        Self(hex::encode(rand::random::<[u8; 16]>()))
-    }
-
-    pub fn parse(value: &str) -> Result<Self, TaskModelError> {
-        Self::try_from(value.to_owned())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl TryFrom<String> for TaskId {
-    type Error = TaskModelError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.len() != 32
-            || !value
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-            || hex::decode(&value).map_or(true, |bytes| bytes.len() != 16)
-        {
-            return Err(TaskModelError::InvalidTaskId);
-        }
-        Ok(Self(value))
-    }
-}
-
-impl From<TaskId> for String {
-    fn from(value: TaskId) -> Self {
-        value.0
-    }
-}
-
-impl std::fmt::Display for TaskId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+pub use veytrane_node::operation_id::TaskId;
 
 /// A validated, stable peer binding persisted as the existing 128-bit NodeId.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]

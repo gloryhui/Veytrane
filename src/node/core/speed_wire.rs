@@ -1,74 +1,15 @@
-//! Narrow speed-control envelope.
-//!
-//! Bytes remain compatible with the P2PF file frame:
-//! `P2PF\x01 | request_id | postcard Message::Speed (tag 7) | SpeedControl`.
-//! Speed execution no longer decodes the full file `Message` enum.
+//! Root compatibility path plus old-P2PF interop tests.
 
-use crate::error::{Error, Result};
-use crate::node::core::protocol::{MAGIC, MAX_FRAME_BYTES, SpeedControl};
-
-const SPEED_MESSAGE_TAG: u32 = 7;
-
-fn invalid(message: &str) -> Error {
-    Error::Protocol(message.into())
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct SpeedFrame {
-    pub(crate) request_id: u64,
-    pub(crate) control: SpeedControl,
-}
-
-impl SpeedFrame {
-    pub(crate) fn encode(&self) -> Result<Vec<u8>> {
-        self.validate()?;
-        let mut bytes = MAGIC.to_vec();
-        bytes.extend_from_slice(&postcard::to_allocvec(&self.request_id)?);
-        bytes.extend_from_slice(&postcard::to_allocvec(&SPEED_MESSAGE_TAG)?);
-        bytes.extend_from_slice(&postcard::to_allocvec(&self.control)?);
-        if bytes.len() > MAX_FRAME_BYTES as usize {
-            return Err(invalid("文件帧超限"));
-        }
-        Ok(bytes)
-    }
-
-    pub(crate) fn decode(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() > MAX_FRAME_BYTES as usize {
-            return Err(invalid("文件帧超限"));
-        }
-        let payload = bytes
-            .strip_prefix(MAGIC)
-            .ok_or_else(|| invalid("对端不支持文件协议"))?;
-        let (request_id, rest): (u64, &[u8]) = postcard::take_from_bytes(payload)?;
-        let (tag, rest): (u32, &[u8]) = postcard::take_from_bytes(rest)?;
-        if tag != SPEED_MESSAGE_TAG {
-            return Err(invalid("非法测速控制消息"));
-        }
-        let (control, trailing): (SpeedControl, &[u8]) = postcard::take_from_bytes(rest)?;
-        if !trailing.is_empty() {
-            return Err(invalid("文件帧含多余字节"));
-        }
-        let frame = Self {
-            request_id,
-            control,
-        };
-        frame.validate()?;
-        Ok(frame)
-    }
-
-    fn validate(&self) -> Result<()> {
-        if self.request_id == 0 {
-            return Err(invalid("文件请求编号非法"));
-        }
-        self.control.validate()
-    }
-}
+pub(crate) use veytrane_speed::wire::SpeedFrame;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::SpeedFrame;
+    use crate::error::Error;
     use crate::identity::NodeId;
-    use crate::node::core::protocol::{Frame, Message, SpeedDirection, SpeedLease};
+    use crate::node::core::protocol::{
+        Frame, MAX_FRAME_BYTES, Message, SpeedControl, SpeedDirection, SpeedLease,
+    };
     use crate::node::core::task_model::TaskId;
 
     fn task() -> TaskId {
@@ -149,7 +90,7 @@ mod tests {
         ));
 
         let mut zero = base.clone();
-        zero[MAGIC.len()] = 0;
+        zero[5] = 0;
         assert!(matches!(SpeedFrame::decode(&zero), Err(Error::Protocol(_))));
 
         let mut trailing = base;

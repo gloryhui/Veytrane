@@ -25,6 +25,7 @@ pub mod settings;
 pub mod snapshot;
 pub(crate) mod space_budget;
 pub(crate) mod speed;
+#[cfg(test)]
 pub(crate) mod speed_wire;
 pub mod task_details;
 pub mod task_events;

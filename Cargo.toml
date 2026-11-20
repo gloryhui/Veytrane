@@ -14,6 +14,7 @@ license = "MIT"
 members = [
     "crates/veytrane-files",
     "crates/veytrane-node",
+    "crates/veytrane-speed",
     "crates/veytrane-transport",
 ]
 default-members = ["."]
@@ -26,6 +27,7 @@ sub2api-gateway = ["node"]
 live = ["node", "dep:reqwest"]
 node = [
     "dep:veytrane-node",
+    "dep:veytrane-speed",
     "veytrane-files/safe-storage",
     "dep:argon2",
     "dep:hmac",
@@ -52,6 +54,7 @@ gui = [
 [dependencies]
 veytrane-files = { path = "crates/veytrane-files" }
 veytrane-node = { path = "crates/veytrane-node", optional = true }
+veytrane-speed = { path = "crates/veytrane-speed", optional = true }
 veytrane-transport = { path = "crates/veytrane-transport" }
 socket2 = "0.6.5"
 rusqlite = { version = "=0.37.0", features = ["bundled"] }
