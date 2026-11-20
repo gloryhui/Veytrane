@@ -29,6 +29,7 @@ node = [
     "dep:veytrane-node",
     "veytrane-speed/node-runtime",
     "veytrane-files/safe-storage",
+    "veytrane-files/node-tasks",
     "veytrane-transport/private-storage",
     "dep:argon2",
     "dep:hmac",

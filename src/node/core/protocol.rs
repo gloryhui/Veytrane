@@ -12,6 +12,7 @@ use crate::protocol::manifest::{ChunkHash, FileManifest};
 
 use crate::node::core::task_model::TaskId;
 
+pub use veytrane_files::task_model::MAX_CHUNKS;
 pub use veytrane_node::capability::{
     CAP_AUTO_RESUME, CAP_DIRECTORY_TRANSFER, CAP_FILE_FLOW, CAP_FILE_TRANSFER,
     CAP_INCREMENTAL_DIRECTORY, CAP_PAUSE_RESUME, CAP_RELATIVE_ENTRIES, CAP_REMOTE_AUTH,
@@ -20,7 +21,6 @@ pub use veytrane_node::capability::{
 };
 pub(crate) use veytrane_node::p2pf::MAGIC;
 pub use veytrane_node::p2pf::MAX_FRAME_BYTES;
-pub const MAX_CHUNKS: usize = 65_536;
 pub const MAX_TASKS_PER_PEER: usize = 128;
 
 fn invalid(message: &str) -> Error {

@@ -6,5 +6,7 @@ pub mod manifest;
 pub mod relative_path;
 #[cfg(feature = "safe-storage")]
 pub mod secure_fs;
+#[cfg(feature = "node-tasks")]
+pub mod task_model;
 
 use veytrane_transport::error;
