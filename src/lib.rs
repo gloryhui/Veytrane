@@ -27,7 +27,7 @@ pub mod protocol;
 pub mod relay;
 #[cfg(feature = "standalone")]
 pub mod speedtest;
-#[cfg(any(feature = "standalone", feature = "agent-base"))]
+#[cfg(any(feature = "standalone", feature = "node-runtime"))]
 pub mod storage;
 #[cfg(feature = "standalone")]
 pub mod transfer;
@@ -35,7 +35,7 @@ pub mod transport;
 #[cfg(feature = "standalone")]
 pub mod tunnel;
 
-#[cfg(feature = "agent-base")]
+#[cfg(feature = "node-runtime")]
 pub mod node;
 
 #[cfg(feature = "desktop-client")]

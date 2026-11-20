@@ -105,7 +105,7 @@ impl PunchSocketHandle {
     pub fn register_probe(&self, token: &PunchToken) -> Result<PunchProbeReceiver> {
         let local_addr = self.router.local_addr;
         let result = self.router.register(token, None, 0);
-        #[cfg(feature = "agent-base")]
+        #[cfg(feature = "node-runtime")]
         crate::transport::diagnostic::punch_watch_register(
             local_addr,
             token,
@@ -125,7 +125,7 @@ impl PunchSocketHandle {
     ) -> Result<PunchProbeReceiver> {
         let local_addr = self.router.local_addr;
         let result = self.router.register(token, Some(peer), generation);
-        #[cfg(feature = "agent-base")]
+        #[cfg(feature = "node-runtime")]
         crate::transport::diagnostic::punch_watch_register(
             local_addr,
             token,
@@ -156,7 +156,7 @@ impl PunchSocketHandle {
                 io::ErrorKind::InvalidInput,
                 "punch address family mismatch",
             );
-            #[cfg(feature = "agent-base")]
+            #[cfg(feature = "node-runtime")]
             crate::transport::diagnostic::punch_send_error(
                 Some(local),
                 token,
@@ -169,7 +169,7 @@ impl PunchSocketHandle {
         let sent = match self.io.send_to(&packet, destination).await {
             Ok(sent) => sent,
             Err(error) => {
-                #[cfg(feature = "agent-base")]
+                #[cfg(feature = "node-runtime")]
                 crate::transport::diagnostic::punch_send_error(
                     Some(local),
                     token,
@@ -184,7 +184,7 @@ impl PunchSocketHandle {
                 io::ErrorKind::WriteZero,
                 "UDP punch probe was only partially sent",
             );
-            #[cfg(feature = "agent-base")]
+            #[cfg(feature = "node-runtime")]
             crate::transport::diagnostic::punch_send_error(
                 Some(local),
                 token,
@@ -193,7 +193,7 @@ impl PunchSocketHandle {
             );
             return Err(error);
         }
-        #[cfg(feature = "agent-base")]
+        #[cfg(feature = "node-runtime")]
         crate::transport::diagnostic::punch_send_ok(Some(local), token, destination);
         Ok(())
     }
@@ -291,7 +291,7 @@ impl PunchRouter {
             // The packet has the exact punch shape, so drop it if internal routing is
             // unavailable. Passing it to QUIC must never create punch progress.
             Err(_) => {
-                #[cfg(feature = "agent-base")]
+                #[cfg(feature = "node-runtime")]
                 crate::transport::diagnostic::punch_recv(
                     self.local_addr,
                     &PunchToken::from_bytes(token),
@@ -306,7 +306,7 @@ impl PunchRouter {
         };
         let Some(route) = routes.by_token.get(&token) else {
             drop(routes);
-            #[cfg(feature = "agent-base")]
+            #[cfg(feature = "node-runtime")]
             crate::transport::diagnostic::punch_recv(
                 self.local_addr,
                 &PunchToken::from_bytes(token),
@@ -321,7 +321,7 @@ impl PunchRouter {
         let route_id = route.id;
         let expected_peer = route.expected_peer;
         let generation = route.generation;
-        #[cfg(feature = "agent-base")]
+        #[cfg(feature = "node-runtime")]
         crate::transport::diagnostic::punch_recv(
             self.local_addr,
             &PunchToken::from_bytes(token),
@@ -339,7 +339,7 @@ impl PunchRouter {
             if route.sources.len() >= MAX_PUNCH_SOURCES_PER_ROUTE
                 || routes.source_count >= MAX_AUTHORIZED_PUNCH_SOURCES
             {
-                #[cfg(feature = "agent-base")]
+                #[cfg(feature = "node-runtime")]
                 crate::transport::diagnostic::punch_recv(
                     self.local_addr,
                     &PunchToken::from_bytes(token),
@@ -387,7 +387,7 @@ impl PunchRouter {
         // unregistering a stale route can make a later incoming QUIC connection
         // unambiguous instead of permanently consuming the authorization here.
         if active_authorizations.next().is_some() {
-            #[cfg(feature = "agent-base")]
+            #[cfg(feature = "node-runtime")]
             crate::transport::diagnostic::punch_claim(
                 self.local_addr,
                 source,
@@ -413,7 +413,7 @@ impl PunchRouter {
         for route in routes.by_token.values_mut() {
             route.sources.remove(&source);
         }
-        #[cfg(feature = "agent-base")]
+        #[cfg(feature = "node-runtime")]
         crate::transport::diagnostic::punch_claim(
             self.local_addr,
             source,
@@ -476,7 +476,7 @@ impl PunchProbeReceiver {
 impl Drop for PunchProbeReceiver {
     fn drop(&mut self) {
         self.router.unregister(&self.token, self.id);
-        #[cfg(feature = "agent-base")]
+        #[cfg(feature = "node-runtime")]
         crate::transport::diagnostic::punch_watch_drop(
             self.local_addr,
             &PunchToken::from_bytes(self.token),

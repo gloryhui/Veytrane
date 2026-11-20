@@ -37,6 +37,10 @@ WORKSPACE_DEPENDENCIES = {
     },
 }
 PROFILE_EXCLUSIONS = {
+    "node-runtime": {
+        "veytrane-management", "veytrane-files", "veytrane-web-management",
+        "axum", "dirs", "gpui", "rusqlite",
+    },
     "agent-base": {"veytrane-files", "veytrane-web-management", "axum", "gpui", "rusqlite"},
     "agent-base,agent-web": {"veytrane-files", "gpui", "rusqlite"},
     "agent-full": {"gpui", "rusqlite"},
@@ -44,9 +48,12 @@ PROFILE_EXCLUSIONS = {
         "veytrane-files", "veytrane-speed", "veytrane-tcp", "veytrane-web-management",
         "axum", "rusqlite",
     },
-    "live": {"veytrane-files", "veytrane-web-management", "gpui", "rusqlite"},
+    "live": {
+        "veytrane-management", "veytrane-files", "veytrane-web-management", "gpui", "rusqlite"
+    },
     "sub2api-client,sub2api-gateway": {
-        "veytrane-files", "veytrane-web-management", "axum", "gpui", "rusqlite"
+        "veytrane-management", "veytrane-files", "veytrane-web-management",
+        "axum", "gpui", "rusqlite"
     },
     "standalone": {"veytrane-node", "veytrane-management", "veytrane-web-management", "gpui"},
 }

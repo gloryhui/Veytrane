@@ -87,7 +87,7 @@ pub const OUTBOX_CAPACITY: usize = 64;
 #[path = "../../apps/signaling/src/server.rs"]
 mod server;
 
-#[cfg(all(test, feature = "agent-base"))]
+#[cfg(all(test, feature = "node-runtime"))]
 pub(crate) use server::run_signal_server_on_borrowed;
 #[cfg(any(feature = "signaling-server", test))]
 pub use server::{

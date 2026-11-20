@@ -27,24 +27,23 @@ resolver = "3"
 
 [features]
 default = ["node"]
-sub2api-client = ["sub2api-runtime"]
-sub2api-gateway = ["sub2api-runtime"]
-sub2api-runtime = ["agent-base"]
-live = ["agent-base", "dep:axum", "dep:reqwest"]
-node = ["agent-full", "standalone", "sub2api-runtime"]
-agent-full = ["agent-base", "agent-files", "agent-web", "node-cli"]
-agent-base = [
+node-runtime = [
     "dep:veytrane-file-policy",
-    "dep:veytrane-management",
     "dep:veytrane-node",
     "veytrane-node/remote-auth",
     "veytrane-speed/node-runtime",
     "veytrane-tcp/node-runtime",
     "veytrane-transport/private-storage",
     "dep:sha2",
-    "dep:dirs",
     "dep:windows-sys",
 ]
+sub2api-client = ["sub2api-runtime"]
+sub2api-gateway = ["sub2api-runtime"]
+sub2api-runtime = ["node-runtime", "dep:dirs"]
+live = ["node-runtime", "dep:axum", "dep:reqwest", "dep:dirs"]
+node = ["agent-full", "standalone", "sub2api-runtime"]
+agent-full = ["agent-base", "agent-files", "agent-web", "node-cli"]
+agent-base = ["node-runtime", "dep:veytrane-management"]
 agent-files = ["agent-base", "dep:veytrane-files", "veytrane-files/node-runtime"]
 agent-web = ["agent-base", "dep:veytrane-web-management"]
 node-cli = ["agent-base", "agent-web"]

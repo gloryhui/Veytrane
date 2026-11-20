@@ -24,7 +24,7 @@ use crate::net::race::{ConnectionGuard, PreparedTransport};
 use crate::net::{
     AddressFamily, DesktopNetwork, DesktopNetworkConfig, NetworkPath, prepare_desktop_network,
 };
-#[cfg(feature = "agent-base")]
+#[cfg(feature = "node-runtime")]
 use crate::transport::diagnostic as udp_diag;
 #[cfg(test)]
 use crate::transport::handshake::handshake_initiator;

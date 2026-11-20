@@ -1,6 +1,6 @@
 //! 数据通道：基于 QUIC 的加密多路复用连接。
 
-#[cfg(feature = "agent-base")]
+#[cfg(feature = "node-runtime")]
 pub mod diagnostic;
 pub mod handshake;
 pub mod identity_wire;
