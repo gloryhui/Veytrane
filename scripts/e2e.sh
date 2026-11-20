@@ -32,11 +32,30 @@ DIRECT_OPTIONS=(--ip-family "$NATIVE_FAMILY" --stun 127.0.0.1:9)
 if [[ "$NATIVE_FAMILY" == "ipv6-only" ]]; then
     DIRECT_OPTIONS=(--ip-family ipv6-only --stun '[::1]:9')
 fi
+read -r SIGNAL_PORT TARGET_PORT FORWARD_PORT SECOND_FORWARD_PORT RELAY_PORT \
+    HOME_PORT TUNNEL_PORT SPEED_PORT PUSH_PORT RETRY_PORT \
+    HOME_BLACKHOLE TUNNEL_BLACKHOLE SPEED_BLACKHOLE PUSH_BLACKHOLE RETRY_BLACKHOLE \
+    <<< "$(python3 - "$NATIVE_FAMILY" <<'PY'
+import contextlib, socket, sys
+with contextlib.ExitStack() as stack:
+    def reserve(family, kind):
+        sock = stack.enter_context(socket.socket(family, kind))
+        sock.bind(("::1" if family == socket.AF_INET6 else "127.0.0.1", 0))
+        return sock.getsockname()[1]
+    family = socket.AF_INET6 if sys.argv[1] == "ipv6-only" else socket.AF_INET
+    print(*(reserve(socket.AF_INET, socket.SOCK_STREAM) for _ in range(4)),
+          reserve(socket.AF_INET, socket.SOCK_DGRAM),
+          *(reserve(family, socket.SOCK_DGRAM) for _ in range(10)))
+PY
+)"
+SIGNAL_ADDR="127.0.0.1:$SIGNAL_PORT"
+TARGET_ADDR="127.0.0.1:$TARGET_PORT"
+RELAY_ADDR="127.0.0.1:$RELAY_PORT"
 if [[ "$RELAY_MODE" == true ]]; then
-    DIRECT_OPTIONS+=(--relay 127.0.0.1:7001 --advertise-only)
+    DIRECT_OPTIONS+=(--relay "$RELAY_ADDR" --advertise-only)
 fi
 advertise_address() {
-    if [[ "$RELAY_MODE" == true ]]; then set -- "$(( $1 + 1000 ))"; fi
+    if [[ "$RELAY_MODE" == true ]]; then set -- "$2"; fi
     if [[ "$NATIVE_FAMILY" == "ipv6-only" ]]; then printf '[::1]:%s' "$1"; else printf '127.0.0.1:%s' "$1"; fi
 }
 
@@ -78,12 +97,12 @@ wait_for() {
 step "准备：$NATIVE_FAMILY 原生 P2P，IPv4 信令和 TCP 目标"
 # 目标服务：一个纯回显 TCP 服务，模拟「家里那台机器上的 ssh / web」
 cat > "$WORK/target.py" <<'PY'
-import socket, threading
+import socket, sys, threading
 srv = socket.socket()
 srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-srv.bind(("127.0.0.1", 9999))
+srv.bind(("127.0.0.1", int(sys.argv[1])))
 srv.listen(8)
-print("回显服务已监听 127.0.0.1:9999", flush=True)
+print("回显服务已监听", flush=True)
 def handle(c):
     with c:
         while True:
@@ -95,20 +114,23 @@ while True:
     c, _ = srv.accept()
     threading.Thread(target=handle, args=(c,), daemon=True).start()
 PY
-python3 "$WORK/target.py" > "$WORK/target.log" 2>&1 &
+python3 "$WORK/target.py" "$TARGET_PORT" > "$WORK/target.log" 2>&1 &
 PIDS+=($!)
-pass "目标服务 127.0.0.1:9999"
+wait_for "$WORK/target.log" '回显服务已监听' 5 || fail "目标服务无法监听 $TARGET_ADDR"
+pass "目标服务 $TARGET_ADDR"
 
-RELAY_SERVER_OPTIONS=()
+SIGNAL_OPTIONS=(--listen "$SIGNAL_ADDR" --short-id-db "$WORK/device-ids.sqlite3")
 if [[ "$RELAY_MODE" == true ]]; then
-    RELAY_SERVER_OPTIONS=(--relay-listen 127.0.0.1:7001)
+    SIGNAL_OPTIONS+=(--relay-listen "$RELAY_ADDR")
     # Held UDP ports deliberately never respond; candidates differ from real Quinn ports.
-    python3 -u - <<'PYBH' > "$WORK/blackholes.log" 2>&1 &
-import socket, time
+    python3 -u - "$NATIVE_FAMILY" "$HOME_BLACKHOLE" "$TUNNEL_BLACKHOLE" \
+        "$SPEED_BLACKHOLE" "$PUSH_BLACKHOLE" "$RETRY_BLACKHOLE" <<'PYBH' > "$WORK/blackholes.log" 2>&1 &
+import socket, sys, time
 sockets = []
-for port in (10101, 10102, 10103, 10105, 10106):
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.bind(("127.0.0.1", port))
+family = socket.AF_INET6 if sys.argv[1] == "ipv6-only" else socket.AF_INET
+for port in map(int, sys.argv[2:]):
+    s = socket.socket(family, socket.SOCK_DGRAM)
+    s.bind(("::1" if family == socket.AF_INET6 else "127.0.0.1", port))
     sockets.append(s)
 print("blackholes ready", flush=True)
 while True:
@@ -117,10 +139,10 @@ PYBH
     PIDS+=($!)
     wait_for "$WORK/blackholes.log" 'blackholes ready' 5 || fail 'blackhole fixture failed'
 fi
-"$BIN" --log warn signal-server "${RELAY_SERVER_OPTIONS[@]}" --listen 127.0.0.1:7000 --short-id-db "$WORK/device-ids.sqlite3" > "$WORK/signal.log" 2>&1 &
+"$BIN" --log warn signal-server "${SIGNAL_OPTIONS[@]}" > "$WORK/signal.log" 2>&1 &
 PIDS+=($!)
-sleep 1
-pass "信令服务器 127.0.0.1:7000"
+wait_for "$WORK/signal.log" '信令服务器监听' 5 || fail "信令服务器无法监听 $SIGNAL_ADDR"
+pass "信令服务器 $SIGNAL_ADDR"
 
 # 两边各生成一个身份，相当于两台机器各有一把自己的私钥。
 "$BIN" --key-file "$WORK/home.key" id > "$WORK/home.id" 2>/dev/null
@@ -132,24 +154,24 @@ pass "两个身份：家=$HOME_ID 本机=$LAPTOP_ID"
 step "1. 「家里那台」先启动并常驻等待（此时对端还没上线）"
 mkdir -p "$WORK/recv"
 RUST_LOG=info "$BIN" --key-file "$WORK/home.key" --log info serve \
-    --signal 127.0.0.1:7000 "${DIRECT_OPTIONS[@]}" \
+    --signal "$SIGNAL_ADDR" "${DIRECT_OPTIONS[@]}" \
     --allow "$LAPTOP_ID" \
-    --forward 127.0.0.1:9999 \
+    --forward "$TARGET_ADDR" \
     --recv-dir "$WORK/recv" \
-    --port 9101 --advertise "$(advertise_address 9101)" \
+    --port "$HOME_PORT" --advertise "$(advertise_address "$HOME_PORT" "$HOME_BLACKHOLE")" \
     --re-punch-after "$RE_PUNCH" > "$WORK/serve.log" 2>&1 &
 PIDS+=($!)
 
 wait_for "$WORK/serve.log" "常驻等待中" 40 || fail "serve 没能进入常驻等待"
 pass "serve 已常驻等待对端上线（没有超时退出）"
 
-step "2. 「本机」发起隧道：本地 2222 → 对端 9999"
+step "2. 「本机」发起隧道：本地 $FORWARD_PORT → 对端 $TARGET_PORT"
 RUST_LOG=info "$BIN" --key-file "$WORK/laptop.key" --log info tunnel \
-    --signal 127.0.0.1:7000 "${DIRECT_OPTIONS[@]}" \
+    --signal "$SIGNAL_ADDR" "${DIRECT_OPTIONS[@]}" \
     --peer "$HOME_ID" \
-    --listen 127.0.0.1:2222 \
-    --to 127.0.0.1:9999 \
-    --port 9102 --advertise "$(advertise_address 9102)" > "$WORK/tunnel.log" 2>&1 &
+    --listen "127.0.0.1:$FORWARD_PORT" \
+    --to "$TARGET_ADDR" \
+    --port "$TUNNEL_PORT" --advertise "$(advertise_address "$TUNNEL_PORT" "$TUNNEL_BLACKHOLE")" > "$WORK/tunnel.log" 2>&1 &
 TUNNEL_PID=$!
 PIDS+=($TUNNEL_PID)
 
@@ -162,10 +184,10 @@ else
     fail "既没有打洞成功，也没有候选直连建立证据"
 fi
 
-python3 - <<'PY' || fail "隧道转发数据不正确"
+python3 - "$FORWARD_PORT" <<'PY' || fail "隧道转发数据不正确"
 import socket, os, sys, concurrent.futures
-def roundtrip(msg, port=2222):
-    s = socket.create_connection(("127.0.0.1", port), timeout=30)
+def roundtrip(msg):
+    s = socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=30)
     s.sendall(msg)
     buf, got = [], 0
     while got < len(msg):
@@ -199,9 +221,9 @@ fi
 
 step "2.5 让隧道跨过重新打洞的宽限期（${RE_PUNCH}s），确认不会被误拆"
 sleep $((RE_PUNCH + 8))
-python3 - <<'PY' || fail "隧道在宽限期后被误拆了"
-import socket
-s = socket.create_connection(("127.0.0.1", 2222), timeout=30)
+python3 - "$FORWARD_PORT" <<'PY' || fail "隧道在宽限期后被误拆了"
+import socket, sys
+s = socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=30)
 s.sendall(b"still-alive")
 assert s.recv(100) == b"still-alive", "跨过宽限期后隧道不能用了"
 s.close()
@@ -220,12 +242,12 @@ PIDS=("${REMAINING_PIDS[@]}")
 
 step "2.75 停止旧 CLI 隧道并释放身份后，纯网络测速（不读写文件、不经过文件协议）"
 RUST_LOG=info "$BIN" --key-file "$WORK/laptop.key" --log info speedtest \
-    --signal 127.0.0.1:7000 "${DIRECT_OPTIONS[@]}" \
+    --signal "$SIGNAL_ADDR" "${DIRECT_OPTIONS[@]}" \
     --peer "$HOME_ID" \
     --duration 1 \
     --direction both \
     --block-size 65536 \
-    --port 9103 --advertise "$(advertise_address 9103)" > "$WORK/speedtest.log" 2>&1 \
+    --port "$SPEED_PORT" --advertise "$(advertise_address "$SPEED_PORT" "$SPEED_BLACKHOLE")" > "$WORK/speedtest.log" 2>&1 \
     || fail "speedtest 没有完成"
 grep -Eq '^bytes:[[:space:]]+[1-9][0-9]*' "$WORK/speedtest.log" \
     || fail "speedtest 没有报告正数 bytes"
@@ -237,17 +259,21 @@ pass "speedtest 成功，bytes > 0，接收目录保持为空"
 step "3. 同一旧 CLI 身份顺序直推文件（文件与 TCP 并行由新 Agent 流程验证）"
 head -c 2000000 /dev/urandom > "$WORK/big.bin"
 RUST_LOG=info "$BIN" --key-file "$WORK/laptop.key" --log info push \
-    --signal 127.0.0.1:7000 "${DIRECT_OPTIONS[@]}" \
+    --signal "$SIGNAL_ADDR" "${DIRECT_OPTIONS[@]}" \
     --peer "$HOME_ID" \
-    "$WORK/big.bin" --port 9105 --advertise "$(advertise_address 9105)" > "$WORK/push.log" 2>&1
+    "$WORK/big.bin" --port "$PUSH_PORT" --advertise "$(advertise_address "$PUSH_PORT" "$PUSH_BLACKHOLE")" > "$WORK/push.log" 2>&1 \
+    || fail "直推命令失败"
 
 wait_for "$WORK/push.log" "发送完成" 30 || fail "推送没有完成"
 RECEIVED="$WORK/recv/big.bin"
 [[ -f "$RECEIVED" ]] || fail "对端没有落盘"
-SRC_SUM="$(sha256sum "$WORK/big.bin" | cut -d' ' -f1)"
-DST_SUM="$(sha256sum "$RECEIVED" | cut -d' ' -f1)"
-[[ "$SRC_SUM" == "$DST_SUM" ]] || fail "校验和不一致：$SRC_SUM vs $DST_SUM"
-pass "文件直推正确，sha256 一致（$(stat -c%s "$RECEIVED") 字节）"
+python3 - "$WORK/big.bin" "$RECEIVED" <<'PY' || fail "校验和不一致"
+import hashlib, sys
+from pathlib import Path
+source, received = map(Path, sys.argv[1:])
+assert hashlib.sha256(source.read_bytes()).digest() == hashlib.sha256(received.read_bytes()).digest()
+print(f"  文件直推正确，sha256 一致（{received.stat().st_size} 字节）")
+PY
 grep -qa "换用了后面的候选地址" "$WORK/push.log" \
     && pass "打洞未确认时自动回退到其他候选地址（这条兜底很关键）"
 
@@ -256,17 +282,17 @@ wait_for "$WORK/serve.log" "重新打洞" 90 || fail "serve 没有在空闲后�
 pass "serve 空闲后已重新进入等待"
 
 RUST_LOG=info "$BIN" --key-file "$WORK/laptop.key" --log info tunnel \
-    --signal 127.0.0.1:7000 "${DIRECT_OPTIONS[@]}" \
+    --signal "$SIGNAL_ADDR" "${DIRECT_OPTIONS[@]}" \
     --peer "$HOME_ID" \
-    --listen 127.0.0.1:2223 \
-    --to 127.0.0.1:9999 \
-    --port 9106 --advertise "$(advertise_address 9106)" > "$WORK/tunnel2.log" 2>&1 &
+    --listen "127.0.0.1:$SECOND_FORWARD_PORT" \
+    --to "$TARGET_ADDR" \
+    --port "$RETRY_PORT" --advertise "$(advertise_address "$RETRY_PORT" "$RETRY_BLACKHOLE")" > "$WORK/tunnel2.log" 2>&1 &
 PIDS+=($!)
 wait_for "$WORK/tunnel2.log" "本地转发已就绪" 60 || fail "第二次本地隧道未能监听"
 
-python3 - <<'PY' || fail "第二次隧道转发不正确"
-import socket
-s = socket.create_connection(("127.0.0.1", 2223), timeout=30)
+python3 - "$SECOND_FORWARD_PORT" <<'PY' || fail "第二次隧道转发不正确"
+import socket, sys
+s = socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=30)
 s.sendall(b"round2")
 assert s.recv(100) == b"round2"
 s.close()
