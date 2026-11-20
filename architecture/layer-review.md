@@ -38,4 +38,6 @@
 
 ## 查看与重建
 
-打开同目录的 `layer-review.html`，在图表工具栏选择亮色或暗色，使用 PNG 按钮保存当前配色的完整图。`layer-review.png` 是已导出的暗色版。修改 `layer-review.spec.json` 后，在安装了 arch-diagram、Node.js 和 Chrome 的开发机上，从仓库根目录运行 `node architecture/build-layer-review.mjs` 可重新生成两项产物。
+打开同目录的 `layer-review.html`。在图表工具栏通过「主题样式」选择暗夜终端、晒图蓝图、牛皮纸制图、白板手绘、粗野撞色、荧光终端、柔光卡片或等距沙盘。使用「亮色」「暗色」独立调整配色，再点「导出 PNG」保存当前样式和配色的完整图。
+
+`layer-review.png` 是已导出的暗夜终端暗色版。修改 `layer-review.spec.json` 后，在安装了 arch-diagram、Node.js 和 Chrome 的开发机上，从仓库根目录运行 `node architecture/build-layer-review.mjs` 可重新生成交互页和 PNG。

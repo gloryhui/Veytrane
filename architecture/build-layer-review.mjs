@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Build one native terminal diagram, then replace only its PNG action with offline snapshots.
-// Appearance switching stays in the skill's own toolbar; the light snapshot is exported from
-// a copy whose data-appearance is changed without rebuilding the terminal theme.
+// Build eight native theme documents and one offline viewer.
+// Each selected theme/appearance is rendered by a fresh iframe srcdoc; the iframe's native
+// toolbar is hidden, and this page provides the only theme/appearance/download controls.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, rmdirSync, writeFileSync } from 'node:fs';
@@ -13,90 +13,158 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SPEC = join(HERE, 'layer-review.spec.json');
 const OUT = join(HERE, 'layer-review.html');
 const PNG_OUT = join(HERE, 'layer-review.png');
+const CLIENT = readFileSync(join(HERE, 'layer-review-client.js'), 'utf8');
+const SHELL = readFileSync(join(HERE, 'layer-review-shell.css'), 'utf8');
 const SKILL = [
   join(homedir(), '.config/magpie/library/skills/arch-diagram'),
   join(homedir(), '.codex/skills/arch-diagram'),
 ].find(dir => existsSync(join(dir, 'scripts/build.mjs')));
 if (!SKILL) throw new Error('arch-diagram skill not found');
 
+const THEMES = [
+  { id: 'terminal', label: '终端' },
+  { id: 'blueprint', label: '蓝图' },
+  { id: 'drafting', label: '制图' },
+  { id: 'whiteboard', label: '白板' },
+  { id: 'brutalism', label: '粗野' },
+  { id: 'crt', label: 'CRT' },
+  { id: 'saas', label: '柔光' },
+  { id: 'isometric', label: '等距' },
+];
+
 const run = (script, args) => execFileSync(process.execPath, [script, ...args], { stdio: 'inherit' });
+const esc = value => String(value).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 const json = value => JSON.stringify(value).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 const dataUri = path => 'data:image/png;base64,' + readFileSync(path).toString('base64');
+const appearanceOf = html => {
+  const match = /<html\b[^>]*\bdata-appearance="(dark|light)"/i.exec(html);
+  if (!match) throw new Error('built theme has no data-appearance');
+  return match[1].toLowerCase();
+};
+const withAppearance = (html, appearance) => {
+  const pattern = /(<html\b[^>]*\bdata-appearance=")(?:dark|light)(")/i;
+  if (!pattern.test(html)) throw new Error('cannot replace data-appearance');
+  return html.replace(pattern, '$1' + appearance + '$2');
+};
 
-const STYLE = `<style>
-#diagram-controls a.ctl-png{appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:32px;height:30px;padding:0 9px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--text);font:inherit;font-weight:600;cursor:pointer;text-decoration:none}
-#diagram-controls a.ctl-png:hover{background:color-mix(in srgb,var(--text) 9%,transparent)}
-#diagram-controls a.ctl-png:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
-</style>`;
-
-const CLIENT = `<script>
+const BRIDGE = `<script>
 (function () {
-  var button = document.querySelector('#diagram-controls .ctl-png');
-  // ?check / ?loop hide the native controls; leave the official check path untouched.
-  if (!button) return;
-
-  var data = JSON.parse(document.getElementById('layer-review-png').textContent);
-  if (!data.dark || !data.light) return;
-
-  var link = document.createElement('a');
-  link.className = 'ctl-png';
-  link.innerHTML = button.innerHTML;
-  link.title = button.title || '导出 PNG';
-  link.setAttribute('aria-label', link.title);
-  button.replaceWith(link);
-
-  function sync() {
-    var mode = document.documentElement.dataset.appearance === 'light' ? 'light' : 'dark';
-    link.href = data[mode];
-    link.download = 'layer-review-' + mode + '.png';
+  function send() {
+    var fit = document.getElementById('fit');
+    if (!fit) return;
+    var style = getComputedStyle(document.documentElement);
+    function value(name) { return style.getPropertyValue('--' + name).trim(); }
+    parent.postMessage({
+      type: 'lr-state',
+      theme: document.documentElement.dataset.theme,
+      appearance: document.documentElement.dataset.appearance,
+      height: Math.ceil(fit.getBoundingClientRect().height + 48),
+      palette: {
+        bg: value('bg'),
+        panel: value('panel'),
+        text: value('text'),
+        head: value('head'),
+        dim: value('dim'),
+        faint: value('faint'),
+        blue: value('blue')
+      }
+    }, '*');
   }
-
-  new MutationObserver(sync).observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-appearance']
-  });
-  sync();
+  addEventListener('load', send);
+  addEventListener('resize', send);
+  if (window.ResizeObserver) {
+    var fit = document.getElementById('fit');
+    if (fit) new ResizeObserver(send).observe(fit);
+  }
+  setTimeout(send, 80);
+  setTimeout(send, 500);
 })();
 </script>`;
 
-function addOfflinePng(html, png) {
-  const tail = `${STYLE}
-<script type="application/json" id="layer-review-png">${json(png)}</script>
-${CLIENT}
-`;
-  const out = html.replace(/<\/body>\s*<\/html>\s*$/i, tail + '</body></html>');
-  if (out === html) throw new Error('built HTML has no closing body');
-  return out;
+function prepareDoc(html) {
+  const withStyle = html.replace('</head>', '<style>#diagram-controls{display:none!important}</style></head>');
+  if (withStyle === html) throw new Error('could not hide the iframe toolbar');
+  const withBridge = withStyle.replace(/<\/body>\s*<\/html>\s*$/i, BRIDGE + '\n</body></html>');
+  if (withBridge === withStyle) throw new Error('could not attach the iframe bridge');
+  return withBridge;
+}
+
+function finalPage(spec, title, docs, png) {
+  const options = THEMES.map(theme => `<option value="${theme.id}">${theme.label}</option>`).join('');
+  const labels = Object.fromEntries(THEMES.map(theme => [theme.id, theme.label]));
+  return `<!doctype html>
+<html lang="${esc(spec.lang || 'zh-CN')}" data-theme="terminal" data-appearance="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>${esc(title)}</title>
+<style>${SHELL}</style>
+</head>
+<body>
+<h1 class="sr-only">${esc(title)}</h1>
+<header class="toolbar">
+  <div class="toolbar-inner">
+    <div class="brand"><i aria-hidden="true"></i><span>${esc(title)}</span></div>
+    <div class="controls">
+      <label class="field" for="theme-select"><span>主题样式</span><select id="theme-select">${options}</select></label>
+      <div class="appearance" role="group" aria-label="亮暗配色">
+        <button id="appearance-light" type="button" aria-pressed="false">亮色</button>
+        <button id="appearance-dark" type="button" aria-pressed="true">暗色</button>
+      </div>
+      <a id="download" class="download" href="#" download="layer-review-terminal-dark.png" title="导出当前主题与亮暗配色的 2× PNG"><span aria-hidden="true">↓</span>导出 PNG</a>
+    </div>
+    <p id="status" class="status" role="status" aria-live="polite">终端 · 暗色</p>
+  </div>
+</header>
+<main class="viewer"><iframe id="stage" title="架构图预览" sandbox="allow-scripts" scrolling="no"></iframe></main>
+<noscript>此页面需要 JavaScript 才能渲染图表。</noscript>
+<script type="application/json" id="layer-review-data">${json({ docs, png, labels })}</script>
+<script>${CLIENT}</script>
+</body>
+</html>`;
 }
 
 function main() {
   if (!existsSync(SPEC)) throw new Error(`spec not found: ${SPEC}`);
-
+  const spec = JSON.parse(readFileSync(SPEC, 'utf8'));
+  const title = spec.pageTitle || String(spec.title || 'Layer review').replace(/\{\w+:([^{}]*)\}/g, '$1');
   const tmp = mkdtempSync(join(tmpdir(), 'layer-review-'));
-  const base = join(tmp, 'terminal.html');
-  const light = join(tmp, 'terminal-light.html');
-  const darkPng = join(tmp, 'dark.png');
-  const lightPng = join(tmp, 'light.png');
-  const files = [base, light, darkPng, lightPng];
+  const files = [];
+  const docs = {};
+  const png = {};
 
   try {
-    run(join(SKILL, 'scripts/build.mjs'), [SPEC, base, '--theme', 'terminal']);
+    for (const theme of THEMES) {
+      const base = join(tmp, `${theme.id}.html`);
+      files.push(base);
+      run(join(SKILL, 'scripts/build.mjs'), [SPEC, base, '--theme', theme.id]);
 
-    const baseHtml = readFileSync(base, 'utf8');
-    const lightHtml = baseHtml.replace(/(<html\b[^>]*\bdata-appearance=")dark(")/i, '$1light$2');
-    if (lightHtml === baseHtml) throw new Error('could not set data-appearance="light"');
-    writeFileSync(light, lightHtml);
+      const html = readFileSync(base, 'utf8');
+      const native = appearanceOf(html);
+      const other = native === 'dark' ? 'light' : 'dark';
+      const variant = join(tmp, `${theme.id}-${other}.html`);
+      const nativePng = join(tmp, `${theme.id}-${native}.png`);
+      const otherPng = join(tmp, `${theme.id}-${other}.png`);
+      files.push(variant, nativePng, otherPng);
 
-    run(join(SKILL, 'scripts/export.mjs'), [base, darkPng, '--scale', '2']);
-    run(join(SKILL, 'scripts/export.mjs'), [light, lightPng, '--scale', '2']);
+      writeFileSync(variant, withAppearance(html, other));
+      run(join(SKILL, 'scripts/export.mjs'), [base, nativePng, '--scale', '2']);
+      run(join(SKILL, 'scripts/export.mjs'), [variant, otherPng, '--scale', '2']);
 
-    const png = { dark: dataUri(darkPng), light: dataUri(lightPng) };
-    const html = addOfflinePng(baseHtml, png);
+      docs[theme.id] = prepareDoc(html);
+      png[theme.id] = {};
+      png[theme.id][native] = dataUri(nativePng);
+      png[theme.id][other] = dataUri(otherPng);
+    }
+
+    if (!png.terminal || !png.terminal.dark) throw new Error('terminal dark PNG is missing');
+    const html = finalPage(spec, title, docs, png);
     writeFileSync(OUT, html);
-    writeFileSync(PNG_OUT, Buffer.from(png.dark.split(',')[1], 'base64'));
+    writeFileSync(PNG_OUT, Buffer.from(png.terminal.dark.split(',')[1], 'base64'));
 
-    console.log(`✓ architecture/layer-review.html (${(Buffer.byteLength(html) / 1024 / 1024).toFixed(2)} MB, offline dark + light PNG)`);
-    console.log('✓ architecture/layer-review.png (terminal, 2×)');
+    console.log(`✓ architecture/layer-review.html (${THEMES.length} themes × 2 appearances, ${(Buffer.byteLength(html) / 1024 / 1024).toFixed(1)} MB)`);
+    console.log('✓ architecture/layer-review.png (terminal dark, 2×)');
   } finally {
     for (const file of files) {
       try { if (existsSync(file)) rmSync(file); } catch {}
