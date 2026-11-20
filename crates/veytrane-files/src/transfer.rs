@@ -217,11 +217,22 @@ impl TransferService {
     }
     pub fn new(store: TaskStore, receive_root: PathBuf) -> Self {
         let (changed, _) = watch::channel(0);
+        let activity = veytrane_node::activity::Activity::new(changed.clone());
+        let frame_budget = veytrane_node::frame_budget::FrameBudget::default();
+        Self::new_with_shared(store, receive_root, activity, changed, frame_budget)
+    }
+    pub fn new_with_shared(
+        store: TaskStore,
+        receive_root: PathBuf,
+        activity: veytrane_node::activity::Activity,
+        changed: watch::Sender<u64>,
+        frame_budget: veytrane_node::frame_budget::FrameBudget,
+    ) -> Self {
         Self {
             store: Arc::new(Mutex::new(store)),
             receive_root: Arc::new(Mutex::new(receive_root)),
             active: Arc::new(Mutex::new(HashMap::new())),
-            activity: veytrane_node::activity::Activity::new(changed.clone()),
+            activity,
             changed,
             epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             fair_writes: crate::queue::FairWrites::default(),
@@ -232,7 +243,7 @@ impl TransferService {
             previews: Default::default(),
             preview_requests: Default::default(),
             comparisons: Arc::new(tokio::sync::Semaphore::new(2)),
-            frame_budget: veytrane_node::frame_budget::FrameBudget::default(),
+            frame_budget,
             rate_origin: Instant::now(),
             rates: Arc::new(Mutex::new(HashMap::new())),
             sender_queue: Arc::new(Mutex::new(crate::queue::TaskQueue::default())),
@@ -258,6 +269,7 @@ impl TransferService {
             publication_error: Arc::new(Mutex::new(None)),
         }
     }
+    #[cfg(any(test, feature = "test-support"))]
     pub fn shared_parts(
         &self,
     ) -> (

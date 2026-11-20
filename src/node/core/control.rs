@@ -366,10 +366,17 @@ pub fn spawn_with_storage(
 ) -> Result<(NodeControl, ControlEvents)> {
     let (store, _) = crate::node::core::task_store::TaskStore::open(tasks)
         .map_err(|e| Error::Protocol(e.to_string()))?;
-    config.transfer = Some(crate::node::core::transfer::TransferService::new(
-        store,
-        receive_root,
-    ));
+    let shared_runtime = crate::node::core::session::SharedRuntime::new();
+    config.transfer = Some(
+        crate::node::core::transfer::TransferService::new_with_shared(
+            store,
+            receive_root,
+            shared_runtime.activity.clone(),
+            shared_runtime.changed.clone(),
+            shared_runtime.frame_budget.clone(),
+        ),
+    );
+    config.shared_runtime = Some(shared_runtime);
     spawn(identity, config).map_err(Error::Io)
 }
 

@@ -122,10 +122,26 @@ impl Pair {
         }
         let (store_a, _) = TaskStore::open(&root.join("a-state/tasks.json")).unwrap();
         let (store_b, _) = TaskStore::open(&root.join("b-state/tasks.json")).unwrap();
-        let a = TransferService::new(store_a, root.join("a-receive"));
-        let b = TransferService::new(store_b, root.join("b-receive"));
-        let (activity_a, changed_a, frame_budget_a) = a.shared_parts();
-        let (activity_b, changed_b, frame_budget_b) = b.shared_parts();
+        let (changed_a, _) = watch::channel(0);
+        let activity_a = veytrane_node::activity::Activity::new(changed_a.clone());
+        let frame_budget_a = veytrane_node::frame_budget::FrameBudget::default();
+        let a = TransferService::new_with_shared(
+            store_a,
+            root.join("a-receive"),
+            activity_a.clone(),
+            changed_a.clone(),
+            frame_budget_a.clone(),
+        );
+        let (changed_b, _) = watch::channel(0);
+        let activity_b = veytrane_node::activity::Activity::new(changed_b.clone());
+        let frame_budget_b = veytrane_node::frame_budget::FrameBudget::default();
+        let b = TransferService::new_with_shared(
+            store_b,
+            root.join("b-receive"),
+            activity_b.clone(),
+            changed_b.clone(),
+            frame_budget_b.clone(),
+        );
         let speed_a =
             veytrane_speed::runtime::SpeedService::new(activity_a, changed_a, frame_budget_a);
         let speed_b =

@@ -219,6 +219,31 @@ pub struct NodeSessionConfig {
     pub allowed_forward_targets: Vec<crate::node::core::config::AllowedForwardTarget>,
     pub tunnel_rules: Vec<crate::node::core::config::TunnelRule>,
     pub(crate) transfer: Option<crate::node::core::transfer::TransferService>,
+    pub(crate) shared_runtime: Option<SharedRuntime>,
+}
+
+#[derive(Clone)]
+pub(crate) struct SharedRuntime {
+    pub(crate) activity: crate::node::core::activity::Activity,
+    pub(crate) changed: watch::Sender<u64>,
+    pub(crate) frame_budget: crate::node::core::frame_budget::FrameBudget,
+}
+
+impl std::fmt::Debug for SharedRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedRuntime").finish_non_exhaustive()
+    }
+}
+
+impl SharedRuntime {
+    pub(crate) fn new() -> Self {
+        let (changed, _) = watch::channel(0);
+        Self {
+            activity: crate::node::core::activity::Activity::new(changed.clone()),
+            changed,
+            frame_budget: crate::node::core::frame_budget::FrameBudget::default(),
+        }
+    }
 }
 
 impl NodeSessionConfig {
@@ -248,6 +273,7 @@ impl NodeSessionConfig {
             allowed_forward_targets: Vec::new(),
             tunnel_rules: Vec::new(),
             transfer: None,
+            shared_runtime: None,
         }
     }
 
@@ -1197,7 +1223,7 @@ type TunnelTaskJoin = Option<std::result::Result<TunnelTaskResult, tokio::task::
 /// Start a dedicated Tokio runtime so GPUI's UI thread never performs network work.
 pub fn spawn(
     identity: Identity,
-    config: NodeSessionConfig,
+    mut config: NodeSessionConfig,
 ) -> std::io::Result<(NodeSessionHandle, mpsc::Receiver<SessionEvent>)> {
     if config.service_ids.len() > 512 {
         return Err(std::io::Error::new(
@@ -1235,19 +1261,24 @@ pub fn spawn(
     crate::node::core::trusted_devices::validate(&config.trusted_devices)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let max_peers = config.max_peers;
+    let shared_runtime = config.shared_runtime.take().unwrap_or_else(|| {
+        #[cfg(test)]
+        if let Some(service) = config.transfer.as_ref() {
+            let (activity, changed, frame_budget) = service.shared_parts();
+            return SharedRuntime {
+                activity,
+                changed,
+                frame_budget,
+            };
+        }
+        SharedRuntime::new()
+    });
     let speed = config.enable_speed.then(|| {
-        let (activity, changed, frame_budget) = config.transfer.as_ref().map_or_else(
-            || {
-                let (changed, _) = watch::channel(0);
-                (
-                    crate::node::core::activity::Activity::new(changed.clone()),
-                    changed,
-                    crate::node::core::frame_budget::FrameBudget::default(),
-                )
-            },
-            |service| service.shared_parts(),
-        );
-        SpeedService::new(activity, changed, frame_budget)
+        SpeedService::new(
+            shared_runtime.activity.clone(),
+            shared_runtime.changed.clone(),
+            shared_runtime.frame_budget.clone(),
+        )
     });
     let control = crate::node::core::control::ControlState::new(
         identity.node_id(),
