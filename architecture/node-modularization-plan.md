@@ -106,11 +106,11 @@ Veytrane 的核心是可信节点之间建立、维持和恢复连接的机制�
 
 ## 6. 验收矩阵与执行入口
 
-**编译时裁剪和运行时停用要分别验收。** 根包默认保留完整版；建议在提包时增加明确的装配 feature（如 `agent-files`、`agent-speed`、`agent-tcp`），根包 `default` 继续选择原发行组合。`node` 是现有脚本使用的 feature，盘点当前 `--no-default-features --features node` 调用后保留其既有含义；增加独立的最小宿主选择（如 `agent-base`），让裁剪构建直接选择所需能力，不通过带齐业务的 `node` 别名。新命名是 S3–S6 的目标，当前 HEAD 没有这些命令对应的 feature。
+**编译时裁剪和运行时停用分别验收。** 根包默认 `node` 保留原发行组合。当前 `agent-base` 内置 TCP 和测速，按 `agent-files` 和 `agent-web` 增加文件和 Web。`enable_tcp`、`enable_speed` 在运行时独立控制协商与业务执行。`agent-full` 发行 Agent 与管理 CLI，可与 `desktop-client` 分开构建。另行选择 `standalone` 构建原 `p2p_file`。
 
 | 场景 | 具体验证 |
 |---|---|
-| 最小 node、测速+TCP Agent | 最终目标可用 `cargo check --locked -p veytrane-node`。对裁剪 Agent 以单独的 Cargo 调用选择 `--no-default-features --features agent-base,agent-speed,agent-tcp --bin p2p-agent`；对相同包和选择运行 `cargo tree -e normal,features`。根包若仍附带 standalone 二进制依赖，先把 standalone 的依赖设为可选并由其发行组合启用，或将裁剪 Agent 置于独立包。提交实际可运行的精确命令，确认依赖树无文件执行库、GPUI；另验无 Web 的宿主库不依赖 HTTP 管理。 |
+| 最小 node、测速+TCP Agent | `cargo check --locked -p veytrane-node`。单独运行 `cargo build --locked --no-default-features --features agent-base --bin p2p-agent` 与 `cargo tree --locked --no-default-features --features agent-base -e normal,features`。保留构建好的裁剪二进制，然后从默认 `node` 构建运行混合进程测试。生产树无需文件执行、GPUI、HTTP 管理或信令服务端 SQLite。 |
 | 双端组合与拒绝 | 裸节点仅协商基础能力；TCP-only ↔ 完整版只允许 TCP；speed+TCP ↔ 完整版可测速；文件关闭仍可查询状态与测速。对未协商流、缺失 ACL、撤销、重复注册、慢首部和队列满分别校验。执行目录使用独立临时根，核对内容、文件副作用及进程退出后的锁。 |
 | 线协议与旧数据 | 对照基线固定向量覆盖 P2PN、P2PF、独立 CLI 身份握手和有代表性的业务帧；校验编码、解码、越界和尾随字节。用基线 fixture 加载 `node.json`、任务、回执和部分下载；对停用再启用、进程中断后手动/自动续传、同名冲突各核一次。 |
 | 文件与测速并发 | 复用 `speed_and_file_activity_exclude_each_other_without_silent_pause`、`speed_cancel_and_stale_uni_token_do_not_pollute_next_test_or_file_transfer` 和许可清理用例。补覆盖无文件的独立测速、取消与新代际清理；并发两端竞争时只产生一个有效测速租约。 |
@@ -167,6 +167,13 @@ Veytrane 的核心是可信节点之间建立、维持和恢复连接的机制�
 - `9878798`、`2dc4686` 拆开短设备 ID 与 SQLite 注册，独立 `signaling-server` feature 持有服务端注册、TLS 监听和 Relay，沿用 `p2p_file signal-server`。发现、信令以及 TLS 共 76 项，Relay 24 项，独立 CLI TLS 进程测试通过。
 - `b1a3c68`、`ee14ab2` 保留 `node` 与 `gui` 的原组合，新增 `agent-full` 和 `desktop-client`。Live、Sub2API 可单独构建。桌面依赖 IPC 客户端与纯校验，独立桌面编译通过。Linux、macOS、Windows 原包装脚本分别构建 Agent/CLI 和桌面，macOS 本机通过包装脚本语法与 8 项归档检查。实机打包与跨平台窗口仍待验证。
 - `scripts/check-architecture.py` 检查源码和生产 Cargo 依赖。`agent-base` 内置 TCP 与测速，排除文件运行包、Web、GPUI 和 SQLite；`agent-full` 包含 Web 和文件，排除 GPUI 和信令服务端 SQLite。独立桌面、Live 和 Sub2API 均排除文件执行。实际依赖验证以脚本中的展开组合为准。
+- `84f97e8` 将独立 CLI 进程测试改为动态回环端口。macOS 上 IPv4、IPv6 和强制 Relay 均通过，含 TCP 并发、测速、文件哈希和重新连接。`5cce30d` 将信令服务端、Live 和 Sub2API 的装配移入 `apps/` 各目录，并保留八个根发布入口。完整组合八个目标通过编译，三个管理相关二进制的实际 `--build-info` 均能读取。
+- `1f60754`、`07fc4ad` 验证双裁剪 Agent、TCP+测速裁剪端对完整版、仅 TCP 端对完整版、仅基础能力端对完整版。前两种完成 30 秒测速、并行 TCP 与重连。裸节点仍能认证和重连，保存的转发不会开监听，未协商的目录、测速和文件命令返回拒绝。`2fe610c` 验证两个 IPC 客户端并行请求不同任务，各自得到原接收位置和调整后的接收位置。
+- `a7f9e9c` 用 `0b0d77b` Agent 实际传输并生成旧任务。裁剪 Agent 在停用期间保留任务库原始字节及收到的文件。完整版重新启用后可按原 ID 查到已完成任务。运行 `file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage` 可用 `VEYTRANE_TEST_MINIMAL_AGENT` 指定独立裁剪版，`VEYTRANE_TEST_AGENT_MIX` 选择 `minimal-both`、`minimal-client-full-server`、`tcp-client-full-server` 或 `bare-client-full-server`。运行 `completed_file_task_survives_files_disabled_then_full_reenable` 可加 `VEYTRANE_TEST_BASELINE_AGENT` 指定施工前二进制。
+- macOS 上 `cargo test --locked --offline --test node_agent_process` 的 9 项测试通过。最终在 `5a2a4fe` 运行 `scripts/node-core-e2e.py`，14 个场景通过并采集 21 条进程证据。真实发布中断恢复覆盖 10 个步骤。`514527d` 的生产依赖检查在 Cargo 默认和离线两种模式分别通过。
+- [现行交互图](layer-review.html) 的八主题、亮暗状态与 PNG 按钮完成生成和静态核验。浏览器审批拒绝了打开本地架构图的操作，点击、视觉布局及实际下载尚待确认。
+- Intel macOS 的 Agent/管理 CLI 和 Windows GNU 的管理包通过交叉编译检查。Windows 命名管道 ACL、接收预算、Linux/Windows 实机打包与 GPUI 交互仍待验证。macOS 运行的两个 Windows 宿主管理路径模拟错误也在施工前 `0b0d77b` 复现。专用 Sub2API 隔离用例通过，部署用例按设计跳过。
+- 根包 `src/node/core/session.rs` 仍负责静态能力装配。对新协议能力需增加协商位、流编号与处理器注册。独立 Agent 的进一步编译裁剪目前针对文件、Web 和信令服务端，TCP 和测速使用各自的运行启停条件。
 
 ## 7. 新增或移除业务时的操作示例
 
