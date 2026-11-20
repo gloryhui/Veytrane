@@ -255,7 +255,7 @@ pub struct VerifiedSource {
     name: String,
 }
 
-pub fn source_parent(record: &TaskRecord) -> Result<(cap_std::fs::Dir, String)> {
+pub(crate) fn source_parent(record: &TaskRecord) -> Result<(cap_std::fs::Dir, String)> {
     let details = record
         .file_details()
         .ok_or_else(|| failure("缺少文件任务绑定"))?;

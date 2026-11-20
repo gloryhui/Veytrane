@@ -2,4 +2,4 @@
 
 #[cfg(test)]
 pub use veytrane_files::secure_fs::identity;
-pub use veytrane_files::secure_fs::{child, open, parent, root};
+pub use veytrane_files::secure_fs::root;

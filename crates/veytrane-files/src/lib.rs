@@ -31,6 +31,8 @@ pub mod secure_fs;
 pub mod space_budget;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod task_events;
+#[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
+pub mod task_location;
 #[cfg(feature = "node-tasks")]
 pub mod task_measurements;
 #[cfg(feature = "node-tasks")]

@@ -1,14 +1,11 @@
 //! Read-only task details and their presentation.
+use crate::identity::NodeId;
 use crate::node::core::task_model::{TaskDirection, TaskId, TaskRecord, TaskState};
-use crate::{error::Result, identity::NodeId};
 use std::{collections::HashMap, path::PathBuf, time::Duration};
+use veytrane_files::task_location::{LocationKind, anchor, location, records_for};
+pub use veytrane_files::task_location::{Selection, reveal};
 pub use veytrane_files::task_measurements::{Measurements, Sample};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Selection {
-    Task(TaskId),
-    Group(TaskId),
-}
 #[derive(Clone, Debug)]
 pub struct Member {
     pub id: TaskId,
@@ -62,18 +59,6 @@ pub struct Detail {
     pub reveal_label: &'static str,
     pub errors: Vec<(&'static str, usize, bool)>,
 }
-fn records_for<'a>(records: &'a [TaskRecord], selected: &Selection) -> Vec<&'a TaskRecord> {
-    match selected {
-        Selection::Task(id) => records
-            .iter()
-            .filter(|record| record.task_id() == id)
-            .collect(),
-        Selection::Group(id) => records
-            .iter()
-            .filter(|record| record.group_id() == Some(id))
-            .collect(),
-    }
-}
 pub fn eta(remaining: u64, rate: f64, blocked: bool) -> Option<u64> {
     if blocked || remaining == 0 || !rate.is_finite() || rate <= 0. {
         return None;
@@ -81,67 +66,6 @@ pub fn eta(remaining: u64, rate: f64, blocked: bool) -> Option<u64> {
     let seconds = (remaining as f64 / rate).ceil();
     // Casting would otherwise silently saturate an unsupported estimate.
     (seconds.is_finite() && seconds < u64::MAX as f64).then_some(seconds as u64)
-}
-fn anchor<'a>(records: &[&'a TaskRecord]) -> &'a TaskRecord {
-    records
-        .iter()
-        .copied()
-        .min_by_key(|record| {
-            (
-                record.directory_details().is_none(),
-                record
-                    .relative_path()
-                    .map_or(usize::MAX, |path| path.split('/').count()),
-                record.task_id().clone(),
-            )
-        })
-        .unwrap()
-}
-fn location(records: &[&TaskRecord], selection: &Selection) -> Result<(PathBuf, &'static str)> {
-    let record = anchor(records);
-    if matches!(selection, Selection::Group(_)) && record.direction() == TaskDirection::Receive {
-        return Ok((record.local_path().to_path_buf(), "定位原接收目录"));
-    }
-    if matches!(selection, Selection::Group(_))
-        && record.file_details().is_some()
-        && record.direction() == TaskDirection::Send
-    {
-        let root = record
-            .file_details()
-            .unwrap()
-            .source_root
-            .as_ref()
-            .ok_or_else(|| crate::node::core::transfer_files::failure("目录源绑定不可用"))?;
-        return Ok((root.clone(), "定位源目录"));
-    }
-    if record.direction() == TaskDirection::Send {
-        Ok((
-            record.local_path().to_path_buf(),
-            if record.directory_details().is_none() {
-                "定位源文件"
-            } else {
-                "定位源目录"
-            },
-        ))
-    } else if records
-        .iter()
-        .all(|record| record.state() == TaskState::Completed && record.receipt_committed())
-    {
-        let relative = record
-            .relative_path()
-            .ok_or_else(|| crate::node::core::transfer_files::failure("任务缺少相对路径"))?;
-        crate::node::core::protocol::validate_relative_path(relative)?;
-        Ok((
-            record.local_path().join(relative),
-            if record.file_details().is_some() {
-                "定位接收文件"
-            } else {
-                "定位接收目录"
-            },
-        ))
-    } else {
-        Ok((record.local_path().to_path_buf(), "定位原接收目录"))
-    }
 }
 pub fn project(
     records: &[TaskRecord],
@@ -297,7 +221,7 @@ pub fn project(
         .checked_sub(started)
         .filter(|elapsed| *elapsed >= 0)
         .map(|elapsed| elapsed as u64 / 1000);
-    let root = anchor(&selected);
+    let root = anchor(&selected)?;
     let name = if matches!(selection, Selection::Group(_)) {
         root.relative_path()
             .and_then(|relative| relative.split('/').next())
@@ -306,7 +230,14 @@ pub fn project(
     } else {
         members[0].name.clone()
     };
-    let (local_path, reveal_label) = location(&selected, selection).ok()?;
+    let (local_path, location_kind) = location(&selected, selection).ok()?;
+    let reveal_label = match location_kind {
+        LocationKind::ReceiveRoot => "定位原接收目录",
+        LocationKind::SourceDirectory => "定位源目录",
+        LocationKind::SourceFile => "定位源文件",
+        LocationKind::ReceivedFile => "定位接收文件",
+        LocationKind::ReceivedDirectory => "定位接收目录",
+    };
     let mut errors: Vec<_> = errors
         .into_iter()
         .map(|(message, (count, retryable))| (message, count, retryable))
@@ -354,93 +285,6 @@ pub fn project(
         reveal_label,
         errors,
     })
-}
-/// Revalidate the stored task's own no-follow location off the UI thread.
-pub fn reveal(records: &[TaskRecord], selection: &Selection) -> Result<PathBuf> {
-    let selected = records_for(records, selection);
-    let first = selected
-        .first()
-        .ok_or_else(|| crate::node::core::transfer_files::failure("任务或目录组记录已不存在"))?;
-    if selected.iter().any(|record| {
-        record.peer_id() != first.peer_id()
-            || record.direction() != first.direction()
-            || (first.direction() == TaskDirection::Receive
-                && record.local_path() != first.local_path())
-    }) {
-        return Err(crate::node::core::transfer_files::failure(
-            "任务组绑定不一致",
-        ));
-    }
-    let record = anchor(&selected);
-    let (path, _) = location(&selected, selection)?;
-    if record.direction() == TaskDirection::Send {
-        if matches!(selection, Selection::Group(_)) && record.file_details().is_some() {
-            let _ = crate::storage::secure_fs::root(&path)?;
-        } else if record.directory_details().is_none() {
-            let (parent, name) = if record
-                .file_details()
-                .is_some_and(|details| details.source_root.is_some())
-            {
-                crate::node::core::transfer_files::source_parent(record)?
-            } else {
-                let path = record
-                    .local_path()
-                    .parent()
-                    .ok_or_else(|| crate::node::core::transfer_files::failure("源目录不可用"))?;
-                let parent = if path.parent().is_some() {
-                    crate::storage::secure_fs::root(path)?
-                } else {
-                    cap_std::fs::Dir::open_ambient_dir(path, cap_std::ambient_authority())?
-                };
-                let name = record
-                    .local_path()
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .ok_or_else(|| crate::node::core::transfer_files::failure("源文件名不可用"))?;
-                (parent, name.to_owned())
-            };
-            let _ = crate::storage::secure_fs::open(&parent, &name, false, false)?;
-        } else {
-            let group_root = record.group_id().and_then(|id| {
-                records
-                    .iter()
-                    .filter(|candidate| {
-                        candidate.group_id() == Some(id)
-                            && candidate.direction() == TaskDirection::Send
-                            && candidate.peer_id() == record.peer_id()
-                            && candidate.directory_details().is_some()
-                    })
-                    .min_by_key(|candidate| candidate.relative_path().unwrap().split('/').count())
-            });
-            let root_record = group_root.unwrap_or(record);
-            let root = crate::storage::secure_fs::root(root_record.local_path())?;
-            if root_record.task_id() != record.task_id() {
-                let relative = record
-                    .relative_path()
-                    .unwrap()
-                    .split_once('/')
-                    .map(|(_, path)| path)
-                    .ok_or_else(|| crate::node::core::transfer_files::failure("源目录绑定无效"))?;
-                if root_record.local_path().join(relative) != record.local_path() {
-                    return Err(crate::node::core::transfer_files::failure("源目录绑定无效"));
-                }
-                let (parent, name) = crate::storage::secure_fs::parent(&root, relative, false)?;
-                let _ = crate::storage::secure_fs::child(&parent, &name, false)?;
-            }
-        }
-    } else {
-        let root = crate::storage::secure_fs::root(record.local_path())?;
-        if path != record.local_path() {
-            let (parent, name) =
-                crate::storage::secure_fs::parent(&root, record.relative_path().unwrap(), false)?;
-            if record.file_details().is_some() {
-                let _ = crate::storage::secure_fs::open(&parent, &name, false, false)?;
-            } else {
-                let _ = crate::storage::secure_fs::child(&parent, &name, false)?;
-            }
-        }
-    }
-    Ok(path)
 }
 pub fn duration(seconds: u64) -> String {
     if seconds >= 86_400 {
