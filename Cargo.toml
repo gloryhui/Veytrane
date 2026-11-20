@@ -10,6 +10,11 @@ keywords = ["p2p", "nat-traversal", "quic", "file-transfer", "tunnel"]
 categories = ["network-programming"]
 license = "MIT"
 
+[workspace]
+members = ["crates/veytrane-transport"]
+default-members = ["."]
+resolver = "3"
+
 [features]
 default = ["node"]
 sub2api-client = ["node"]
@@ -39,6 +44,7 @@ gui = [
 ]
 
 [dependencies]
+veytrane-transport = { path = "crates/veytrane-transport" }
 socket2 = "0.6.5"
 rusqlite = { version = "=0.37.0", features = ["bundled"] }
 argon2 = { version = "=0.5.3", optional = true }
