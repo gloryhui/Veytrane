@@ -29,6 +29,7 @@ node = [
     "dep:veytrane-node",
     "dep:veytrane-speed",
     "veytrane-files/safe-storage",
+    "veytrane-transport/private-storage",
     "dep:argon2",
     "dep:hmac",
     "dep:sha2",
