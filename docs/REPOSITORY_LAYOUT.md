@@ -9,7 +9,7 @@ src/bin/p2p-desktop.rs → desktop/agent_shell → veytrane-management
 src/bin/p2p-node.rs → apps/node-cli → veytrane-management
                        ├─ 离线命令 → Agent 宿主
                        └─ web → apps/web-management → veytrane-management
-src/bin/p2p-agent.rs → Agent 宿主与可选 Web 导航
+src/bin/p2p-agent.rs → apps/agent → Agent 宿主与可选 Web 导航
                    └─ node/composition → node/core → 节点、传输及能力包
 Live / Sub2API → 各自的产品组装 → node/composition、TCP
 src/main.rs → apps/standalone-cli
@@ -25,6 +25,7 @@ src/main.rs → apps/standalone-cli
 | `src/node/core/` | 会话、连接代际、网络恢复及已认证流生命周期。根会话接收已装配的服务，在每条连接上为双方已协商的业务注册有界队列，协调关闭与撤销。各能力的执行代码由对应包持有。 |
 | `src/node/composition/` | `NodeSettings`、持久配置记录、配置到会话策略的投影，以及 TCP 转发连接适配器。`runtime.rs` 供 Agent、Live 与 Sub2API 组装会话及所需的测速、文件服务。 |
 | `src/node/host/` | Agent 进程所有权、IPC 服务端命令、配置 revision、请求去重、事件聚合与关停。 |
+| `apps/agent` | `p2p-agent` 的启动参数、可选导航与宿主装配，以及核心重建和退出协调。 |
 | `crates/veytrane-management` | IPC v1 请求和响应、AgentClient、当前用户路径、Unix socket 和 Windows pipe。`node/api` 给旧 Rust 调用方转出契约和客户端，并提供根二进制版本信息。 |
 | `apps/node-cli` | `p2p-node` 的命令编排，正常请求直接使用管理 IPC 契约，离线操作调用宿主配置入口。`node/adapters` 保留已有 Rust 导入路径。 |
 | `apps/web-management` | `p2p-node web` 管理页和 Agent 默认 `3001` 导航。两个入口经同一 IPC 使用 Agent。内置导航与 Agent 同进程，核心重建时导航继续运行。 |

@@ -195,6 +195,11 @@
       ],
       "parts": [
         {
+          "name": "应用启动与导航装配",
+          "path": "apps/agent/src/application.rs",
+          "detail": "按私有配置启动同进程导航，并协调宿主核心重建和进程退出。"
+        },
+        {
           "name": "进程宿主",
           "path": "src/node/host/agent.rs",
           "detail": "启动、所有权、命令执行和请求去重。"
