@@ -1,17 +1,19 @@
 //! Static inbound business assembly: speed, files and TCP share one authenticated connection.
 
-use std::future::Future;
 use std::sync::Arc;
 
+#[cfg(feature = "node-speed")]
 use tokio::sync::Semaphore;
 
 use crate::node::core::session::business::{BusinessContext, BusinessHandler, BusinessOutcome};
+#[cfg(feature = "node-speed")]
 use crate::node::core::speed::{DEFAULT_MAX_PEER_BUSINESS_STREAMS, SpeedService};
 
 #[cfg(feature = "agent-files")]
 use veytrane_files::transfer::TransferService;
 
 pub(crate) struct StaticBusiness {
+    #[cfg(feature = "node-speed")]
     speed: Option<SpeedService>,
     tcp_streams: Arc<veytrane_tcp::ForwardStreamOwner>,
     #[cfg(feature = "agent-files")]
@@ -19,12 +21,22 @@ pub(crate) struct StaticBusiness {
 }
 
 impl StaticBusiness {
+    #[cfg(feature = "node-speed")]
     pub(crate) fn new(
         speed: Option<SpeedService>,
         tcp_streams: Arc<veytrane_tcp::ForwardStreamOwner>,
     ) -> Self {
         Self {
             speed,
+            tcp_streams,
+            #[cfg(feature = "agent-files")]
+            files: None,
+        }
+    }
+
+    #[cfg(not(feature = "node-speed"))]
+    pub(crate) fn new(tcp_streams: Arc<veytrane_tcp::ForwardStreamOwner>) -> Self {
+        Self {
             tcp_streams,
             #[cfg(feature = "agent-files")]
             files: None,
@@ -46,20 +58,37 @@ impl StaticBusiness {
 }
 
 impl BusinessHandler for StaticBusiness {
-    fn serve(&self, context: BusinessContext) -> impl Future<Output = BusinessOutcome> + Send {
-        async move {
-            let BusinessContext {
-                connection,
-                peer,
-                local,
-                authorization,
-                targets,
-                resources,
-                incoming,
-            } = context;
+    async fn serve(&self, context: BusinessContext) -> BusinessOutcome {
+        let BusinessContext {
+            connection,
+            peer,
+            #[cfg(feature = "node-speed")]
+            local,
+            authorization,
+            targets,
+            resources,
+            incoming,
+        } = context;
+        let handle_tcp = async {
+            if let Some(streams) = incoming.services {
+                veytrane_tcp::services::serve(
+                    peer,
+                    authorization.clone(),
+                    targets,
+                    resources.clone(),
+                    streams,
+                    self.tcp_streams.clone(),
+                )
+                .await
+            } else {
+                Ok::<(), veytrane_transport::error::Error>(())
+            }
+        };
+
+        #[cfg(feature = "node-speed")]
+        let report_end = {
             let business_budget = (incoming.files.is_some() || incoming.speed.is_some())
                 .then(|| Arc::new(Semaphore::new(DEFAULT_MAX_PEER_BUSINESS_STREAMS)));
-
             let handle_speed = async {
                 if let (Some(service), Some(streams), Some(budget)) =
                     (self.speed.as_ref(), incoming.speed, &business_budget)
@@ -79,7 +108,6 @@ impl BusinessHandler for StaticBusiness {
                     Ok(())
                 }
             };
-
             let handle_file = async {
                 #[cfg(feature = "agent-files")]
                 {
@@ -107,22 +135,6 @@ impl BusinessHandler for StaticBusiness {
                 }
             };
 
-            let handle_tcp = async {
-                if let Some(streams) = incoming.services {
-                    veytrane_tcp::services::serve(
-                        peer,
-                        authorization.clone(),
-                        targets,
-                        resources.clone(),
-                        streams,
-                        self.tcp_streams.clone(),
-                    )
-                    .await
-                } else {
-                    Ok::<(), veytrane_transport::error::Error>(())
-                }
-            };
-
             let (speed_result, file_result, _tcp_result, _) = tokio::join!(
                 biased;
                 handle_speed,
@@ -130,9 +142,14 @@ impl BusinessHandler for StaticBusiness {
                 handle_tcp,
                 connection.closed(),
             );
-            BusinessOutcome {
-                report_end: speed_result.is_err() || file_result.is_err(),
-            }
-        }
+            speed_result.is_err() || file_result.is_err()
+        };
+        #[cfg(not(feature = "node-speed"))]
+        let report_end = {
+            drop((incoming.files, incoming.speed));
+            let _ = tokio::join!(biased; handle_tcp, connection.closed());
+            false
+        };
+        BusinessOutcome { report_end }
     }
 }

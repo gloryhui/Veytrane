@@ -14,9 +14,10 @@ pub use veytrane_node::capability::{
     CAP_TRUSTED_DEVICE_AUTH,
 };
 pub use veytrane_node::p2pf::MAX_FRAME_BYTES;
+#[cfg(feature = "node-speed")]
 pub use veytrane_speed::control::{SpeedArbiter, SpeedControl, SpeedDirection, SpeedLease};
 
-#[cfg(test)]
+#[cfg(all(test, feature = "node-speed"))]
 mod tests {
     use super::*;
     use crate::identity::Identity;

@@ -12,6 +12,7 @@ use crate::node::core::remote_auth::LiveAuthorization;
 pub(crate) struct BusinessContext {
     pub connection: quinn::Connection,
     pub peer: NodeId,
+    #[cfg(feature = "node-speed")]
     pub local: NodeId,
     pub authorization: LiveAuthorization,
     pub targets: watch::Receiver<Vec<AllowedForwardTarget>>,

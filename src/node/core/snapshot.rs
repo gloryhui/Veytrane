@@ -1,10 +1,10 @@
 //! Small authoritative UI projection. No manifests, tokens or remote absolute paths.
 use crate::identity::NodeId;
+#[cfg(feature = "node-speed")]
 use crate::node::core::speed::{SpeedSnapshot, SpeedStatus};
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
+use std::collections::HashMap;
+#[cfg(feature = "node-speed")]
+use std::time::{Duration, Instant};
 
 #[cfg(feature = "agent-files")]
 mod file_rows;
@@ -40,14 +40,17 @@ pub fn project_peer_path(
     true
 }
 
+#[cfg(feature = "node-speed")]
 #[derive(Clone)]
 pub struct SpeedView {
     pub snapshot: SpeedSnapshot,
     pub instant: f64,
     updated: Instant,
 }
+#[cfg(feature = "node-speed")]
 #[derive(Default)]
 pub struct SpeedViews(pub HashMap<NodeId, SpeedView>);
+#[cfg(feature = "node-speed")]
 impl SpeedViews {
     pub fn update(&mut self, incoming: HashMap<NodeId, SpeedSnapshot>, now: Instant) {
         for (peer, old) in &mut self.0 {
@@ -116,7 +119,7 @@ pub fn can_trust_peer(
         && matches!(state, Some(crate::node::core::network_state::PeerLifecycle::Connected(a)) if a.inbound.password)
 }
 
-#[cfg(all(test, feature = "agent-files"))]
+#[cfg(all(test, feature = "agent-files", feature = "node-speed"))]
 mod tests {
     use super::*;
     use crate::node::core::queue::QueueMetrics;

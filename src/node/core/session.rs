@@ -46,6 +46,7 @@ use crate::node::core::network_state::{
     BeginPeerAttempt, DEFAULT_MAX_PEERS, MAX_PEER_CAPACITY, MAX_PENDING_PEERS, NetworkLifecycle,
     PeerLifecycle, PeerRegistry, reconnect_delay, should_initiate_quic,
 };
+#[cfg(feature = "node-speed")]
 use crate::node::core::speed::SpeedService;
 #[cfg(feature = "agent-files")]
 use veytrane_files::transfer::{FileCommand, FileCommandResult};
@@ -55,6 +56,7 @@ mod direct;
 #[cfg(test)]
 mod direct_tests;
 mod recovery;
+#[cfg(test)]
 mod test_support;
 use business::{BusinessContext, BusinessHandler};
 
@@ -354,9 +356,11 @@ pub enum SessionEvent {
         peer: NodeId,
         count: usize,
     },
+    #[cfg(feature = "node-speed")]
     SpeedRequestEnded {
         peer: NodeId,
     },
+    #[cfg(feature = "node-speed")]
     SpeedPhaseCompleted {
         peer: NodeId,
         snapshot: crate::node::core::speed::SpeedSnapshot,
@@ -421,6 +425,7 @@ impl SessionEvents {
 pub struct NodeSessionHandle {
     pub(crate) control: crate::node::core::control::ControlState,
     peer_capacity: usize,
+    #[cfg(feature = "node-speed")]
     speed_available: bool,
     resources: watch::Sender<crate::node::core::authorization::ResourcePolicy>,
     commands: mpsc::Sender<SessionCommand>,
@@ -815,6 +820,7 @@ impl NodeSessionHandle {
             .map_err(|_| "传输命令队列已满或会话已关闭".into())
     }
     #[allow(dead_code)] // T010 controls.
+    #[cfg(feature = "node-speed")]
     pub fn start_speed(
         &self,
         peer: NodeId,
@@ -833,6 +839,7 @@ impl NodeSessionHandle {
             .map_err(|_| "测速命令队列已满或会话已关闭".into())
     }
     #[allow(dead_code)] // T010 controls.
+    #[cfg(feature = "node-speed")]
     pub fn cancel_speed(&self, peer: NodeId, id: TaskId) -> std::result::Result<(), String> {
         if !self.speed_available {
             return Err("capability_disabled: 测速服务未启用".into());
@@ -953,11 +960,13 @@ enum SessionCommand {
             std::result::Result<Vec<crate::node::core::trusted_devices::TrustedDevice>, String>,
         >,
     },
+    #[cfg(feature = "node-speed")]
     StartSpeed {
         peer: NodeId,
         direction: crate::node::core::config::SpeedtestDirection,
         seconds: u16,
     },
+    #[cfg(feature = "node-speed")]
     CancelSpeed {
         peer: NodeId,
         id: TaskId,
@@ -1022,6 +1031,7 @@ enum SessionCommand {
 impl SessionCommand {
     fn required_capability(&self) -> u64 {
         match self {
+            #[cfg(feature = "node-speed")]
             Self::StartSpeed { .. } => veytrane_node::capability::CAP_SPEED_EXECUTION,
             #[cfg(feature = "agent-files")]
             Self::File(command) => match command {
@@ -1052,6 +1062,7 @@ impl SessionCommand {
         match self {
             #[cfg(feature = "agent-files")]
             Self::File(command) => Some(file_peer(command)),
+            #[cfg(feature = "node-speed")]
             Self::StartSpeed { peer, .. } => Some(*peer),
             _ => None,
         }
@@ -1241,7 +1252,7 @@ struct RunningTunnel {
 type TunnelTaskResult = (String, std::result::Result<(), String>);
 type TunnelTaskJoin = Option<std::result::Result<TunnelTaskResult, tokio::task::JoinError>>;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "node-speed"))]
 fn default_test_speed() -> SpeedService {
     let (changed, _) = watch::channel(0);
     let activity = crate::node::core::activity::Activity::new(changed.clone());
@@ -1257,6 +1268,7 @@ pub(crate) fn spawn_for_test(
     identity: Identity,
     config: NodeSessionConfig,
 ) -> std::io::Result<(NodeSessionHandle, mpsc::Receiver<SessionEvent>)> {
+    #[cfg(feature = "node-speed")]
     let speed = config.enable_speed.then(|| {
         #[cfg(feature = "agent-files")]
         if let Some(service) = config.transfer.as_ref() {
@@ -1265,10 +1277,16 @@ pub(crate) fn spawn_for_test(
         }
         default_test_speed()
     });
-    test_support::spawn(identity, config, speed)
+    #[cfg(feature = "node-speed")]
+    {
+        return test_support::spawn(identity, config, speed);
+    }
+    #[cfg(not(feature = "node-speed"))]
+    test_support::spawn(identity, config)
 }
 
 pub(crate) struct SessionServices<B> {
+    #[cfg(feature = "node-speed")]
     pub speed: Option<SpeedService>,
     pub business: Arc<B>,
     pub tcp_streams: Arc<veytrane_tcp::ForwardStreamOwner>,
@@ -1278,7 +1296,7 @@ pub(crate) struct SessionServices<B> {
 pub(crate) fn spawn<B>(
     identity: Identity,
     config: NodeSessionConfig,
-    mut services: SessionServices<B>,
+    services: SessionServices<B>,
 ) -> std::io::Result<(NodeSessionHandle, mpsc::Receiver<SessionEvent>)>
 where
     B: BusinessHandler,
@@ -1318,14 +1336,27 @@ where
     }
     crate::node::core::trusted_devices::validate(&config.trusted_devices)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    #[cfg(feature = "node-speed")]
     if config.enable_speed && services.speed.is_none() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "测速服务未装配",
         ));
     }
+    #[cfg(not(feature = "node-speed"))]
+    if config.enable_speed {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "capability_disabled: 当前构建未包含测速服务",
+        ));
+    }
     let max_peers = config.max_peers;
-    services.speed = services.speed.filter(|_| config.enable_speed);
+    #[cfg(feature = "node-speed")]
+    let services = SessionServices {
+        speed: services.speed.filter(|_| config.enable_speed),
+        ..services
+    };
+    #[cfg(feature = "node-speed")]
     let speed_available = services.speed.is_some();
     let control = crate::node::core::control::ControlState::new(identity.node_id(), max_peers);
     control.set_trust_sources(&config.trust_sources);
@@ -1393,6 +1424,7 @@ where
         NodeSessionHandle {
             control,
             peer_capacity: max_peers,
+            #[cfg(feature = "node-speed")]
             speed_available,
             resources,
             commands: command_tx,
@@ -1424,11 +1456,10 @@ async fn run_session<B>(
 ) where
     B: BusinessHandler,
 {
-    let SessionServices {
-        speed: speed_service,
-        business,
-        tcp_streams: forward_streams,
-    } = services;
+    #[cfg(feature = "node-speed")]
+    let speed_service = services.speed;
+    let business = services.business;
+    let forward_streams = services.tcp_streams;
     let SessionChannels {
         command_tx,
         mut commands,
@@ -1511,9 +1542,13 @@ async fn run_session<B>(
     let files_enabled = config.transfer.is_some() && config.enable_files;
     #[cfg(not(feature = "agent-files"))]
     let files_enabled = false;
+    #[cfg(feature = "node-speed")]
+    let speed_enabled = speed_service.is_some();
+    #[cfg(not(feature = "node-speed"))]
+    let speed_enabled = false;
     let local_capabilities = crate::node::core::wire::capabilities(
         files_enabled,
-        speed_service.is_some(),
+        speed_enabled,
         config.enable_tcp,
     );
     let mut nearby = crate::node::core::connectivity::NearbyCache::new(identity.node_id());
@@ -1853,6 +1888,7 @@ async fn run_session<B>(
                     .send(SessionEvent::DirectoryPreviewFailed(request.clone()))
                     .await;
             }
+            #[cfg(feature = "node-speed")]
             if matches!(command, SessionCommand::StartSpeed { .. }) {
                 let _ = events.send(SessionEvent::SpeedRequestEnded { peer }).await;
             }
@@ -1880,6 +1916,7 @@ async fn run_session<B>(
                     .send(SessionEvent::DirectoryPreviewFailed(request.clone()))
                     .await;
             }
+            #[cfg(feature = "node-speed")]
             if matches!(command, SessionCommand::StartSpeed { .. }) {
                 let _ = events.send(SessionEvent::SpeedRequestEnded { peer }).await;
             }
@@ -2152,6 +2189,7 @@ async fn run_session<B>(
                 };
                 #[cfg(not(feature = "agent-files"))]
                 let result: std::result::Result<(), String> = Ok(());
+                #[cfg(feature = "node-speed")]
                 if let Some(service) = &speed_service {
                     service.revoke_authorization(peer, RemoteAuthorization::default());
                 }
@@ -2376,6 +2414,7 @@ async fn run_session<B>(
                     PeerLifecycle::Connected(authorization),
                 )
                 .await;
+                #[cfg(feature = "node-speed")]
                 if let Some(service) = &speed_service {
                     service.revoke_authorization(peer, authorization);
                 }
@@ -2451,6 +2490,7 @@ async fn run_session<B>(
             Wake::Command(None) => {
                 session_shutdown = true;
             }
+            #[cfg(feature = "node-speed")]
             Wake::Command(Some(SessionCommand::StartSpeed {
                 peer,
                 direction,
@@ -2537,6 +2577,7 @@ async fn run_session<B>(
                     });
                 }
             }
+            #[cfg(feature = "node-speed")]
             Wake::Command(Some(SessionCommand::CancelSpeed { peer, id })) => {
                 if let Some(service) = &speed_service
                     && let Err(error) = service.cancel(peer, &id)
@@ -4520,6 +4561,7 @@ async fn run_session<B>(
                         .serve(BusinessContext {
                             connection: business_connection,
                             peer,
+                            #[cfg(feature = "node-speed")]
                             local: local_node,
                             authorization: live.clone(),
                             targets: allowed_targets,
@@ -4722,6 +4764,7 @@ async fn run_session<B>(
                     if let Some((_, _, rights)) = authorizations.remove(&peer) {
                         rights.send_replace(RemoteAuthorization::default());
                     }
+                    #[cfg(feature = "node-speed")]
                     if let Some(service) = &speed_service {
                         service.revoke_authorization(peer, RemoteAuthorization::default());
                     }

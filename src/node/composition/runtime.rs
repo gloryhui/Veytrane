@@ -8,18 +8,23 @@ use std::io;
 #[cfg(feature = "agent-files")]
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+#[cfg(any(feature = "node-speed", feature = "agent-files"))]
 use tokio::sync::watch;
 #[cfg(feature = "agent-files")]
 use veytrane_files::{task_store::TaskStore, transfer::TransferService};
+#[cfg(any(feature = "node-speed", feature = "agent-files"))]
 use veytrane_node::{activity::Activity, frame_budget::FrameBudget};
+#[cfg(feature = "node-speed")]
 use veytrane_speed::runtime::SpeedService;
 
+#[cfg(any(feature = "node-speed", feature = "agent-files"))]
 struct SharedRuntime {
     activity: Activity,
     changed: watch::Sender<u64>,
     frame_budget: FrameBudget,
 }
 
+#[cfg(any(feature = "node-speed", feature = "agent-files"))]
 impl SharedRuntime {
     fn new() -> Self {
         let (changed, _) = watch::channel(0);
@@ -30,6 +35,7 @@ impl SharedRuntime {
         }
     }
 
+    #[cfg(feature = "node-speed")]
     fn speed(&self) -> SpeedService {
         SpeedService::new(
             self.activity.clone(),
@@ -42,6 +48,7 @@ impl SharedRuntime {
 pub struct RuntimeAssembly {
     pub control: NodeControl,
     pub events: ControlEvents,
+    #[cfg(feature = "node-speed")]
     pub speed: Option<SpeedService>,
     #[cfg(feature = "agent-files")]
     pub file_service: Option<TransferService>,
@@ -59,15 +66,20 @@ pub(crate) fn spawn_assembled(
     identity: Identity,
     config: NodeSessionConfig,
 ) -> io::Result<RuntimeAssembly> {
+    #[cfg(feature = "node-speed")]
     let speed = config.enable_speed.then(|| SharedRuntime::new().speed());
     let tcp_streams = Arc::new(veytrane_tcp::ForwardStreamOwner::new(
         veytrane_tcp::DEFAULT_MAX_NODE_TCP_STREAMS,
     ));
+    #[cfg(feature = "node-speed")]
     let business = Arc::new(StaticBusiness::new(speed.clone(), tcp_streams.clone()));
+    #[cfg(not(feature = "node-speed"))]
+    let business = Arc::new(StaticBusiness::new(tcp_streams.clone()));
     let (control, events) = control::spawn(
         identity,
         config,
         SessionServices {
+            #[cfg(feature = "node-speed")]
             speed: speed.clone(),
             business,
             tcp_streams,
@@ -76,6 +88,7 @@ pub(crate) fn spawn_assembled(
     Ok(RuntimeAssembly {
         control,
         events,
+        #[cfg(feature = "node-speed")]
         speed,
         #[cfg(feature = "agent-files")]
         file_service: None,
@@ -125,6 +138,7 @@ pub fn spawn_with_storage(
     Ok(RuntimeAssembly {
         control,
         events,
+        #[cfg(feature = "node-speed")]
         speed,
         file_service: Some(file_service),
     })

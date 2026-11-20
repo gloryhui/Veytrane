@@ -57,13 +57,18 @@ impl NodeSettings {
             receive_safety_mib: 64,
             file_limits: Default::default(),
             enable_files: cfg!(feature = "agent-files"),
-            enable_speed: true,
+            enable_speed: cfg!(feature = "node-speed"),
             enable_tcp: true,
         }
     }
     pub(crate) fn unsupported_capability(&self) -> Option<&'static str> {
-        (self.enable_files && !cfg!(feature = "agent-files"))
-            .then_some("capability_disabled: 当前构建未包含文件服务")
+        if self.enable_files && !cfg!(feature = "agent-files") {
+            Some("capability_disabled: 当前构建未包含文件服务")
+        } else if self.enable_speed && !cfg!(feature = "node-speed") {
+            Some("capability_disabled: 当前构建未包含测速服务")
+        } else {
+            None
+        }
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -272,6 +277,20 @@ impl ConfigRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(feature = "node-speed"))]
+    #[test]
+    fn explicit_speed_is_rejected_when_the_runtime_omits_it() {
+        let mut settings = NodeSettings::initial(std::env::temp_dir().join("node-speed-test"));
+        settings.enable_speed = true;
+        assert!(
+            settings
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("测速服务")
+        );
+    }
 
     #[test]
     fn removed_peer_modes_are_rejected_and_forwards_require_service_ids() {
