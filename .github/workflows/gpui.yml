@@ -81,9 +81,11 @@ jobs:
         run: cargo test --locked -p veytrane-management --target ${{ matrix.target }}
       - name: Verify Windows file storage boundaries
         if: runner.os == 'Windows'
-        run: |
-          cargo test --locked -p veytrane-files --features node-runtime --target ${{ matrix.target }} windows_open_target_failure_keeps_old_file_and_can_retry_after_release
-          cargo test --locked -p veytrane-files --features node-runtime --target ${{ matrix.target }} windows_source_junction_and_receive_reparse_directory_are_rejected
+        run: >-
+          cargo test --locked -p veytrane-files --features node-runtime --target ${{ matrix.target }} --
+          native_probe_uses_the_open_directory_and_unifies_siblings
+          windows_open_target_failure_keeps_old_file_and_can_retry_after_release
+          windows_source_junction_and_receive_reparse_directory_are_rejected
       - name: Verify native X11 background lifetime with isolated SNI host
         if: runner.os == 'Linux'
         run: >-
