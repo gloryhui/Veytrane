@@ -96,6 +96,7 @@ embed-resource = "=3.0.11"
 
 [dev-dependencies]
 tower = { version = "=0.5.3", features = ["util"] }
+veytrane-node = { path = "crates/veytrane-node", features = ["test-support"] }
 
 [[bin]]
 name = "p2p-desktop"
