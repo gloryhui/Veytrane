@@ -63,9 +63,27 @@ jobs:
           python scripts/macos-intel-packaging-tests.py
           ./packaging/macos-x86_64/doctor.sh
       - name: Check native desktop shell
-        run: cargo check --locked --features gui --bin p2p-desktop --target ${{ matrix.target }}
+        run: cargo check --locked --no-default-features --features desktop-client --bin p2p-desktop --target ${{ matrix.target }}
       - name: Build native desktop shell
-        run: cargo build --locked --features gui --bin p2p-desktop --target ${{ matrix.target }}
+        run: cargo build --locked --no-default-features --features desktop-client --bin p2p-desktop --target ${{ matrix.target }}
+      - name: Build native Agent and management CLI
+        run: cargo build --locked --no-default-features --features agent-full --bin p2p-agent --bin p2p-node --target ${{ matrix.target }}
+      - name: Verify native navigation and isolated Agent restart
+        run: python scripts/navigation-native-smoke.py --bin-dir target/${{ matrix.target }}/debug
+      - name: Verify Unix IPC peer ownership and permissions
+        if: runner.os == 'Linux'
+        run: >-
+          sudo /usr/bin/python3 scripts/node-ipc-uid-smoke.py
+          --agent target/${{ matrix.target }}/debug/p2p-agent
+          --node target/${{ matrix.target }}/debug/p2p-node
+      - name: Verify native Windows management transport
+        if: runner.os == 'Windows'
+        run: cargo test --locked -p veytrane-management --target ${{ matrix.target }}
+      - name: Verify Windows file storage boundaries
+        if: runner.os == 'Windows'
+        run: |
+          cargo test --locked -p veytrane-files --features node-runtime --target ${{ matrix.target }} windows_open_target_failure_keeps_old_file_and_can_retry_after_release
+          cargo test --locked -p veytrane-files --features node-runtime --target ${{ matrix.target }} windows_source_junction_and_receive_reparse_directory_are_rejected
       - name: Verify native X11 background lifetime with isolated SNI host
         if: runner.os == 'Linux'
         run: >-
@@ -86,9 +104,12 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo clippy --locked --features gui --all-targets --target ${{ matrix.target }} -- -D warnings
       - name: Build optimized native candidate
+        if: matrix.target != 'x86_64-apple-darwin'
         env:
           MACOSX_DEPLOYMENT_TARGET: '13.0'
-        run: cargo build --locked --release --features gui --bin p2p-desktop --target ${{ matrix.target }}
+        run: |
+          cargo build --locked --release --no-default-features --features desktop-client --bin p2p-desktop --target ${{ matrix.target }}
+          cargo build --locked --release --no-default-features --features agent-full --bin p2p-agent --bin p2p-node --target ${{ matrix.target }}
       - name: Package and verify the literal-head native candidate
         if: matrix.target != 'x86_64-apple-darwin'
         run: |
