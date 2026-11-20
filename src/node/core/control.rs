@@ -1,8 +1,6 @@
 //! In-process node control. Commands and snapshots contain no GUI or QUIC handles.
 
 use std::collections::BTreeMap;
-#[cfg(feature = "agent-files")]
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -12,11 +10,9 @@ use crate::error::{Error, Result};
 use crate::identity::{Identity, NodeId};
 #[cfg(feature = "agent-files")]
 pub use crate::node::core::drop_send::Admission as PathAdmission;
-use crate::node::core::remote_auth::SecretPassword;
 pub use crate::node::core::session::SessionEvent;
 #[cfg(test)]
 pub use crate::node::core::session::change_trusted_device;
-use veytrane_node::operation_id::TaskId;
 
 #[cfg(test)]
 pub use crate::node::core::session::TrustedDeviceChange;
@@ -355,55 +351,6 @@ pub(crate) fn spawn(
     Ok((handle, ControlEvents { receiver }))
 }
 
-pub enum NodeCommand {
-    Connect {
-        peer: NodeId,
-        password: SecretPassword,
-    },
-    ConnectTrusted {
-        peer: NodeId,
-    },
-    StartTunnel {
-        rule_id: String,
-    },
-    StopTunnel {
-        rule_id: String,
-    },
-    #[cfg(feature = "agent-files")]
-    SendPaths {
-        peer: NodeId,
-        paths: Vec<PathBuf>,
-    },
-    #[cfg(feature = "agent-files")]
-    Pause {
-        task: TaskId,
-    },
-    #[cfg(feature = "agent-files")]
-    Resume {
-        peer: NodeId,
-        task: TaskId,
-    },
-    #[cfg(feature = "agent-files")]
-    ConfirmDirectory {
-        peer: NodeId,
-        request: TaskId,
-    },
-    #[cfg(feature = "agent-files")]
-    CancelDirectory {
-        request: TaskId,
-    },
-    StartSpeed {
-        peer: NodeId,
-        direction: crate::node::core::config::SpeedtestDirection,
-        seconds: u16,
-    },
-    StopSpeed {
-        peer: NodeId,
-        task: TaskId,
-    },
-    Stop,
-}
-
 impl NodeControl {
     pub(crate) fn configuration_committed(&self, revision: u64) -> Result<()> {
         let mut snapshot = self
@@ -427,39 +374,6 @@ impl NodeControl {
     }
     pub fn subscribe(&self) -> Result<(NodeSnapshot, broadcast::Receiver<SequencedEvent>)> {
         self.control.subscribe()
-    }
-    pub fn execute(&self, command: NodeCommand) -> Result<()> {
-        let result = match command {
-            NodeCommand::Connect { peer, password } => {
-                self.connect_peer_with_password(peer, password)
-            }
-            NodeCommand::ConnectTrusted { peer } => self.connect_peer_trusted(peer),
-            NodeCommand::StartTunnel { rule_id } => self.start_tunnel_rule(rule_id),
-            NodeCommand::StopTunnel { rule_id } => self.stop_tunnel_rule(rule_id),
-            #[cfg(feature = "agent-files")]
-            NodeCommand::SendPaths { peer, paths } => self.send_paths(peer, paths),
-            #[cfg(feature = "agent-files")]
-            NodeCommand::Pause { task } => self.pause_task(task),
-            #[cfg(feature = "agent-files")]
-            NodeCommand::Resume { peer, task } => self.resume_task(peer, task),
-            #[cfg(feature = "agent-files")]
-            NodeCommand::ConfirmDirectory { peer, request } => {
-                self.confirm_directory(peer, request)
-            }
-            #[cfg(feature = "agent-files")]
-            NodeCommand::CancelDirectory { request } => self.cancel_directory_preview(request),
-            NodeCommand::StartSpeed {
-                peer,
-                direction,
-                seconds,
-            } => self.start_speed(peer, direction, seconds),
-            NodeCommand::StopSpeed { peer, task } => self.cancel_speed(peer, task),
-            NodeCommand::Stop => {
-                self.shutdown();
-                Ok(())
-            }
-        };
-        result.map_err(Error::Protocol)
     }
 }
 
