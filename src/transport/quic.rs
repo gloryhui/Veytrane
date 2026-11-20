@@ -53,6 +53,7 @@ pub use veytrane_transport::TRANSFER_IDLE_TIMEOUT;
 pub use veytrane_transport::channel_binding::{
     CHANNEL_BINDING_LABEL, CHANNEL_BINDING_LEN, ChannelBinding,
 };
+pub use veytrane_transport::connection::await_identity_commit;
 pub use veytrane_transport::handshake::APPLICATION_HANDSHAKE_TIMEOUT;
 pub use veytrane_transport::quic::{
     ALPN, KEEP_ALIVE_INTERVAL, MAX_IDLE_TIMEOUT, client_endpoint, connect, endpoint_from_socket,
@@ -652,23 +653,6 @@ impl UdpPoller for PunchUdpPoller {
     fn poll_writable(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         self.io.poll_send_ready(cx)
     }
-}
-
-/// Dedicated identity streams are already finished by existing CLI/Desktop
-/// initiators after Ready. Only the racing winner sends that FIN; responders
-/// must observe it before exposing capabilities, authorization or handlers.
-pub async fn await_identity_commit(recv: &mut quinn::RecvStream) -> Result<()> {
-    let mut byte = [0_u8; 1];
-    let next = tokio::time::timeout(APPLICATION_HANDSHAKE_TIMEOUT, recv.read(&mut byte))
-        .await
-        .map_err(|_| Error::Transport("identity winner commit timed out".into()))?
-        .map_err(|e| Error::Transport(e.to_string()))?;
-    if next.is_some() {
-        return Err(Error::Protocol(
-            "unexpected data on dedicated identity stream".into(),
-        ));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

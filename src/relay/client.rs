@@ -5,25 +5,16 @@ use super::{
 };
 use crate::identity::{Identity, NodeId};
 use crate::nat::punch::PunchToken;
-use crate::net::{
-    AddressFamily, NetworkFamilies,
-    race::{ConnectionGuard, PreparedTransport},
-};
+use crate::net::{AddressFamily, NetworkFamilies};
 use crate::{Error, Result};
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::UdpSocket;
+use veytrane_transport::connection::{ConnectionGuard, PreparedTransport};
 
-/// Owned by the Desktop network or CLI link. Only winning endpoints are retained;
-/// pending/losing endpoints stay inside cancellation guards. No detached keepalive task.
-#[derive(Clone, Default)]
-pub struct EndpointPool(Arc<Mutex<PoolState>>);
-#[derive(Default)]
-struct PoolState {
-    closed: bool,
-    endpoints: Vec<(usize, quinn::Endpoint)>,
-}
+pub use veytrane_transport::connection::EndpointPool;
+
 type Progress = Arc<dyn Fn(&str) + Send + Sync>;
 #[derive(Clone)]
 pub struct Fallback {
@@ -84,58 +75,6 @@ impl Fallback {
         .await
     }
 }
-impl EndpointPool {
-    pub(crate) fn retain(
-        &self,
-        connection: &quinn::Connection,
-        endpoint: quinn::Endpoint,
-    ) -> Result<()> {
-        let mut endpoints = self
-            .0
-            .lock()
-            .map_err(|_| Error::Transport("Relay endpoint ownership unavailable".into()))?;
-        if endpoints.closed {
-            return Err(Error::Transport("Relay network already closed".into()));
-        }
-        endpoints
-            .endpoints
-            .retain(|(_, endpoint)| endpoint.open_connections() > 0);
-        if endpoints.endpoints.len() >= 64 {
-            return Err(Error::Transport("Relay endpoint resource limit".into()));
-        }
-        endpoints.endpoints.push((connection.stable_id(), endpoint));
-        Ok(())
-    }
-    pub fn is_relay(&self, connection: &quinn::Connection) -> bool {
-        self.0.lock().is_ok_and(|items| {
-            items
-                .endpoints
-                .iter()
-                .any(|(id, _)| *id == connection.stable_id())
-        })
-    }
-    pub fn endpoints(&self) -> Vec<quinn::Endpoint> {
-        self.0
-            .lock()
-            .map(|items| {
-                items
-                    .endpoints
-                    .iter()
-                    .map(|(_, endpoint)| endpoint.clone())
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-    pub fn close(&self) {
-        if let Ok(mut state) = self.0.lock() {
-            state.closed = true;
-            for (_, endpoint) in &state.endpoints {
-                endpoint.close(0_u32.into(), b"Relay network shutdown");
-            }
-        }
-    }
-}
-
 /// Resolving is deliberately called only inside the delayed fallback task.
 pub async fn resolve(spec: &str, families: NetworkFamilies) -> Result<Vec<SocketAddr>> {
     let addresses = tokio::time::timeout(Duration::from_secs(3), tokio::net::lookup_host(spec))

@@ -3,6 +3,8 @@
 pub mod atomic;
 #[cfg(feature = "quic")]
 pub mod channel_binding;
+#[cfg(feature = "quic")]
+pub mod connection;
 pub mod error;
 #[cfg(feature = "quic")]
 pub mod handshake;
