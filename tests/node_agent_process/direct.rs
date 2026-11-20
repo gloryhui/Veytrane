@@ -1,5 +1,73 @@
 use super::*;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TestAgentMix {
+    FullBoth,
+    MinimalBoth,
+    MinimalClientFullServer,
+    TcpClientFullServer,
+}
+
+fn minimal_agent() -> Option<String> {
+    std::env::var_os("VEYTRANE_TEST_MINIMAL_AGENT")
+        .map(|path| path.into_string().expect("验收二进制路径不是 UTF-8"))
+}
+
+fn test_agent_mix(minimal: Option<&str>) -> TestAgentMix {
+    match std::env::var("VEYTRANE_TEST_AGENT_MIX").ok().as_deref() {
+        Some("full-both") => TestAgentMix::FullBoth,
+        Some("minimal-both") => {
+            assert!(
+                minimal.is_some(),
+                "minimal-both requires VEYTRANE_TEST_MINIMAL_AGENT"
+            );
+            TestAgentMix::MinimalBoth
+        }
+        Some("minimal-client-full-server") => {
+            assert!(
+                minimal.is_some(),
+                "minimal-client-full-server requires VEYTRANE_TEST_MINIMAL_AGENT"
+            );
+            TestAgentMix::MinimalClientFullServer
+        }
+        Some("tcp-client-full-server") => {
+            assert!(minimal.is_some(), "tcp-client-full-server requires VEYTRANE_TEST_MINIMAL_AGENT");
+            TestAgentMix::TcpClientFullServer
+        }
+        Some(other) => panic!("unknown VEYTRANE_TEST_AGENT_MIX={other}"),
+        None if minimal.is_some() => TestAgentMix::MinimalBoth,
+        None => TestAgentMix::FullBoth,
+    }
+}
+
+fn init_agent(root: PathBuf, binary: Option<&str>) -> Node {
+    let Some(binary) = binary else {
+        return Node::init(root);
+    };
+    let initialized = Command::new(binary)
+        .arg("--data-dir")
+        .arg(&root)
+        .arg("--init")
+        .output()
+        .unwrap();
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+    let record = ConfigRecord::load(&root.join("node.json")).unwrap();
+    assert!(!record.settings.enable_files);
+    Node::open(root)
+}
+
+async fn start_agent(node: &mut Node, binary: Option<&str>) {
+    if let Some(binary) = binary {
+        node.start_with(binary).await;
+    } else {
+        node.start().await;
+    }
+}
+
 async fn configured_pair(sandbox: &Sandbox, discovery: bool) -> (Node, Node) {
     let mut a = Node::init(sandbox.0.join("direct-a"));
     let mut b = Node::init(sandbox.0.join("direct-b"));
@@ -46,30 +114,22 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
     use p2p_file::node::api::protocol::SpeedtestDirection;
 
     let sandbox = Sandbox::new();
-    let minimal = std::env::var_os("VEYTRANE_TEST_MINIMAL_AGENT")
-        .map(|path| path.into_string().expect("验收二进制路径不是 UTF-8"));
-    let init = |name: &str| {
-        let root = sandbox.0.join(name);
-        let Some(binary) = minimal.as_deref() else {
-            return Node::init(root);
-        };
-        let initialized = Command::new(binary)
-            .arg("--data-dir")
-            .arg(&root)
-            .arg("--init")
-            .output()
-            .unwrap();
-        assert!(
-            initialized.status.success(),
-            "{}",
-            String::from_utf8_lossy(&initialized.stderr)
-        );
-        let record = ConfigRecord::load(&root.join("node.json")).unwrap();
-        assert!(!record.settings.enable_files);
-        Node::open(root)
+    let minimal = minimal_agent();
+    let mix = test_agent_mix(minimal.as_deref());
+    let (client_binary, server_binary) = match mix {
+        TestAgentMix::FullBoth => (None, None),
+        TestAgentMix::MinimalBoth => (minimal.as_deref(), minimal.as_deref()),
+        TestAgentMix::MinimalClientFullServer | TestAgentMix::TcpClientFullServer => {
+            (minimal.as_deref(), None)
+        }
     };
-    let mut client = init("client");
-    let mut server = init("server");
+    let server_files = matches!(
+        mix,
+        TestAgentMix::MinimalClientFullServer | TestAgentMix::TcpClientFullServer
+    );
+    let client_speed = mix != TestAgentMix::TcpClientFullServer;
+    let mut client = init_agent(sandbox.0.join("client"), client_binary);
+    let mut server = init_agent(sandbox.0.join("server"), server_binary);
     let client_id = client.id();
     let server_id = server.id();
     let target = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -88,11 +148,12 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
             .unwrap()
             .settings
             .redacted();
-        settings["enable_files"] = json!(false);
-        settings["enable_speed"] = json!(true);
+        let files_enabled = node.root == server.root && server_files;
+        settings["enable_files"] = json!(files_enabled);
+        settings["enable_speed"] = json!(node.root == server.root || client_speed);
         settings["direct"]["lan_discovery"] = json!(false);
         grant(&mut settings, std::slice::from_ref(peer));
-        settings["resources"]["peers"][0]["files"] = json!(false);
+        settings["resources"]["peers"][0]["files"] = json!(files_enabled);
         if node.root == client.root {
             settings["forwards"] = json!([forward("echo", peer, listen)]);
             settings["service_ids"] = json!({"echo": "echo"});
@@ -104,14 +165,23 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
         offline(node, settings);
     }
 
-    if let Some(binary) = minimal.as_deref() {
-        server.start_with(binary).await;
-        client.start_with(binary).await;
-    } else {
-        server.start().await;
-        client.start().await;
+    start_agent(&mut server, server_binary).await;
+    start_agent(&mut client, client_binary).await;
+    if server_files {
+        let until = Instant::now() + Duration::from_secs(10);
+        while !(server.root.join("tasks.json").is_file() && server.root.join("receive").is_dir()) {
+            assert!(
+                Instant::now() < until,
+                "full server did not initialize its file store"
+            );
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+        assert!(
+            !client.root.join("tasks.json").exists(),
+            "minimal client created a task store"
+        );
     }
-    if minimal.is_some() {
+    if client_binary.is_some() {
         let before = fs::read(client.root.join("node.json")).unwrap();
         let mut config = client.config().await;
         config["settings"]["enable_files"] = json!(true);
@@ -141,40 +211,45 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
         })
         .await;
     assert_eq!(rejected.error.unwrap().code, "capability_disabled");
-    client
-        .ok(Api::StartSpeed {
-            peer: server_id.clone(),
-            direction: SpeedtestDirection::Upload,
-            seconds: 30,
-        })
-        .await;
-    let until = Instant::now() + Duration::from_secs(45);
-    let mut tcp_during_speed = false;
-    loop {
-        let tasks = client.ok(Api::Tasks { offset: 0 }).await;
-        assert_eq!(tasks["tasks"], json!([]));
-        assert!(tasks["queue"].is_null());
-        assert_eq!(tasks["directory_previews"], json!([]));
-        let speeds = tasks["speeds"].as_array().unwrap();
-        if !tcp_during_speed
-            && speeds
-                .iter()
-                .any(|row| row["peer"] == server_id && row["state"] == "Running")
-        {
-            echo_request(listen, b"TCP during speed").await;
-            tcp_during_speed = true;
+    let speed = Api::StartSpeed {
+        peer: server_id.clone(),
+        direction: SpeedtestDirection::Upload,
+        seconds: 30,
+    };
+    if client_speed {
+        client.ok(speed).await;
+        let until = Instant::now() + Duration::from_secs(45);
+        let mut tcp_during_speed = false;
+        loop {
+            let tasks = client.ok(Api::Tasks { offset: 0 }).await;
+            assert_eq!(tasks["tasks"], json!([]));
+            assert!(tasks["queue"].is_null());
+            assert_eq!(tasks["directory_previews"], json!([]));
+            let speeds = tasks["speeds"].as_array().unwrap();
+            if !tcp_during_speed
+                && speeds
+                    .iter()
+                    .any(|row| row["peer"] == server_id && row["state"] == "Running")
+            {
+                echo_request(listen, b"TCP during speed").await;
+                tcp_during_speed = true;
+            }
+            if speeds.iter().any(|row| {
+                row["peer"] == server_id
+                    && row["state"] == "Completed"
+                    && row["bytes"].as_u64().is_some_and(|bytes| bytes > 0)
+            }) {
+                break;
+            }
+            assert!(Instant::now() < until, "speed did not complete: {tasks}");
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        if speeds.iter().any(|row| {
-            row["peer"] == server_id
-                && row["state"] == "Completed"
-                && row["bytes"].as_u64().is_some_and(|bytes| bytes > 0)
-        }) {
-            break;
-        }
-        assert!(Instant::now() < until, "speed did not complete: {tasks}");
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(tcp_during_speed);
+    } else {
+        let rejected = client.response(speed).await;
+        assert_eq!(rejected.error.unwrap().code, "capability_disabled");
+        assert_eq!(client.ok(Api::Tasks { offset: 0 }).await["speeds"], json!([]));
     }
-    assert!(tcp_during_speed);
 
     client
         .ok(Api::Disconnect {
@@ -189,12 +264,96 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
     echo_request(listen, b"TCP after reconnect").await;
     client.stop().await;
     server.stop().await;
-    for node in [&client, &server] {
+    for (node, has_files) in [(&client, false), (&server, server_files)] {
         for relative in ["receive", "tasks.json", "tasks.lock"] {
-            assert!(!node.root.join(relative).exists(), "created {relative}");
+            assert_eq!(
+                node.root.join(relative).exists(),
+                has_files,
+                "unexpected {relative} state"
+            );
         }
     }
     echo.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn completed_file_task_survives_files_disabled_then_full_reenable() {
+    use p2p_file::node::{core::task_model::TaskState, core::task_store::TaskStore};
+
+    let sandbox = Sandbox::new();
+    let (mut sender, mut receiver) = configured_pair(&sandbox, false).await;
+    let sender_id = sender.id();
+    let receiver_id = receiver.id();
+    let bytes = vec![0x6bu8; 192 * 1024];
+    let source = sender.root.join("retained-before-disable.bin");
+    let received = receiver.root.join("receive/retained-before-disable.bin");
+    fs::write(&source, &bytes).unwrap();
+    let endpoint = ipv4_listener(&receiver).await;
+    cli_ok(
+        &sender.root,
+        &["connect-address", &receiver_id, &endpoint.to_string()],
+    );
+    wait_peer(&sender, &receiver_id).await;
+    wait_peer(&receiver, &sender_id).await;
+    cli_ok(
+        &sender.root,
+        &["send", &receiver_id, source.to_str().unwrap()],
+    );
+    let until = Instant::now() + Duration::from_secs(45);
+    let task_id = loop {
+        let tasks = receiver.ok(Api::Tasks { offset: 0 }).await;
+        if let Some(id) = tasks["tasks"].as_array().and_then(|rows| {
+            rows.iter()
+                .find(|row| row["state"] == "completed")
+                .and_then(|row| row["id"].as_str())
+        }) {
+            break id.to_owned();
+        }
+        assert!(Instant::now() < until, "file did not complete: {tasks}");
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    };
+    assert_eq!(
+        blake3::hash(&fs::read(&received).unwrap()),
+        blake3::hash(&bytes)
+    );
+    sender.stop().await;
+    receiver.stop().await;
+
+    let tasks_path = receiver.root.join("tasks.json");
+    let (store, _) = TaskStore::open(&tasks_path).unwrap();
+    assert!(store.list().iter().any(|task| {
+        task.task_id().to_string() == task_id && task.state() == TaskState::Completed
+    }));
+    drop(store);
+    let persisted_tasks = fs::read(&tasks_path).unwrap();
+
+    let mut disabled = ConfigRecord::load(&receiver.root.join("node.json"))
+        .unwrap()
+        .settings
+        .redacted();
+    disabled["enable_files"] = json!(false);
+    offline(&receiver, disabled);
+    let minimal = minimal_agent();
+    start_agent(&mut receiver, minimal.as_deref()).await;
+    let hidden = receiver.ok(Api::Tasks { offset: 0 }).await;
+    assert_eq!(hidden["tasks"], json!([]));
+    assert_eq!(fs::read(&tasks_path).unwrap(), persisted_tasks);
+    assert!(received.is_file());
+    receiver.stop().await;
+    assert_eq!(fs::read(&tasks_path).unwrap(), persisted_tasks);
+
+    let mut enabled = ConfigRecord::load(&receiver.root.join("node.json"))
+        .unwrap()
+        .settings
+        .redacted();
+    enabled["enable_files"] = json!(true);
+    offline(&receiver, enabled);
+    receiver.start().await;
+    let restored = receiver.ok(Api::Tasks { offset: 0 }).await;
+    assert!(restored["tasks"].as_array().unwrap().iter().any(|task| {
+        task["id"].as_str() == Some(task_id.as_str()) && task["state"] == "completed"
+    }));
+    receiver.stop().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

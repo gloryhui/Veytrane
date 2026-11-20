@@ -215,9 +215,13 @@ fn forward(id: &str, peer: &str, listen: std::net::SocketAddr) -> Value {
 fn offline(node: &Node, settings: Value) {
     let path = node.root.join("candidate.json");
     fs::write(&path, serde_json::to_vec(&settings).unwrap()).unwrap();
+    let revision = ConfigRecord::load(&node.root.join("node.json"))
+        .unwrap()
+        .revision
+        .to_string();
     cli_ok(
         &node.root,
-        &["offline-apply", path.to_str().unwrap(), "--revision", "0"],
+        &["offline-apply", path.to_str().unwrap(), "--revision", &revision],
     );
 }
 fn grant(settings: &mut Value, peers: &[String]) {
