@@ -4454,6 +4454,7 @@ dependencies = [
  "veytrane-files",
  "veytrane-node",
  "veytrane-speed",
+ "veytrane-tcp",
  "veytrane-transport",
  "webpki-roots",
  "windows-sys 0.59.0",
@@ -7153,6 +7154,16 @@ dependencies = [
  "tokio",
  "tracing",
  "veytrane-node",
+ "veytrane-transport",
+]
+
+[[package]]
+name = "veytrane-tcp"
+version = "0.1.0"
+dependencies = [
+ "quinn",
+ "tokio",
+ "tracing",
  "veytrane-transport",
 ]
 

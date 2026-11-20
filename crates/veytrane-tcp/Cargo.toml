@@ -1,0 +1,12 @@
+[package]
+name = "veytrane-tcp"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+
+[dependencies]
+quinn = "0.11.12"
+tokio = { version = "1.53.1", features = ["io-util", "macros", "net", "rt", "sync"] }
+tracing = "0.1.44"
+veytrane-transport = { path = "../veytrane-transport" }

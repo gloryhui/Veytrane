@@ -15,6 +15,7 @@ members = [
     "crates/veytrane-files",
     "crates/veytrane-node",
     "crates/veytrane-speed",
+    "crates/veytrane-tcp",
     "crates/veytrane-transport",
 ]
 default-members = ["."]
@@ -56,6 +57,7 @@ gui = [
 veytrane-files = { path = "crates/veytrane-files" }
 veytrane-node = { path = "crates/veytrane-node", optional = true }
 veytrane-speed = { path = "crates/veytrane-speed", default-features = false }
+veytrane-tcp = { path = "crates/veytrane-tcp" }
 veytrane-transport = { path = "crates/veytrane-transport", features = ["quic"] }
 socket2 = "0.6.5"
 rusqlite = { version = "=0.37.0", features = ["bundled"] }
