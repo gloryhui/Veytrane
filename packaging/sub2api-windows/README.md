@@ -20,11 +20,11 @@
 
 以下 `--init` 仅用于首次建立新网关。升级现有网关时先私有备份、优雅停机并确认锁释放，再替换二进制和服务路径；保留 `gateway.json`、`identity.key` 和原客户端私有 profile，禁止重新初始化或重设凭证。专用 GatewayProfile 不含通用节点的 `peer_modes`。Windows 更新只替换分发文件，保留当前用户的 `%LOCALAPPDATA%\Sub2API-Client`。P2PN v2 网关与客户端必须使用同一协议版本，旧协议包不能继续连接。
 
-1. 构建服务器：`cargo build --locked --release --features sub2api-gateway --bin p2p-sub2api-gateway`。
+1. 构建服务器：`cargo build --locked --release --no-default-features --features sub2api-gateway --bin p2p-sub2api-gateway`。
 2. 为网关选择全新私有目录，执行 `p2p-sub2api-gateway --data-dir <目录> --init --signal-server <HOST:PORT>`，从 stdin 输入独立随机 12 位字母数字密码。仅返回新网关 NodeId。已存在的身份/配置会被拒绝覆盖。
 3. 网关 `gateway.json` 仅保存密码校验值。用该目录运行服务器并由 systemd 管理；不要改变现有 Agent 的部署。
 4. 在仓库外或被忽略且权限为 0700 的私有目录准备客户端构建 JSON：`signal_server`、`server_node_id`、`password`；可选 `signal_tls`、`relay_server`。它是发行者的私有构建输入，不能提交或加入 ZIP。
-5. 构建时设置 `P2P_SUB2API_PROFILE_FILE=<绝对路径>`，然后 `cargo build --locked --release --features sub2api-client --bin sub2api-client --target x86_64-pc-windows-msvc`。也可使用 LLVM-MinGW 配合官方 `x86_64-pc-windows-gnullvm` 标准库交叉构建，静态链接 CRT，并检查 DLL 导入。默认未提供 profile 的构建会在运行时拒绝连接。
+5. 构建时设置 `P2P_SUB2API_PROFILE_FILE=<绝对路径>`，然后 `cargo build --locked --release --no-default-features --features sub2api-client --bin sub2api-client --target x86_64-pc-windows-msvc`。也可使用 LLVM-MinGW 配合官方 `x86_64-pc-windows-gnullvm` 标准库交叉构建，静态链接 CRT，并检查 DLL 导入。默认未提供 profile 的构建会在运行时拒绝连接。
 6. `python3 scripts/package-sub2api-windows.py --binary <sub2api-client.exe> --output <新输出目录>`。包外的 manifest 记录实际父提交、未提交状态、源文件与程序的 SHA256；它不声称未提交代码已经发布到 Git。
 
 首次启动持锁，避免重复实例。核心保持断线重连；检测到休眠/接口变化后清理会话并重建网络。连通探测后打开默认浏览器，端口占用时直接报错，不猜测另一个端口。关闭窗口不保留后台任务或开机自启。

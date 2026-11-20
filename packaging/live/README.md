@@ -77,7 +77,7 @@ Windows 从源码直接测试观看端也可以：
 ## Mac 开发和主播运行
 
 ```sh
-cargo build --locked --release --features live --bin live-gateway --bin live-viewer
+cargo build --locked --release --no-default-features --features live --bin live-gateway --bin live-viewer
 ./target/release/live-gateway --data-dir "$PWD/live-private/gateway" --init --signal-server 'signal.example.com:7000'
 MEDIAMTX_BIN='/实际路径/mediamtx' sh packaging/live/start-live-host.sh
 ```
@@ -111,14 +111,15 @@ Mac 下载同一官方 Release 的 `darwin_arm64` 或 `darwin_amd64` 压缩包�
 ## 验证与延迟
 
 ```sh
-cargo test --locked --features live --lib node::products
-cargo clippy --locked --features live --lib --bin live-gateway --bin live-viewer -- -D warnings
+cargo test --locked --no-default-features --features live --lib node::products
+cargo clippy --locked --no-default-features --features live --lib --bin live-gateway --bin live-viewer -- -D warnings
 ```
 
-可重复的 Mac 本机端到端测试（测试工具不进入朋友的包）：
+可重复的 Mac 本机端到端测试。Live 和 standalone 分开构建，smoke 脚本从同一个 `--bin-dir` 读取这些本机测试程序。
 
 ```sh
-cargo build --locked --features live --bin live-gateway --bin live-viewer --bin p2p_file
+cargo build --locked --no-default-features --features live --bin live-gateway --bin live-viewer
+cargo build --locked --no-default-features --features standalone --bin p2p_file
 npm install --prefix release/live/test-tools --no-audit --no-fund playwright-core
 python3 scripts/live-local-smoke.py \
   --mediamtx '/实际路径/mediamtx' \

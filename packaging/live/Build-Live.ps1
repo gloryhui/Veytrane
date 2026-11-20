@@ -21,7 +21,7 @@ try {
         if ($callerFlags) { $flags = @($callerFlags -split '\s+' | Where-Object { $_ }) }
     }
     $env:CARGO_ENCODED_RUSTFLAGS = ($flags + @('-C', 'target-feature=+crt-static')) -join [char]31
-    cargo build --locked --release --target x86_64-pc-windows-msvc --features live --bin live-gateway --bin live-viewer
+    cargo build --locked --release --no-default-features --target x86_64-pc-windows-msvc --features live --bin live-gateway --bin live-viewer
     if ($LASTEXITCODE -ne 0) { throw 'Cargo build failed.' }
     Write-Host 'Built target/x86_64-pc-windows-msvc/release/live-gateway.exe and live-viewer.exe'
 } finally {
