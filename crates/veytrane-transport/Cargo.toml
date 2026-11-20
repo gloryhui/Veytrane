@@ -7,7 +7,7 @@ publish = false
 
 [features]
 private-storage = ["dep:rustix", "dep:windows-sys"]
-quic = ["dep:quinn", "dep:rcgen", "dep:socket2", "dep:tracing", "tokio/net", "tokio/sync", "tokio/time"]
+quic = ["dep:quinn", "dep:rcgen", "dep:socket2", "dep:tracing", "tokio/macros", "tokio/net", "tokio/sync", "tokio/time"]
 test-support = []
 
 [dependencies]

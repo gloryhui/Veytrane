@@ -19,6 +19,8 @@ pub mod quic;
 pub mod raw_frame;
 pub mod short_id;
 #[cfg(feature = "quic")]
+pub mod signal_wire;
+#[cfg(feature = "quic")]
 pub mod udp;
 
 /// Maximum silence while waiting for data on an active transfer stream.

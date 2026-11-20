@@ -37,11 +37,11 @@
 use std::collections::HashSet;
 #[cfg(test)]
 use std::net::IpAddr;
+#[cfg(any(feature = "signaling-server", test))]
 use std::net::SocketAddr;
 use std::time::Duration;
 
 use super::short_id::ShortId;
-use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, ReadHalf, WriteHalf};
 #[cfg(test)]
 use tokio::net::TcpListener;
@@ -66,35 +66,20 @@ type SignalWrite = WriteHalf<SignalStream>;
 /// 信令服务器默认端口。
 pub const DEFAULT_SIGNAL_PORT: u16 = 7000;
 
-/// 信令协议版本。
-///
-/// - v1：`Register { node_id, public_key, candidates }`，没有任何认证。
-/// - v2：challenge-response 注册认证（见本模块文档），单连接单身份。
-///
-/// 两者不兼容：新版服务器收到 v1 的 `Register` 会在握手阶段明确拒绝，
-/// 新版客户端也会拒绝 v1 服务器的应答，不会静默降级到无认证路径。
-pub const SIGNAL_PROTOCOL_VERSION: u32 = 2;
-/// Opt-in extension; legacy v2 wire/signatures stay unchanged.
-pub const SHORT_ID_PROTOCOL_VERSION: u32 = 3;
-/// Desktop signaling with signed, peer-scoped recovery candidates.
-pub const RECOVERY_PROTOCOL_VERSION: u32 = 4;
-const RECOVERY_DOMAIN: &[u8] = b"p2p_file/signal-recovery-lookup/v1";
-const SHORT_LOOKUP_UNAVAILABLE: &str = "设备查询不可用或请求过多，请稍后重试";
-
-/// 注册 challenge 长度（256 bit）。
-pub const CHALLENGE_LEN: usize = 32;
-
-/// 注册签名的域标签，避免签名被挪用到别处。
-pub const REGISTER_DOMAIN: &[u8] = b"p2p_file/signal-register/v2";
-
 /// 信令单帧上限。
 ///
 /// 信令全是小控制消息（候选地址最多 [`MAX_CANDIDATES`] 个），不该复用业务
 /// 分片那 16 MiB 的通用上限，否则公网端口上一个长度头就能逼服务端提前分配大缓冲。
 pub const MAX_SIGNAL_FRAME_LEN: u32 = 64 * 1024;
 
-/// 单个节点允许公布的候选地址数量上限。
-pub const MAX_CANDIDATES: usize = 32;
+pub(crate) use veytrane_transport::signal_wire::recovery_payload;
+pub use veytrane_transport::signal_wire::{
+    CHALLENGE_LEN, Candidate, CandidateKind, MAX_CANDIDATES, RECOVERY_PROTOCOL_VERSION,
+    REGISTER_DOMAIN, SHORT_ID_PROTOCOL_VERSION, SIGNAL_PROTOCOL_VERSION, SignalMessage,
+    dedup_candidates, register_payload, sort_candidates,
+};
+const SHORT_LOOKUP_UNAVAILABLE: &str = "设备查询不可用或请求过多，请稍后重试";
+
 /// 每条连接待写队列容量。
 pub const OUTBOX_CAPACITY: usize = 64;
 
@@ -110,243 +95,6 @@ pub use server::{
     MAX_REGISTERED_PEERS, MAX_WAITER_ENTRIES, NODE_LOOKUP_WINDOW, SignalServerConfig,
     run_signal_server, run_signal_server_on, run_signal_server_on_with,
 };
-
-/// 候选地址的类型，决定了它的优先级。
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
-pub enum CandidateKind {
-    /// 服务器反射地址（STUN 看到的公网映射）。
-    ServerReflexive,
-    /// Relay 兜底候选；实际使用须经过认证 UDP admission，不代表实现完整 TURN。
-    Relay,
-    /// 用端口预测猜出来的地址，只在对称型 NAT 下才用。
-    Predicted,
-    /// 直连地址（局域网或本机地址）。
-    Host,
-}
-
-impl CandidateKind {
-    /// 数字越小越优先尝试。
-    ///
-    /// 顺序是刻意排的：先公网映射，再 Host（局域网或原生 IPv6）和端口预测地址，
-    /// 最后 Relay 候选；运行时原生 IPv6/IPv4 直连竞速优先，认证 Relay 只做延迟兜底。
-    pub fn priority(self) -> u32 {
-        match self {
-            Self::ServerReflexive => 0,
-            Self::Host => 1,
-            Self::Predicted => 2,
-            Self::Relay => 3,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::ServerReflexive => "公网映射",
-            Self::Relay => "中继",
-            Self::Predicted => "预测",
-            Self::Host => "本机/局域网",
-        }
-    }
-}
-
-/// 一个候选地址。
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub struct Candidate {
-    pub kind: CandidateKind,
-    pub addr: SocketAddr,
-}
-
-impl Candidate {
-    pub fn new(kind: CandidateKind, addr: SocketAddr) -> Self {
-        Self { kind, addr }
-    }
-
-    /// 公网映射候选（STUN 或手动指定）。
-    pub fn reflexive(addr: SocketAddr) -> Self {
-        Self::new(CandidateKind::ServerReflexive, addr)
-    }
-
-    /// 本机/局域网候选。
-    pub fn host(addr: SocketAddr) -> Self {
-        Self::new(CandidateKind::Host, addr)
-    }
-}
-
-impl std::fmt::Display for Candidate {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}（{}）", self.addr, self.kind.as_str())
-    }
-}
-
-/// 把候选地址按尝试顺序排好。
-///
-/// 同优先级里 IPv6 排前面：没有 NAT 的可能性大，成功率高。
-pub fn sort_candidates(candidates: &mut [Candidate]) {
-    candidates.sort_by_key(|candidate| {
-        let family_bonus = if candidate.addr.is_ipv6() { 0 } else { 1 };
-        (candidate.kind.priority(), family_bonus)
-    });
-}
-
-/// 去重（同类型同地址只留一个）。
-pub fn dedup_candidates(candidates: &mut Vec<Candidate>) {
-    let mut seen = Vec::new();
-    candidates.retain(|candidate| {
-        if seen.contains(candidate) {
-            false
-        } else {
-            seen.push(*candidate);
-            true
-        }
-    });
-}
-
-/// 信令消息。
-///
-/// 变体顺序就是 postcard 的线格式（enum 用变体序号编码），**不要重排**：
-/// 前 8 个变体与 v1 保持同样的序号，这样 v1 客户端收到 v2 服务器的
-/// `RegisterChallenge`（序号 9，超出 v1 的范围）会解析失败并明确报错，
-/// 而不是把挑战错认成 `Registered`、假装登记成功。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SignalMessage {
-    /// 客户端 → 服务器：带签名的正式登记。
-    ///
-    /// 与 v1 的 `Register { node_id, public_key, candidates }` 同序号但多一个
-    /// `signature` 字段：v1 客户端发来的帧会因为字段缺失而解析失败，被明确拒绝。
-    Register {
-        node_id: NodeId,
-        public_key: [u8; 32],
-        candidates: Vec<Candidate>,
-        /// 对 [`register_payload`] 的 Ed25519 签名。
-        signature: Vec<u8>,
-    },
-    /// 服务器 → 客户端：登记成功。
-    Registered,
-    /// 客户端 → 服务器：我要找这个节点。
-    Lookup {
-        node_id: NodeId,
-    },
-    /// 服务器 → 客户端：对方的候选地址（对方已就位）。
-    ///
-    /// `token` 是服务器为这一对节点生成的打洞令牌，双方拿到的必须一致。
-    /// 有了它，打洞时就能安全地接受「来自任意地址」的探测包，从而打通那些
-    /// 公网端口按目标分配的 NAT（地址相关映射型）。
-    PeerCandidates {
-        node_id: NodeId,
-        candidates: Vec<Candidate>,
-        token: PunchToken,
-    },
-    /// 服务器 → 客户端：对方还没上线，等着，来了会推送。
-    PeerPending {
-        node_id: NodeId,
-    },
-    /// 心跳。
-    Ping,
-    Pong,
-    /// 出错。
-    Error {
-        reason: String,
-    },
-    /// 客户端 → 服务器：v2 注册第一步，声明身份。
-    RegisterHello {
-        protocol_version: u32,
-        node_id: NodeId,
-        public_key: [u8; 32],
-    },
-    /// 服务器 → 客户端：v2 本次连接的注册挑战。
-    RegisterChallenge {
-        protocol_version: u32,
-        challenge: [u8; CHALLENGE_LEN],
-    },
-    RegisteredShort {
-        short_id: ShortId,
-    },
-    LookupShort {
-        short_id: ShortId,
-    },
-    ShortResolved {
-        short_id: ShortId,
-        node_id: Option<NodeId>,
-    },
-    /// A lookup with candidates scoped to this target and registration.
-    RecoveryLookup {
-        node_id: NodeId,
-        candidates: Vec<Candidate>,
-        sequence: u64,
-        signature: Vec<u8>,
-    },
-}
-
-impl SignalMessage {
-    pub fn encode(&self) -> Result<Vec<u8>> {
-        Ok(postcard::to_allocvec(self)?)
-    }
-
-    pub fn decode(bytes: &[u8]) -> Result<Self> {
-        Ok(postcard::from_bytes(bytes)?)
-    }
-
-    /// 便于日志阅读的简短名字。
-    pub fn kind(&self) -> &'static str {
-        match self {
-            Self::RegisterHello { .. } => "RegisterHello",
-            Self::RegisterChallenge { .. } => "RegisterChallenge",
-            Self::Register { .. } => "Register",
-            Self::Registered => "Registered",
-            Self::RegisteredShort { .. } => "RegisteredShort",
-            Self::LookupShort { .. } => "LookupShort",
-            Self::ShortResolved { .. } => "ShortResolved",
-            Self::RecoveryLookup { .. } => "RecoveryLookup",
-            Self::Lookup { .. } => "Lookup",
-            Self::PeerCandidates { .. } => "PeerCandidates",
-            Self::PeerPending { .. } => "PeerPending",
-            Self::Ping => "Ping",
-            Self::Pong => "Pong",
-            Self::Error { .. } => "Error",
-        }
-    }
-}
-
-/// 注册签名载荷。
-///
-/// 双方（客户端签名、服务器校验）必须算出完全相同的字节串：
-///
-/// ```text
-/// REGISTER_DOMAIN + challenge + node_id + public_key + blake3(postcard(candidates))
-/// ```
-///
-/// `challenge` 绑定本次连接的新鲜性；`candidates` 进签名是为了让明文信令上的
-/// 中间人无法篡改对端地址。postcard 对这些类型是确定性编码，两侧重新编码结果
-/// 一致，所以服务器可以只对收到的候选列表重新求哈希。
-pub fn register_payload(
-    challenge: &[u8; CHALLENGE_LEN],
-    node_id: NodeId,
-    public_key: &[u8; 32],
-    candidates: &[Candidate],
-) -> Result<Vec<u8>> {
-    let mut payload = Vec::with_capacity(REGISTER_DOMAIN.len() + CHALLENGE_LEN + 16 + 32 + 32);
-    payload.extend_from_slice(REGISTER_DOMAIN);
-    payload.extend_from_slice(challenge);
-    payload.extend_from_slice(node_id.as_bytes());
-    payload.extend_from_slice(public_key);
-    let encoded = postcard::to_allocvec(candidates)?;
-    payload.extend_from_slice(blake3::hash(&encoded).as_bytes());
-    Ok(payload)
-}
-
-fn recovery_payload(
-    challenge: &[u8; CHALLENGE_LEN],
-    target: NodeId,
-    candidates: &[Candidate],
-    sequence: u64,
-) -> Result<Vec<u8>> {
-    let mut payload = Vec::new();
-    payload.extend_from_slice(RECOVERY_DOMAIN);
-    payload.extend_from_slice(challenge);
-    payload.extend_from_slice(target.as_bytes());
-    payload.extend_from_slice(&sequence.to_be_bytes());
-    payload.extend_from_slice(blake3::hash(&postcard::to_allocvec(candidates)?).as_bytes());
-    Ok(payload)
-}
 
 // ---------------------------------------------------------------------------
 // 信令客户端
