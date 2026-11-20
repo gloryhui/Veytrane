@@ -3,6 +3,7 @@
 use super::{Agent, Command, FilePage, NodeId};
 use serde_json::{Value, json};
 use std::time::Duration;
+use veytrane_files::task_model::TaskDiagnostic;
 
 impl Agent {
     pub(super) async fn execute_files(&self, command: Command) -> Result<Value, String> {
@@ -99,6 +100,7 @@ impl Agent {
                 .skip(offset)
                 .take(128)
                 .map(|task| {
+                    let diagnostic = task.diagnostic.map(TaskDiagnostic::safe_message);
                     json!({
                         "id": task.id,
                         "group": task.group,
@@ -110,11 +112,11 @@ impl Agent {
                         "total": task.total,
                         "confirmed": task.confirmed,
                         "rate": task.rate,
-                        "diagnostic": task.diagnostic,
-                        "retryable": task.retryable,
+                        "diagnostic": diagnostic,
+                        "retryable": task.retryable(),
                         "can_pause": task.can_pause(),
                         "can_continue": task.can_continue(),
-                        "can_delete_file": task.can_delete_file(),
+                        "can_delete_file": task.can_delete_file,
                     })
                 })
                 .collect();

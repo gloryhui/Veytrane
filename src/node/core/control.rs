@@ -479,15 +479,13 @@ impl NodeControl {
         result.map_err(Error::Protocol)
     }
     #[cfg(feature = "agent-files")]
-    pub fn task_snapshot(&self) -> Result<Option<crate::node::core::snapshot::Snapshot>> {
+    pub(crate) fn task_snapshot(
+        &self,
+    ) -> Result<Option<veytrane_files::task_snapshot::FileSnapshot>> {
         self.control
             .transfer
             .as_ref()
-            .map(|service| {
-                service
-                    .file_snapshot()
-                    .map(crate::node::core::snapshot::Snapshot::from_file)
-            })
+            .map(|service| service.file_snapshot())
             .transpose()
     }
     #[cfg_attr(not(feature = "agent-files"), allow(dead_code))]

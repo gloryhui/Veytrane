@@ -65,6 +65,27 @@ impl FileTaskSnapshot {
                     .is_some_and(|details| details.receipt_committed),
         }
     }
+
+    pub fn retryable(&self) -> bool {
+        self.diagnostic.is_some_and(TaskDiagnostic::is_retryable)
+    }
+
+    pub fn can_pause(&self) -> bool {
+        self.auto_waiting
+            || matches!(
+                self.state,
+                TaskState::Queued
+                    | TaskState::Connecting
+                    | TaskState::Negotiating
+                    | TaskState::Transferring
+            )
+    }
+
+    pub fn can_continue(&self) -> bool {
+        !self.auto_waiting
+            && (matches!(self.state, TaskState::Paused | TaskState::Interrupted)
+                || (self.state == TaskState::Failed && self.retryable()))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -72,4 +93,62 @@ pub struct FileSnapshot {
     pub space: Summary,
     pub tasks: Vec<FileTaskSnapshot>,
     pub queue: QueueMetrics,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::task_model::{TaskDiagnostic, TaskErrorCode};
+
+    fn fact(
+        state: TaskState,
+        diagnostic: Option<TaskDiagnostic>,
+        auto_waiting: bool,
+    ) -> FileTaskSnapshot {
+        FileTaskSnapshot {
+            id: TaskId::parse("22222222222222222222222222222222").unwrap(),
+            group: None,
+            name: "fixture.bin".into(),
+            peer: NodeId::from_hex("11111111111111111111111111111111").unwrap(),
+            direction: TaskDirection::Receive,
+            state,
+            total: 1,
+            confirmed: 0,
+            rate: 0.,
+            diagnostic,
+            auto_waiting,
+            can_delete_file: false,
+        }
+    }
+
+    #[test]
+    fn actionability_is_derived_from_file_state_without_presentation_labels() {
+        let transferring = fact(TaskState::Transferring, None, false);
+        assert!(transferring.can_pause());
+        assert!(!transferring.can_continue());
+
+        let paused = fact(TaskState::Paused, None, false);
+        assert!(!paused.can_pause());
+        assert!(paused.can_continue());
+
+        let retryable = fact(
+            TaskState::Failed,
+            Some(TaskDiagnostic::new(TaskErrorCode::NetworkInterrupted, true)),
+            false,
+        );
+        assert!(retryable.retryable());
+        assert!(retryable.can_continue());
+
+        let non_retryable = fact(
+            TaskState::Failed,
+            Some(TaskDiagnostic::new(TaskErrorCode::PermissionDenied, false)),
+            false,
+        );
+        assert!(!non_retryable.retryable());
+        assert!(!non_retryable.can_continue());
+
+        let auto_waiting = fact(TaskState::Interrupted, None, true);
+        assert!(auto_waiting.can_pause());
+        assert!(!auto_waiting.can_continue());
+    }
 }
