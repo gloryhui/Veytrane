@@ -1,5 +1,7 @@
 //! TCP stream budgets, listener supervision, and QUIC byte forwarding.
 
+pub mod rules;
+
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};

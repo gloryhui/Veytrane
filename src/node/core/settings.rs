@@ -114,16 +114,8 @@ impl NodeSettings {
         if self.trust_sources.len() != self.trusted_devices.len() {
             return Err(Error::Protocol("授权来源包含未授权设备".into()));
         }
-        crate::tunnel::rules::ServiceConfig {
-            forward_targets: self.services.clone(),
-            ..Default::default()
-        }
-        .validate()?;
-        crate::tunnel::rules::ClientConfig {
-            rules: self.forwards.clone(),
-            ..Default::default()
-        }
-        .validate()?;
+        veytrane_tcp::rules::validate_forward_targets(&self.services)?;
+        veytrane_tcp::rules::validate_client_rules(&self.forwards)?;
         for service in &self.services {
             crate::node::core::wire::validate_service_id(&service.id)?;
         }

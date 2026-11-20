@@ -70,46 +70,7 @@ pub struct SettingsDraft {
     pub trusted_devices: Vec<crate::node::core::trusted_devices::TrustedDevice>,
 }
 
-pub use crate::tunnel::rules::{AllowedForwardTarget, TunnelRule};
-
-impl AllowedForwardTarget {
-    pub fn new(
-        name: impl Into<String>,
-        target: std::net::SocketAddr,
-        allowed_peers: Vec<String>,
-    ) -> Self {
-        Self {
-            id: new_rule_id(),
-            name: name.into(),
-            allowed_peers,
-            target,
-            enabled: true,
-        }
-    }
-}
-
-impl TunnelRule {
-    pub fn new(
-        name: impl Into<String>,
-        peer_node_id: impl Into<String>,
-        listen_port: u16,
-        target: std::net::SocketAddr,
-    ) -> Self {
-        Self {
-            id: new_rule_id(),
-            name: name.into(),
-            peer_node_id: peer_node_id.into(),
-            listen: std::net::SocketAddr::from(([127, 0, 0, 1], listen_port)),
-            target,
-            enabled: true,
-            auto_start: false,
-        }
-    }
-}
-
-fn new_rule_id() -> String {
-    format!("{:032x}", rand::random::<u128>())
-}
+pub use veytrane_tcp::rules::{AllowedForwardTarget, TunnelRule};
 
 impl SettingsDraft {
     pub fn defaults(downloads_dir: Option<PathBuf>) -> Self {
