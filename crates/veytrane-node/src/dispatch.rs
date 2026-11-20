@@ -110,3 +110,135 @@ pub async fn open_bi(connection: &quinn::Connection, kind: StreamKind) -> Result
         .map_err(|error| Error::Transport(format!("写入节点流类型失败：{error}")))?;
     Ok(BiStream { send, recv })
 }
+
+#[cfg(all(test, feature = "remote-auth"))]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use veytrane_transport::quic::{client_endpoint, connect, server_endpoint};
+
+    async fn pair() -> (
+        quinn::Endpoint,
+        quinn::Endpoint,
+        quinn::Connection,
+        quinn::Connection,
+    ) {
+        let server = server_endpoint("127.0.0.1:0".parse().unwrap()).unwrap();
+        let client = client_endpoint("127.0.0.1:0".parse().unwrap()).unwrap();
+        let accepting = async { server.accept().await.unwrap().await.unwrap() };
+        let (client_connection, server_connection) = tokio::join!(
+            connect(&client, server.local_addr().unwrap(), "localhost"),
+            accepting
+        );
+        (
+            client,
+            server,
+            client_connection.unwrap(),
+            server_connection,
+        )
+    }
+
+    fn all_capabilities() -> u64 {
+        capability::CAP_FILE_TRANSFER | capability::CAP_TCP_TUNNEL | capability::CAP_SPEED_EXECUTION
+    }
+
+    async fn wait_queue_len(receiver: &mpsc::Receiver<BiStream>, expected: usize) {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while receiver.len() < expected {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("queue did not reach {expected} entries"));
+    }
+
+    #[tokio::test]
+    async fn pending_header_slots_are_bounded_by_the_next_business_stream() {
+        let (_client_endpoint, _server_endpoint, client, server) = pair().await;
+        let (_dispatcher, _incoming) = Dispatcher::start(server, all_capabilities());
+        let mut silent = Vec::new();
+        for _ in 0..MAX_PENDING_HEADERS {
+            silent.push(client.open_bi().await.unwrap());
+        }
+        let (mut successor, _successor_recv) = client.open_bi().await.unwrap();
+        successor
+            .write_all(&[StreamKind::Service as u8])
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), successor.stopped())
+                .await
+                .expect("pending header overflow must reject the successor promptly")
+                .unwrap(),
+            Some(RESET_BUSY.into())
+        );
+        drop(silent);
+    }
+
+    #[tokio::test]
+    async fn slow_low_header_times_out_after_a_later_business_stream_opens_it() {
+        let (_client_endpoint, _server_endpoint, client, server) = pair().await;
+        let (_dispatcher, _incoming) = Dispatcher::start(server, all_capabilities());
+        let (silent, _silent_recv) = client.open_bi().await.unwrap();
+        let (mut successor, _successor_recv) = client.open_bi().await.unwrap();
+        successor
+            .write_all(&[StreamKind::Service as u8])
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(8), silent.stopped())
+                .await
+                .expect("implicitly opened low stream must still time out")
+                .unwrap(),
+            Some(RESET_INVALID.into())
+        );
+    }
+
+    #[tokio::test]
+    async fn valid_stream_queue_is_bounded_per_kind_and_reuses_a_freed_slot() {
+        let (_client_endpoint, _server_endpoint, client, server) = pair().await;
+        let (_dispatcher, mut incoming) = Dispatcher::start(server, all_capabilities());
+        let mut queued = Vec::new();
+        for _ in 0..QUEUE_CAPACITY {
+            queued.push(open_bi(&client, StreamKind::Service).await.unwrap());
+            tokio::task::yield_now().await;
+        }
+        wait_queue_len(&incoming.services, QUEUE_CAPACITY).await;
+
+        let overflow = open_bi(&client, StreamKind::Service).await.unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), overflow.send.stopped())
+                .await
+                .expect("full service queue must reject promptly")
+                .unwrap(),
+            Some(RESET_BUSY.into())
+        );
+
+        let speed = open_bi(&client, StreamKind::Speed).await.unwrap();
+        wait_queue_len(&incoming.speed, 1).await;
+        let _ = tokio::time::timeout(Duration::from_secs(2), incoming.speed.recv())
+            .await
+            .expect("speed queue must remain independent")
+            .expect("speed stream must be queued");
+
+        let _ = tokio::time::timeout(Duration::from_secs(2), incoming.services.recv())
+            .await
+            .expect("service queue must contain the bounded streams")
+            .expect("service stream must be queued");
+        wait_queue_len(&incoming.services, QUEUE_CAPACITY - 1).await;
+        let replacement = open_bi(&client, StreamKind::Service).await.unwrap();
+        wait_queue_len(&incoming.services, QUEUE_CAPACITY).await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            for _ in 0..QUEUE_CAPACITY {
+                incoming
+                    .services
+                    .recv()
+                    .await
+                    .expect("replacement service stream must restore a full queue");
+            }
+        })
+        .await
+        .expect("a freed service slot must accept one replacement stream");
+        drop((queued, overflow, speed, replacement));
+    }
+}
