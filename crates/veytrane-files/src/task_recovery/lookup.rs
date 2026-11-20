@@ -1,6 +1,6 @@
 //! Historical explicit-lookup regression fixtures, not part of the runtime.
 use super::*;
-use crate::node::core::{
+use crate::{
     task_model::TaskDirection,
     task_store::{TaskStore, TaskStoreError},
 };

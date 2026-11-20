@@ -15,6 +15,7 @@ safe-storage = [
     "dep:serde_json",
     "dep:unicode-normalization",
     "dep:windows-sys",
+    "veytrane-transport/private-storage",
 ]
 test-support = []
 
