@@ -111,7 +111,7 @@
 - 从干净 `4f3be51` 源码在 macOS arm64 分别用 `--no-default-features` 构建 `live` 的 gateway/viewer、`sub2api-gateway` 和 `sub2api-client`，均生成原生可执行文件。客户端使用无私有配置的编译组合。三套构建均报告四条未使用的节点策略 API 告警；验证涵盖构建和目标架构。[Live](../tmp/p4-products.1GBs3O/live.log)、[Sub2API Gateway](../tmp/p4-products.1GBs3O/sub2api-gateway.log)、[Sub2API Client](../tmp/p4-products.1GBs3O/sub2api-client.log)。
 - [首次原生 CI](https://github.com/gloryhui/Veytrane/actions/runs/44878747014) 在 `fdac2e6` 通过 Linux、Apple Silicon 和 Intel Mac。Windows 回归通过后，正式打包被干净工作树检查拦截。MSVC 探针默认把 `sdk_probe.obj` 写到仓库目录，`de9af87` 将它显式输出到探针临时目录。
 - [修复后原生 CI](https://github.com/gloryhui/Veytrane/actions/runs/44880833831) 在 `de9af87d516efea8f0cf2dab0c235ea59815e1b2` 的 Windows x64、Intel Mac、Apple Silicon 和 Linux 全部通过。Windows 和 Intel Mac 分别使用正式宿主脚本构建两版型，归档校验通过。Linux 的标准版与增强版均通过严格 Clippy。
-- `d639375` 更新 Windows [计划任务换版验收入口](../packaging/node/README.md#windows-双版型隔离验收)，允许同 SHA 的标准与增强候选往返切换，并核对任务指向、TCP 能力、身份与配置。18 项本机 Python 宿主测试通过。Windows Server 2022 CI 提供了可用于实测的双版候选，仍需具有已登录测试用户和 PowerShell 7 的隔离 Win10 22H2 或 Win11 x64 环境执行任务注册、切换和注销。
+- `d639375` 更新 Windows [计划任务换版验收入口](../packaging/node/README.md#windows-双版型隔离验收)，允许同 SHA 的标准与增强候选往返切换，并核对任务指向、TCP 能力、身份与配置。18 项本机 Python 宿主测试通过。Windows Server 2022 CI 提供了可用于实测的双版候选，待在隔离 Win10 22H2 或 Win11 x64 环境执行任务注册、切换和注销。[Windows 验收交接](../docs/task-reports/WINDOWS_SCHEDULED_TASK_EDITION_ACCEPTANCE.md)列出候选、操作边界和回传证据。
 
 | `de9af87` 候选 | GitHub Actions 产物 ID | 归档 SHA-256 |
 | --- | --- | --- |
