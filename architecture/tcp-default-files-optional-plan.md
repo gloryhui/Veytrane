@@ -87,6 +87,26 @@
 - `5b0fcb2` 将文件命令输入、任务动作和目录确认移入文件包。已有管理 IPC 处理认证、请求边界和 revision，节点 actor 仍独占队列及授权检查。两个构建的混合 TCP、文件能力拒绝、四路转发和授权撤销通过。真实裁剪及恢复测试确认同一数据目录中的文件任务保留。
 - `ac92f7d` 将独立 CLI 的文件执行迁入文件包。`b9a22c3` 将独立 `standalone` 与 `standalone-files` 分开。基础组合的实际 TLS 信令、授权 TCP 回环和帮助检查通过，增强组合的 TLS 文件推送、IPv4/IPv6 文件收发、分片上限及 TCP 回环通过。两个组合保留相同的转发编号，基础解码拒绝文件清单。源码和生产依赖检查通过。
 
+### P3 装配与本机验证（2026-11-21）
+
+- `3c389e7` 将 Web 文件面板移入文件包。`bf99ba8` 和 `80eccc0` 提取共享 GPUI 控件和文件任务投影。`5000926` 将授权服务和转发操作提到首页。`9cf4ddc` 将 GPUI 文件工作台、设置、快捷键、拖放、任务窗口及管理 CLI 装入 `veytrane-files`。`ce3a8c2` 将新节点文件能力改为显式启用。`b5b6305` 用当前连接代际的协商结果限制增强桌面的发送入口。`c6ee03c` 收口文件任务 CLI 和 Web 权限列。
+- 标准桌面、增强桌面、标准 Agent/CLI、增强 Agent/CLI 分别编译。生产依赖检查确认标准组合排除文件包，增强桌面排除文件安全存储和业务执行依赖。文件桌面 5 项、两套桌面各 3 项、两套 Web 各 26 项测试通过。标准 CLI 帮助不显示文件及任务命令，增强版保留 `tasks --offset`。历史 v1 请求仍可读取空任务页或收到能力错误。
+- 9 项隔离 Agent 进程验收通过，覆盖混合版型、文件校验和目录确认、任务保留、TCP 并发、恢复与撤销。[进程日志](/private/tmp/veytrane-p3-agents.lmvVbT/agent-process-final.log)。
+- 两种 Web 与两种 Agent 的四个组合通过实际回环 HTTP 和原生 IPC。标准页面没有文件面板资源，增强页面按 Agent 能力判断是否挂载，历史任务页仍有响应。[HTTP 证据](/private/tmp/veytrane-p3-entry.pdkpCo/web-ipc-proof.json)。GPUI 拖放和文件窗口的原生手动交互、浏览器视觉及点击验收仍待补。
+
+### P4 双候选与安装切换（2026-11-21）
+
+- `57f3d05`、`37da50b`、`e6676aa` 分别实现发行版型标识、双候选和只读升级预检。macOS arm64 的同 SHA 双候选从干净源码打包，校验架构、最低部署版本、三二进制元数据、实际依赖清单、原始源码材料、归档 SHA256 和 ad-hoc 签名。Windows、Linux 及 Intel Mac 配置了独立候选及 CI 校验流程。
+- 使用 `18d114b` 的 SHA 目录旧安装与 `37da50b` 的两个原生候选，实测旧版 → 标准 → 增强 → 原 SHA 目录回退。混包和开启文件时切到标准版均在停止旧 Agent 前被拒绝。验证同一身份、信任、转发、配置与任务库保留。系统启动项由隔离测试适配，实际 Agent 进程通过真实 IPC 停启和检查所有权锁。[换版证据](/private/tmp/veytrane-native-p4.8v44vH/install-proof-hkpaqdkn/result.json)。
+- 16 项宿主测试及 9 项包验证测试通过。Windows 计划任务及 Linux systemd 的原生换版、非 arm64 macOS 的原生发行验收仍待执行。
+
+### P5 默认切换与物理移除（2026-11-21）
+
+- `3ae273f` 将默认构建切到 `agent-standard`，保留单独的 `standalone`、`standalone-files` 和专用产品 feature。`fc9e582` 更新[八主题架构图](layer-review.html)及可点击源码地图。图表的亮暗切换与 PNG 导出入口完成静态检查，Chrome 切换与导出图的重新打开仍待验证。
+- 最终代码提交 `c6ee03c` 的 macOS arm64 [标准候选](/private/tmp/veytrane-native-p4.8v44vH/verified-standard/candidate.json)与[文件增强候选](/private/tmp/veytrane-native-p4.8v44vH/verified-files/candidate.json)均通过完整归档校验。标准版依赖清单有 536 个第三方包，增强版有 545 个。Windows、Linux 和 Intel Mac 的原生矩阵待运行。
+- 在从提交 `c6ee03c` 导出的隔离源码中，将 `crates/veytrane-files` 移到源码目录外。只改两份 manifest，去掉根 workspace 注册、增强版组合与依赖、文件专属测试注册，并去掉 Web 的 `files` feature 及依赖。Cargo 重新解析锁文件，生产依赖树与锁文件均无该包。同一份标准 Rust 源码构建出 Agent、CLI 和 GPUI。保留的可选装配 `cfg` 名称在剪掉注册的临时源码中触发检查提示。
+- `0195687` 的真实进程用例使用隔离复制品构建的两个 Agent，覆盖可信授权目录、四路实际 TCP、测速时并发 TCP、重连、撤销信任后旧流和授权失效、停止转发释放监听端口，并验证两端未创建文件任务库。[移除演练日志](/private/tmp/veytrane-p5-verified.ehCYB7/tcp-proof.log)。
+
 ## 给施工模型的起步指令
 
 > 以本文件和当前工作树为准，先执行 P1 的源码清册与依赖核对。文件能力从既有 `veytrane-files` 收口，复用节点会话和授权机制。保留用户工作树中的其他改动，按 P1 到 P5 分步提交，直到双候选和移除演练都有实际证据。每次对外契约变化都写明调用方，记录有效的升级与回退路径。
