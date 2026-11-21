@@ -136,20 +136,51 @@ fn index_html(platform: &str) -> String {
             "Windows",
             "Windows 节点",
             "windows",
-            "管理这台 Windows 的服务、端口转发与文件任务。",
+            "管理这台 Windows 的服务与端口转发。",
         ),
         _ => (
             "当前节点",
             "当前节点",
             "default",
-            "管理当前后台节点的服务、端口转发与文件任务。",
+            "管理当前后台节点的服务与端口转发。",
         ),
     };
+    #[cfg(feature = "files")]
+    let (file_html, file_css, file_script) = (
+        veytrane_files::web::PANEL_HTML,
+        veytrane_files::web::PANEL_CSS,
+        veytrane_files::web::PANEL_SCRIPT,
+    );
+    #[cfg(not(feature = "files"))]
+    let (file_html, file_css, file_script) = ("", "", "null");
     include_str!("web.html")
+        .replace("__FILES_HTML__", file_html)
+        .replace("__FILES_CSS__", file_css)
+        .replace("__FILES_SCRIPT__", file_script)
         .replace("__NODE_NAME__", name)
         .replace("__NODE_SCOPE__", scope)
         .replace("__NODE_THEME__", theme)
         .replace("__NODE_PURPOSE__", purpose)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::index_html;
+
+    #[test]
+    fn management_page_includes_only_compiled_file_assets() {
+        let page = index_html("windows");
+        assert!(page.contains("Windows 上的端口转发"));
+        assert!(!page.contains("__FILES_"));
+        for asset in [
+            "Windows 的文件任务",
+            "preview_directory",
+            "confirm_directory",
+            ".task-list",
+        ] {
+            assert_eq!(page.contains(asset), cfg!(feature = "files"), "{asset}");
+        }
+    }
 }
 
 async fn index() -> Response {

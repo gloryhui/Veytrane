@@ -58,5 +58,7 @@ pub mod task_store;
 pub mod transfer;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod transfer_files;
+#[cfg(feature = "web")]
+pub mod web;
 
 use veytrane_transport::error;

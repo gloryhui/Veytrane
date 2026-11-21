@@ -32,7 +32,7 @@ WORKSPACE_DEPENDENCIES = {
     "veytrane-management": {"veytrane-transport"},
     "veytrane-http-auth": {"veytrane-transport"},
     "veytrane-web-management": {
-        "veytrane-http-auth", "veytrane-management", "veytrane-transport"
+        "veytrane-files", "veytrane-http-auth", "veytrane-management", "veytrane-transport"
     },
 }
 PROFILE_EXCLUSIONS = {
