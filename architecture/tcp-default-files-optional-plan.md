@@ -74,11 +74,13 @@
 
 最后在隔离配置完成两端标准版、标准版对增强版、两端增强版及已有版本升级四组测试。每组跑服务目录授权、真实 TCP 传输、并发、断线重连和撤销后监听/连接回收。增强版验证旧任务恢复及文件传输期间 TCP 并发。至少以实际候选覆盖三平台启动与回退。生产部署、线上信令切换及真实数据迁移分别确认后执行。
 
+2026-11-21 结项时已清理原存于 `/private/tmp` 的临时验收证据，包括 P1 进程矩阵、P3 进程日志与 Web/IPC 结果、P4 macOS 换版结果、P5 架构图浏览器记录与早期 macOS 双候选清单。以下验收结论和已记录的校验值继续保留。
+
 ### P1 施工与验收（2026-11-21）
 
 - `98fe06e` 迁入接收目录探针与错误分类，22 项配置测试通过。`d759050` 合并旧文件策略包，裁剪 Agent 保留旧文件配置并拒绝修改。独立裁剪构建和源码、生产依赖边界通过。裁剪 Agent 对完整 Agent 的可信 TCP、重连和文件能力拒绝实测通过。
 - `cc1fc1f` 将任务库、接收目录和运行配置的启动移入文件包。`93e5ef2` 迁入文件命令配额与执行。`6b1d838` 迁入自动续传所需的方向授权，节点继续负责连接代际和任务所有权。三节点测试通过，覆盖文件、目录、四路转发和授权撤销；停用后恢复任务及配置 revision 事务通过。
-- macOS arm64 的 `scripts/node-core-e2e.py` 验收 15 个场景，收集 21 条进程证据。矩阵启动时 `HEAD` 为 `93e5ef2`，工作树已包含随后提交为 `6b1d838` 的续传调整和既有未提交改动。证据保存在 `/private/tmp/veytrane-p1-matrix.TkUgkR/matrix.json`。当前桌面仍以轻量方式链接文件配置，界面裁剪归 P3。
+- macOS arm64 的 `scripts/node-core-e2e.py` 验收 15 个场景，收集 21 条进程证据。矩阵启动时 `HEAD` 为 `93e5ef2`，工作树已包含随后提交为 `6b1d838` 的续传调整和既有未提交改动。当前桌面仍以轻量方式链接文件配置，界面裁剪归 P3。
 
 ### P2 施工与验收（2026-11-21）
 
@@ -91,8 +93,8 @@
 
 - `3c389e7` 将 Web 文件面板移入文件包。`bf99ba8` 和 `80eccc0` 提取共享 GPUI 控件和文件任务投影。`5000926` 将授权服务和转发操作提到首页。`9cf4ddc` 将 GPUI 文件工作台、设置、快捷键、拖放、任务窗口及管理 CLI 装入 `veytrane-files`。`ce3a8c2` 将新节点文件能力改为显式启用。`b5b6305` 用当前连接代际的协商结果限制增强桌面的发送入口。`c6ee03c` 收口文件任务 CLI 和 Web 权限列。
 - 标准桌面、增强桌面、标准 Agent/CLI、增强 Agent/CLI 分别编译。生产依赖检查确认标准组合排除文件包，增强桌面排除文件安全存储和业务执行依赖。文件桌面 5 项、两套桌面各 3 项、两套 Web 各 26 项测试通过。标准 CLI 帮助不显示文件及任务命令，增强版保留 `tasks --offset`。历史 v1 请求仍可读取空任务页或收到能力错误。
-- 9 项隔离 Agent 进程验收通过，覆盖混合版型、文件校验和目录确认、任务保留、TCP 并发、恢复与撤销。[进程日志](/private/tmp/veytrane-p3-agents.lmvVbT/agent-process-final.log)。
-- 两种 Web 与两种 Agent 的四个组合通过实际回环 HTTP 和原生 IPC。标准页面没有文件面板资源，增强页面按 Agent 能力判断是否挂载，历史任务页仍有响应。[HTTP 证据](/private/tmp/veytrane-p3-entry.pdkpCo/web-ipc-proof.json)。
+- 9 项隔离 Agent 进程验收通过，覆盖混合版型、文件校验和目录确认、任务保留、TCP 并发、恢复与撤销。
+- 两种 Web 与两种 Agent 的四个组合通过实际回环 HTTP 和原生 IPC。标准页面没有文件面板资源，增强页面按 Agent 能力判断是否挂载，历史任务页仍有响应。
 - Ubuntu 24.04 x86_64 使用原生 GPUI、隔离 X11 会话和模拟 Agent IPC 实际投递拖放。标准桌面连接文件增强 Agent、文件增强桌面连接标准 Agent 时均未请求 `tasks` 或 `send`。两端均为文件增强且对端能力已协商时，收到一次包含正确对端与文件路径的 `send`。文件执行由上述真实 Agent 进程验证。[拖放结果](../tmp/p4-linux-evidence.5K8JYj/xdnd.json)。
 - 同一 Linux 增强候选中，点击任务行打开任务详情，收到新的目录预览时打开预览窗口。模拟 Agent 停用文件能力后，两个实际窗口关闭，任务轮询停止，转发工作台继续运行。[窗口结果](../tmp/p3-file-windows.xLzOPv/visual-results.json)、[任务详情截图](../tmp/p3-file-windows.xLzOPv/verified-task-details.png)、[目录预览截图](../tmp/p3-file-windows.xLzOPv/verified-directory-preview.png)。
 - 使用 `c6ee03c` 的两个 macOS arm64 候选，在隔离 Chrome 中认证并读取四种 Web/Agent 组合的配置。四组均显示转发编辑器。标准 Web 无文件面板和三项操作的 DOM；增强 Web 仅在 Agent 启用文件能力时显示文件面板，点击刷新任务完成，清空该测试节点的管理 token 后面板隐藏。[Chrome 结果](../tmp/p3-web.hVtmyC/run.Mg3Ppr/results.json)。
@@ -100,7 +102,7 @@
 ### P4 双候选与安装切换（2026-11-21）
 
 - `57f3d05`、`37da50b`、`e6676aa` 分别实现发行版型标识、双候选和只读升级预检。macOS arm64 的同 SHA 双候选从干净源码打包，校验架构、最低部署版本、三二进制元数据、实际依赖清单、原始源码材料、归档 SHA256 和 ad-hoc 签名。Windows、Linux 及 Intel Mac 配置了独立候选及 CI 校验流程。
-- 使用 `18d114b` 的 SHA 目录旧安装与 `37da50b` 的两个原生候选，实测旧版 → 标准 → 增强 → 原 SHA 目录回退。混包和开启文件时切到标准版均在停止旧 Agent 前被拒绝。验证同一身份、信任、转发、配置与任务库保留。系统启动项由隔离测试适配，实际 Agent 进程通过真实 IPC 停启和检查所有权锁。[换版证据](/private/tmp/veytrane-native-p4.8v44vH/install-proof-hkpaqdkn/result.json)。
+- 使用 `18d114b` 的 SHA 目录旧安装与 `37da50b` 的两个原生候选，实测旧版 → 标准 → 增强 → 原 SHA 目录回退。混包和开启文件时切到标准版均在停止旧 Agent 前被拒绝。验证同一身份、信任、转发、配置与任务库保留。系统启动项由隔离测试适配，实际 Agent 进程通过真实 IPC 停启和检查所有权锁。
 - 补测 macOS 实际 LaunchAgent 时，外置盘上的测试 plist 被 `launchctl bootstrap` 拒绝。从用户 LaunchAgents 目录加载同一临时标签后，向外置盘重定向日志的进程报告 `EX_CONFIG`，日志文件未生成。以 `/dev/null` 对照时 `launchd` 启动了隔离旧版进程，管理 IPC 未就绪，未进入换版。测试任务和临时注册文件均已清理，原 Agent 的 PID 和注册定义已保留。[启动诊断](../tmp/host.mac-runtime-ab4c/runner.log)、[对照结果](../tmp/host.mac-stream-ab4c/runner.log)。
 - 用同一旧版二进制直接以 `--managed` 启动的对照，IPC 在 109 毫秒内就绪，并经 CLI 正常停止。将临时 LaunchAgent 的标准错误单独重定向到用户日志目录后，仍未生成 IPC socket，且标准错误为空。故障尚未定位到应用代码或具体系统限制，启动测试未进入换版。[直接启动证据](../tmp/p4-mac-ipc.HcO1Ad/results.json)、[LaunchAgent 结果](../tmp/host.mac-ipc-ab4c/runner.log)。
 - 在临时 LaunchAgent 中加入执行探针后，确认任务可以访问外置盘上的测试配置和可执行文件。该任务调用旧版 `p2p-agent --build-info` 时超时，进程采样显示其 shell 等待子进程。同一已安装二进制用精简环境从终端执行 `--build-info` 成功。现象出现在 IPC 和节点配置加载之前，尚无证据指向具体系统限制。临时注册和日志已清理，原 Agent PID 未变。[探针日志](../tmp/host.mac-stack-ab4c/agent.stderr.log)、[采样](../tmp/host.mac-stack-ab4c/stack.txt)、[终端对照](../tmp/host.mac-stack-ab4c/direct-build-info.json)。
@@ -126,8 +128,8 @@
 ### P5 默认切换与物理移除（2026-11-21）
 
 - `3ae273f` 将默认构建切到 `agent-standard`，保留单独的 `standalone`、`standalone-files` 和专用产品 feature。`fc9e582` 更新[八主题架构图](layer-review.html)及可点击源码地图。
-- 本机 `8093` 站点返回的架构图与仓库文件 SHA-256 一致。使用 agent-browser 驱动隔离的本机 Chrome 窗口，逐一验证八种主题的亮色、暗色，共 16 种状态，每种均包含全部 14 个节点。实际点击导出并重新打开三张 PNG，终端暗色与蓝图亮色为 2544×2374，等距暗色为 3812×2528，三张均完整显示图例、节点和边缘连线。[浏览器记录](/private/tmp/veytrane-diagram-qa.Ark9pn/browser-results.json)。
-- 以 `c6ee03c` 的干净源码构建 macOS arm64 [标准候选](/private/tmp/veytrane-native-p4.8v44vH/verified-standard/candidate.json)与[文件增强候选](/private/tmp/veytrane-native-p4.8v44vH/verified-files/candidate.json)，均通过完整归档校验，第三方依赖数分别为 536 和 545。
+- 本机 `8093` 站点返回的架构图与仓库文件 SHA-256 一致。使用 agent-browser 驱动隔离的本机 Chrome 窗口，逐一验证八种主题的亮色、暗色，共 16 种状态，每种均包含全部 14 个节点。实际点击导出并重新打开三张 PNG，终端暗色与蓝图亮色为 2544×2374，等距暗色为 3812×2528，三张均完整显示图例、节点和边缘连线。
+- 以 `c6ee03c` 的干净源码构建的 macOS arm64 标准候选与文件增强候选均通过完整归档校验，第三方依赖数分别为 536 和 545。
 - `a94b8a0` 调整公共工作台及诊断文案后，从干净 `ab4c34a` 源码使用正式 macOS arm64 脚本重新构建两个候选。标准与增强的三二进制版型、归档和 ad hoc 签名验证均通过，证据列出同一 SHA 的两个归档校验和。[标准候选](../tmp/p4-macos-final.3ZkW41/standard/candidate.json)、[增强候选](../tmp/p4-macos-final.3ZkW41/files/candidate.json)、[汇总](../tmp/p4-macos-final.3ZkW41/results.json)。
 - 同一源码在 Ubuntu 24.04 x86_64 通过标准和增强两个 `-D warnings` Clippy 配置，打包脚本及归档验证均通过。Linux 标准版和增强版分别列出 591 和 601 个第三方包。标准版另通过真实回环导航 API、核心重建保留 HTTP，以及 X11 窗口、托盘和退出验收。[Linux 标准候选](../tmp/p4-linux-evidence.5K8JYj/standard-candidate.json)、[增强候选](../tmp/p4-linux-evidence.5K8JYj/files-candidate.json)、[导航](../tmp/p4-linux-evidence.5K8JYj/navigation-standard.json)与[桌面](../tmp/p4-linux-evidence.5K8JYj/background-standard.json)记录保存在外置盘工作区。
 - 在从提交 `c6ee03c` 导出的隔离源码中，将 `crates/veytrane-files` 移到源码目录外。只改两份 manifest，去掉根 workspace 注册、增强版组合与依赖、文件专属测试注册，并去掉 Web 的 `files` feature 及依赖。Cargo 重新解析锁文件，生产依赖树与锁文件均无该包。同一份标准 Rust 源码构建出 Agent、CLI 和 GPUI。保留的可选装配 `cfg` 名称在剪掉注册的临时源码中触发检查提示。
