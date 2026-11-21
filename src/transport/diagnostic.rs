@@ -197,10 +197,7 @@ fn optional_peer(peer: Option<NodeId>) -> String {
 }
 
 fn optional_generation(generation: Option<u64>) -> String {
-    format!(
-        "{}",
-        generation.map_or_else(|| "null".to_owned(), |value| value.to_string())
-    )
+    generation.map_or_else(|| "null".to_owned(), |value| value.to_string())
 }
 
 fn optional_addr(addr: Option<SocketAddr>) -> String {

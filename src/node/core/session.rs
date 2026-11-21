@@ -98,15 +98,15 @@ impl AttemptProgress {
     }
 
     fn receive_punch(&self) -> bool {
-        match self.state.compare_exchange(
-            ATTEMPT_PROBING,
-            ATTEMPT_PUNCH_RECEIVED,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
-            Err(ATTEMPT_SUPERSEDED) => false,
-            _ => true,
-        }
+        !matches!(
+            self.state.compare_exchange(
+                ATTEMPT_PROBING,
+                ATTEMPT_PUNCH_RECEIVED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ),
+            Err(ATTEMPT_SUPERSEDED)
+        )
     }
 
     fn try_supersede(&self) -> bool {
@@ -1040,14 +1040,11 @@ impl SessionCommand {
             #[cfg(feature = "node-speed")]
             Self::StartSpeed { .. } => veytrane_node::capability::CAP_SPEED_EXECUTION,
             #[cfg(feature = "agent-files")]
-            Self::File(command) => match command {
+            Self::File(
                 FileCommand::PreviewDirectory { .. }
                 | FileCommand::ConfirmDirectory { .. }
-                | FileCommand::SendDirectory { .. } => {
-                    veytrane_node::capability::CAP_DIRECTORY_TRANSFER
-                }
-                _ => veytrane_node::capability::CAP_FILE_TRANSFER,
-            },
+                | FileCommand::SendDirectory { .. },
+            ) => veytrane_node::capability::CAP_DIRECTORY_TRANSFER,
             #[cfg(feature = "agent-files")]
             _ => veytrane_node::capability::CAP_FILE_TRANSFER,
             #[cfg(not(feature = "agent-files"))]
@@ -1107,7 +1104,7 @@ enum SessionInput {
     },
     SignalConnected {
         generation: u64,
-        result: Result<SignalingClient>,
+        result: Result<Box<SignalingClient>>,
     },
     PeerPath {
         peer: NodeId,
@@ -1285,10 +1282,12 @@ pub(crate) fn spawn_for_test(
     });
     #[cfg(feature = "node-speed")]
     {
-        return test_support::spawn(identity, config, speed);
+        test_support::spawn(identity, config, speed)
     }
     #[cfg(not(feature = "node-speed"))]
-    test_support::spawn(identity, config)
+    {
+        test_support::spawn(identity, config)
+    }
 }
 
 pub(crate) struct SessionServices<B> {
@@ -1874,10 +1873,10 @@ async fn run_session<B>(
             })),
             wake => wake,
         };
-        if let (Some((peer, _)), Wake::Command(Some(command))) = (rotation_preparing, &wake) {
-            if recovery_preparation_invalidated(command, peer) {
-                rotation_preparing = None;
-            }
+        if let (Some((peer, _)), Wake::Command(Some(command))) = (rotation_preparing, &wake)
+            && recovery_preparation_invalidated(command, peer)
+        {
+            rotation_preparing = None;
         }
         if let Wake::Command(Some(command)) = &wake {
             fast_recoveries.retain(|peer, _| !recovery_preparation_invalidated(command, *peer));
@@ -2090,11 +2089,11 @@ async fn run_session<B>(
                         connection.close(3u32.into(), b"node policy revoked");
                     }
                     fresh_lookup_peers.remove(&peer);
-                    if let Some(generation) = peers.generation(peer) {
-                        if peers.transition(peer, generation, PeerLifecycle::Disconnected) {
-                            emit_peer_state(&events, peer, generation, PeerLifecycle::Disconnected)
-                                .await;
-                        }
+                    if let Some(generation) = peers.generation(peer)
+                        && peers.transition(peer, generation, PeerLifecycle::Disconnected)
+                    {
+                        emit_peer_state(&events, peer, generation, PeerLifecycle::Disconnected)
+                            .await;
                     }
 
                     if let Some(sender) = peer_connection_updates.get(&peer) {
@@ -2234,11 +2233,11 @@ async fn run_session<B>(
                         connection.close(3u32.into(), b"peer disabled");
                     }
                     fresh_lookup_peers.remove(&peer);
-                    if let Some(generation) = peers.generation(peer) {
-                        if peers.transition(peer, generation, PeerLifecycle::Disconnected) {
-                            emit_peer_state(&events, peer, generation, PeerLifecycle::Disconnected)
-                                .await;
-                        }
+                    if let Some(generation) = peers.generation(peer)
+                        && peers.transition(peer, generation, PeerLifecycle::Disconnected)
+                    {
+                        emit_peer_state(&events, peer, generation, PeerLifecycle::Disconnected)
+                            .await;
                     }
 
                     #[cfg(feature = "agent-files")]
@@ -2346,16 +2345,11 @@ async fn run_session<B>(
                             connection.close(3u32.into(), b"device trust revoked");
                         }
                         fresh_lookup_peers.remove(&peer);
-                        if let Some(generation) = peers.generation(peer) {
-                            if peers.transition(peer, generation, PeerLifecycle::Disconnected) {
-                                emit_peer_state(
-                                    &events,
-                                    peer,
-                                    generation,
-                                    PeerLifecycle::Disconnected,
-                                )
+                        if let Some(generation) = peers.generation(peer)
+                            && peers.transition(peer, generation, PeerLifecycle::Disconnected)
+                        {
+                            emit_peer_state(&events, peer, generation, PeerLifecycle::Disconnected)
                                 .await;
-                            }
                         }
 
                         #[cfg(feature = "agent-files")]
@@ -3160,11 +3154,10 @@ async fn run_session<B>(
                 reconnect_probes.remove(&peer);
                 peer_candidates.remove(&peer);
                 queued_lookups.retain(|(id, _)| *id != peer);
-                if let Some(generation) = peers.generation(peer) {
-                    if peers.transition(peer, generation, PeerLifecycle::Disconnected) {
-                        emit_peer_state(&events, peer, generation, PeerLifecycle::Disconnected)
-                            .await;
-                    }
+                if let Some(generation) = peers.generation(peer)
+                    && peers.transition(peer, generation, PeerLifecycle::Disconnected)
+                {
+                    emit_peer_state(&events, peer, generation, PeerLifecycle::Disconnected).await;
                 }
                 if let Some(old) = recovery_networks.remove(&peer) {
                     old.shutdown().await;
@@ -4082,7 +4075,7 @@ async fn run_session<B>(
                         if let Some(short_id) = client.short_id() {
                             let _ = events.send(SessionEvent::ShortIdRegistered(short_id)).await;
                         }
-                        signal = Some(client);
+                        signal = Some(*client);
                         reconnect_attempt = 0;
                         reconnect_sleep = None;
                         let _ = events
@@ -5640,7 +5633,8 @@ fn start_signal_connect(
             candidates,
             signal_tls.as_ref(),
         )
-        .await;
+        .await
+        .map(Box::new);
         let _ = inputs
             .send(SessionInput::SignalConnected { generation, result })
             .await;
