@@ -1,8 +1,8 @@
 # Windows x64 计划任务双版切换验收
 
-**状态：待 Windows 实机执行**
+**状态** `PASS`（2026-11-21，Windows x64 实机）
 
-Veytrane 默认保留 TCP 转发，原生文件传输由文件增强版提供。Windows Server 2022 CI 已通过两个版型的原生构建和归档验证。需要在 Windows 桌面环境实测计划任务能启动 Agent，并在同一份合成节点配置上完成标准版 → 文件增强版 → 标准版。
+Veytrane 默认保留 TCP 转发，原生文件传输由文件增强版提供。Windows Server 2022 CI 已通过两个版型的原生构建和归档验证。Windows 桌面实测已通过计划任务启动 Agent，并在同一份合成节点配置上完成标准版 → 文件增强版 → 标准版。
 
 ## 实测环境
 
@@ -31,13 +31,25 @@ Veytrane 默认保留 TCP 转发，原生文件传输由文件增强版提供。
 python -X utf8 .\node-host-tests.py --windows-upgrade "<标准版二进制目录>" "<文件增强版二进制目录>"
 ```
 
-- [ ] 通过真实 Task Scheduler 注册当前测试用户的任务并启动 Agent，通过原生 IPC 确认 TCP 能力已就绪。
-- [ ] 同一 SHA 依次使用 `standard`、`files`、`standard` 两种安装键。每次核对任务 Action 指向、运行中的 Agent 版型、节点身份、revision 和配置字节。
-- [ ] 两个不可变安装目录和回退元数据符合预期。测试卸载后再次查询，确认本次任务已注销。脚本在退出临时目录前核对节点数据和两份版本仍存在。
-- [ ] 现有 Agent、其他任务和用户数据保留。若脚本失败，记录失败步骤，并单独核对本次测试进程和任务的退出状态。
+- [x] 通过真实 Task Scheduler 注册当前测试用户的任务并启动 Agent，通过原生 IPC 确认 TCP 能力已就绪。
+- [x] 同一 SHA 依次使用 `standard`、`files`、`standard` 两种安装键。每次核对任务 Action 指向、运行中的 Agent 版型、节点身份、revision 和配置字节。
+- [x] 两个不可变安装目录和回退元数据符合预期。测试卸载后再次查询，确认本次任务已注销。脚本在退出临时目录前核对节点数据和两份版本仍存在。
+- [x] 现有 Agent 进程持续运行。测试操作限于本次任务、合成节点数据和临时安装，退出后无测试 Agent 进程或临时节点目录残留。
 
 这次通过脚本主动触发任务启动。实际退出并重新登录 Windows 与文件收发各有独立验收范围。
 
 ## 回传证据
 
-报告 `PASS`、`FAIL` 或 `BLOCKED`，附 Windows 版型、系统构建号、架构、PowerShell 版本、两份候选的 SHA-256、实际执行命令和退出码。提供脚本结果 JSON、任务前后查验结果及关键日志。若失败，写明首次失败步骤、清理结果和仍待验证的内容。证据中省略凭据、真实节点身份和私有路径。回传后更新[施工验收记录](../../architecture/tcp-default-files-optional-plan.md)。
+2026-11-21 在 Windows 10 专业版 22H2 x64（构建 `19045.7846`）、PowerShell `7.6.10` 和 Python `3.14.0` 上，经用户授权使用当前普通交互账户和临时节点数据。两份 `de9af87d516efea8f0cf2dab0c235ea59815e1b2` 发行 ZIP 的 SHA-256 均与上表一致。`--windows-upgrade` 用例自身退出码为 `0`，`script-result.json` 为 `PASS`，标准错误为空。
+
+| 时间（UTC+08:00） | Task Scheduler 观测 |
+| --- | --- |
+| 17:16:57 | 执行前查询同一 SID 对应任务，匹配数为 `0` |
+| 17:17:04 | 任务为 `Running`，Action 指向 `standard` 安装 |
+| 17:17:08 | 任务为 `Running`，Action 指向 `files` 安装 |
+| 17:17:13 | 任务为 `Running`，Action 指回 `standard` 安装 |
+| 17:17:17–17:17:20 | 任务先变为 `Disabled`，随后注销，卸载后独立复查的匹配数为 `0` |
+
+三个阶段均通过原生 IPC 核对运行版型和 TCP 就绪，节点身份、revision 和 `node.json` 字节一致。两个换版方向的回退元数据均通过核对。卸载保留节点数据和两个不可变安装目录，随后测试夹具清理完毕，原有 Agent 进程仍在运行。
+
+回传包 `veytrane-windows-x64-44880833831-PASS.zip` 的 SHA-256 为 `0418eeeb3f68d1c693b34c1e70beabe4dfc6f62b5d1fd83b532ea5909b04856c`。包内 `command.txt` 记录实际命令，`exit-code.json` 记录用例退出码，`task-before.json`、`task-observations.json` 和 `task-after.json` 记录任务查验。归档验证、用例原始输出和清理证据一并回传。[施工验收记录](../../architecture/tcp-default-files-optional-plan.md)

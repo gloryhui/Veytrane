@@ -111,7 +111,8 @@
 - 从干净 `4f3be51` 源码在 macOS arm64 分别用 `--no-default-features` 构建 `live` 的 gateway/viewer、`sub2api-gateway` 和 `sub2api-client`，均生成原生可执行文件。客户端使用无私有配置的编译组合。三套构建均报告四条未使用的节点策略 API 告警；验证涵盖构建和目标架构。[Live](../tmp/p4-products.1GBs3O/live.log)、[Sub2API Gateway](../tmp/p4-products.1GBs3O/sub2api-gateway.log)、[Sub2API Client](../tmp/p4-products.1GBs3O/sub2api-client.log)。
 - [首次原生 CI](https://github.com/gloryhui/Veytrane/actions/runs/44878747014) 在 `fdac2e6` 通过 Linux、Apple Silicon 和 Intel Mac。Windows 回归通过后，正式打包被干净工作树检查拦截。MSVC 探针默认把 `sdk_probe.obj` 写到仓库目录，`de9af87` 将它显式输出到探针临时目录。
 - [修复后原生 CI](https://github.com/gloryhui/Veytrane/actions/runs/44880833831) 在 `de9af87d516efea8f0cf2dab0c235ea59815e1b2` 的 Windows x64、Intel Mac、Apple Silicon 和 Linux 全部通过。Windows 和 Intel Mac 分别使用正式宿主脚本构建两版型，归档校验通过。Linux 的标准版与增强版均通过严格 Clippy。
-- `d639375` 更新 Windows [计划任务换版验收入口](../packaging/node/README.md#windows-双版型隔离验收)，允许同 SHA 的标准与增强候选往返切换，并核对任务指向、TCP 能力、身份与配置。18 项本机 Python 宿主测试通过。Windows Server 2022 CI 提供了可用于实测的双版候选，待在隔离 Win10 22H2 或 Win11 x64 环境执行任务注册、切换和注销。[Windows 验收交接](../docs/task-reports/WINDOWS_SCHEDULED_TASK_EDITION_ACCEPTANCE.md)列出候选、操作边界和回传证据。
+- `d639375` 更新 Windows [计划任务换版验收入口](../packaging/node/README.md#windows-双版型隔离验收)，允许同 SHA 的标准与增强候选往返切换，并核对任务指向、TCP 能力、身份与配置。18 项本机 Python 宿主测试通过。
+- Windows x64 桌面实测 `PASS`。在 Windows 10 专业版 22H2（构建 `19045.7846`）上使用 CI #44880833831 的 `de9af87` 双候选，`--windows-upgrade` 退出码为 `0`。`standard` → `files` → `standard` 三阶段均观察到任务进入 `Running`，Action 指向相应安装。原生 IPC 确认 TCP 就绪，节点身份、revision 和配置字节一致。任务卸载后按当前 SID 复查的匹配数为 `0`，测试 Agent 无残留，原有 Agent 持续运行。[Windows 实测时间线和回传证据](../docs/task-reports/WINDOWS_SCHEDULED_TASK_EDITION_ACCEPTANCE.md#回传证据)
 
 | `de9af87` 候选 | GitHub Actions 产物 ID | 归档 SHA-256 |
 | --- | --- | --- |
@@ -135,7 +136,7 @@
 ### Mac 本机验收结论（2026-11-21）
 
 - 已核对 macOS arm64 双候选归档和原生 LaunchAgent 换版结果，并将文件包移除演练的编译日志、生产依赖树、TCP 日志和三种二进制校验和归档到外置盘。三种移除演练产物的 `--build-info` 均返回 `standard`、`files=false` 和 `aarch64-apple-darwin`。演练源码由 `git archive c6ee03c` 导出，产物自报的 SHA 和源码状态均为 `unknown`。[Mac 双候选](../tmp/p4-macos-final.3ZkW41/results.json)、[LaunchAgent 换版](../tmp/p4-mac-system.6EQbja/verified-results.json)、[移除证据](../tmp/p5-mac-close.97wnnC/)。
-- Mac 本机验收结束。Windows 双版归档通过 CI，计划任务注册、启动、换版和注销由 Windows 端按[交接文档](../docs/task-reports/WINDOWS_SCHEDULED_TASK_EDITION_ACCEPTANCE.md)单独实测。
+- Mac 本机验收结束。[Windows 原生计划任务实测证据](../docs/task-reports/WINDOWS_SCHEDULED_TASK_EDITION_ACCEPTANCE.md#回传证据)已回填。
 
 ## 给施工模型的起步指令
 
