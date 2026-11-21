@@ -93,7 +93,9 @@ jobs:
           --binary target/${{ matrix.target }}/debug/p2p-desktop
           --output "${{ runner.temp }}/p2p-background-smoke"
       - name: Run full GUI library regressions
-        run: "cargo test --locked --features gui --lib --target ${{ matrix.target }}"
+        run: |
+          cargo test --locked -p veytrane-desktop-ui --lib --target ${{ matrix.target }}
+          cargo test --locked --features gui --lib --target ${{ matrix.target }}
       - name: Run native IPv6 loopback regressions with capability diagnostics
         run: "cargo test --locked --features gui ipv6 --lib --target ${{ matrix.target }} -- --nocapture"
       - name: Run local authenticated Relay regressions (native IPv4/IPv6, no public network)

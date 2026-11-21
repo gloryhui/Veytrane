@@ -1,6 +1,7 @@
 //! The original desktop workbench, projected exclusively from Agent IPC DTOs.
 //! This view never opens an identity, task store, network session or transfer service.
 use super::*;
+use ui_components::input_frame;
 use veytrane_management::protocol::SpeedtestDirection as AgentSpeedDirection;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash)]
@@ -127,16 +128,6 @@ impl Workbench {
             set_text(input, value, cx);
         }
     }
-}
-
-fn input_frame(input: &Entity<TextField>) -> gpui::Div {
-    div()
-        .min_w_0()
-        .border_1()
-        .border_color(rgb(ui_theme::BORDER))
-        .rounded_md()
-        .bg(white())
-        .child(input.clone())
 }
 
 fn task_state(task: &Value) -> &'static str {

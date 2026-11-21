@@ -1,5 +1,3 @@
 //! Presentation components for Agent workbench windows.
 pub(in crate::desktop) mod branding;
-pub(in crate::desktop) mod components;
-pub(in crate::desktop) mod text_field;
-pub(in crate::desktop) mod theme;
+pub(in crate::desktop) use veytrane_desktop_ui::{components, text_field, theme};

@@ -1,11 +1,14 @@
 //! Small GPUI building blocks shared by the single-page desktop workbench.
 
-use gpui::{CursorStyle, Div, FontWeight, SharedString, Stateful, div, prelude::*, px, rgb, white};
+use gpui::{
+    CursorStyle, Div, Entity, FontWeight, SharedString, Stateful, div, prelude::*, px, rgb, white,
+};
 
-use super::theme;
+use crate::text_field::TextField;
+use crate::theme;
 
 #[derive(Clone, Copy)]
-pub(in crate::desktop) enum StatusTone {
+pub enum StatusTone {
     Neutral,
     Info,
     Success,
@@ -13,7 +16,17 @@ pub(in crate::desktop) enum StatusTone {
     Danger,
 }
 
-pub(in crate::desktop) fn card() -> Div {
+pub fn input_frame(input: &Entity<TextField>) -> Div {
+    div()
+        .min_w_0()
+        .border_1()
+        .border_color(rgb(theme::BORDER))
+        .rounded_md()
+        .bg(white())
+        .child(input.clone())
+}
+
+pub fn card() -> Div {
     div()
         .flex()
         .flex_col()
@@ -26,11 +39,7 @@ pub(in crate::desktop) fn card() -> Div {
         .flex_shrink_0()
 }
 
-pub(in crate::desktop) fn section_header(
-    icon: &'static str,
-    title: &'static str,
-    subtitle: &'static str,
-) -> Div {
+pub fn section_header(icon: &'static str, title: &'static str, subtitle: &'static str) -> Div {
     div()
         .flex()
         .items_center()
@@ -70,10 +79,7 @@ pub(in crate::desktop) fn section_header(
         )
 }
 
-pub(in crate::desktop) fn primary_button(
-    label: impl Into<SharedString>,
-    enabled: bool,
-) -> Stateful<Div> {
+pub fn primary_button(label: impl Into<SharedString>, enabled: bool) -> Stateful<Div> {
     let label = label.into();
     let button = div()
         .id(label.clone())
@@ -104,7 +110,7 @@ pub(in crate::desktop) fn primary_button(
     }
 }
 
-pub(in crate::desktop) fn secondary_button(label: impl Into<SharedString>, enabled: bool) -> Div {
+pub fn secondary_button(label: impl Into<SharedString>, enabled: bool) -> Div {
     let button = div()
         .h(px(36.))
         .px(px(12.))
@@ -130,10 +136,7 @@ pub(in crate::desktop) fn secondary_button(label: impl Into<SharedString>, enabl
     }
 }
 
-pub(in crate::desktop) fn compact_secondary_button(
-    label: impl Into<SharedString>,
-    enabled: bool,
-) -> Div {
+pub fn compact_secondary_button(label: impl Into<SharedString>, enabled: bool) -> Div {
     let button = div()
         .h(px(25.))
         .px(px(8.))
@@ -159,7 +162,7 @@ pub(in crate::desktop) fn compact_secondary_button(
     }
 }
 
-pub(in crate::desktop) fn status_badge(label: impl Into<SharedString>, tone: StatusTone) -> Div {
+pub fn status_badge(label: impl Into<SharedString>, tone: StatusTone) -> Div {
     let (dot, background, foreground) = match tone {
         StatusTone::Neutral => (
             theme::TEXT_MUTED,

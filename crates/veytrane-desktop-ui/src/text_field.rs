@@ -1,7 +1,7 @@
 //! Shared GPUI text input, adapted from GPUI input.rs (Apache-2.0).
 //! See docs/gpui-mvp/THIRD_PARTY_NOTICES.md for attribution.
-use super::theme as ui_theme;
-use crate::desktop::actions::*;
+use crate::text_actions::*;
+use crate::theme as ui_theme;
 use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, FocusHandle, Focusable, GlobalElementId, LayoutId, MouseButton,
@@ -79,22 +79,22 @@ fn password_display(content: &str, revealed: bool) -> String {
     }
 }
 
-pub(in crate::desktop) struct TextField {
-    pub(in crate::desktop) focus_handle: FocusHandle,
-    pub(in crate::desktop) content: SharedString,
+pub struct TextField {
+    pub focus_handle: FocusHandle,
+    pub content: SharedString,
     placeholder: SharedString,
     secret: bool,
-    pub(in crate::desktop) revealed: bool,
-    pub(in crate::desktop) selected_range: Range<usize>,
-    pub(in crate::desktop) selection_reversed: bool,
-    pub(in crate::desktop) marked_range: Option<Range<usize>>,
-    pub(in crate::desktop) last_layout: Option<ShapedLine>,
+    pub revealed: bool,
+    pub selected_range: Range<usize>,
+    pub selection_reversed: bool,
+    pub marked_range: Option<Range<usize>>,
+    pub last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
-    pub(in crate::desktop) is_selecting: bool,
+    pub is_selecting: bool,
 }
 
 impl TextField {
-    pub(in crate::desktop) fn new(cx: &mut Context<Self>, placeholder: &'static str) -> Self {
+    pub fn new(cx: &mut Context<Self>, placeholder: &'static str) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
             content: "".into(),
@@ -110,10 +110,7 @@ impl TextField {
         }
     }
 
-    pub(in crate::desktop) fn new_password(
-        cx: &mut Context<Self>,
-        placeholder: &'static str,
-    ) -> Self {
+    pub fn new_password(cx: &mut Context<Self>, placeholder: &'static str) -> Self {
         let mut field = Self::new(cx, placeholder);
         field.secret = true;
         field

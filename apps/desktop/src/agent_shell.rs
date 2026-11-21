@@ -5,7 +5,7 @@ use crate::desktop::ui::{components as ui_components, text_field::TextField, the
 use gpui::{
     App, Application, Bounds, ClipboardItem, Context, CursorStyle, Entity, FocusHandle, Focusable,
     KeyBinding, MouseButton, PathPromptOptions, PromptButton, PromptLevel, SharedString, Window,
-    WindowBounds, WindowOptions, div, prelude::*, px, relative, rgb, size, white,
+    WindowBounds, WindowOptions, div, prelude::*, px, relative, rgb, size,
 };
 use std::{
     collections::{HashMap, HashSet},

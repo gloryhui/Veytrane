@@ -24,6 +24,7 @@ ALLOWED = {
 FOUNDATION = {"storage", "identity.rs", "instance_lock.rs", "nat", "net",
               "transport", "protocol", "discovery", "relay"}
 WORKSPACE_DEPENDENCIES = {
+    "veytrane-desktop-ui": set(),
     "veytrane-transport": set(),
     "veytrane-node": {"veytrane-transport"},
     "veytrane-files": {"veytrane-node", "veytrane-transport"},
