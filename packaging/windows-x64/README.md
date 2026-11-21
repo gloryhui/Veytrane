@@ -20,7 +20,7 @@ Run the doctor first. It only diagnoses and prints remediation steps; it does no
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\packaging\windows-x64\doctor.ps1
 ```
 
-PowerShell 7 is also supported when installed. Use a 64-bit PowerShell process. The `-ExecutionPolicy Bypass` option applies only to this PowerShell launch and does not change the machine or user policy.
+Use a 64-bit Windows PowerShell 5.1 or PowerShell 7 process for building and packaging. The `-ExecutionPolicy Bypass` option applies only to this PowerShell launch and does not change the machine or user policy. The installed-node lifecycle uses PowerShell 7 (`pwsh` on `PATH`) for Windows Task Scheduler operations. See [node host installation and upgrade](../node/README.md).
 
 Required tools:
 

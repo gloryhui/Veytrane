@@ -14,6 +14,8 @@
 
 将包内`node-host.py`与版本一致的二进制一起保留。以下是生命周期命令参考；安装、启停、启用或卸载命令会修改本机安装或登录启动项，按实际需要执行。
 
+Windows 的 `enable`、`start`、`disable`、`upgrade` 和 `uninstall` 调用计划任务前需要 PowerShell 7。先在运行 Python 的同一个终端执行 `pwsh --version`，确认 `pwsh` 在 `PATH` 上。
+
 ```text
 python node-host.py install --bin-dir <包含agent和node的绝对目录>
 python node-host.py enable
