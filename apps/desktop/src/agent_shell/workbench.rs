@@ -234,7 +234,7 @@ impl AgentShell {
             .gap_3()
             .child(crate::desktop::ui::branding::brand_identity(
                 "Veytrane",
-                "设备之间，直接传文件",
+                "可信设备，跨网络互联",
             ))
             .child(
                 div()
@@ -576,7 +576,7 @@ impl AgentShell {
                         .gap_2()
                         .text_xs()
                         .child(div().flex_1().truncate().child(format!(
-                            "{} · {} · 接收授权 {} · 发送授权 {}",
+                            "{} · {} · 入站授权 {} · 出站授权 {}",
                             id,
                             peer["phase"].as_str().unwrap_or("未知"),
                             peer["inbound_password"] == true || peer["inbound_trusted"] == true,
