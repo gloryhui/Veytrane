@@ -24,11 +24,11 @@
 - Ubuntu：`~/.local/share/p2p-file/node/node.json`，revision `15`，对应 12 项服务均配置启用。以上是配置状态，不表示应用此刻在线。
 - Ubuntu 主节点完整 NodeId：`cbd82de8be77d5f813fc3ff92663b2ac`。
 - Mac NodeId：`ae4c49f3d120f1e013155039eb3263ce`，目前这 12 项服务的 `allowed_peers` 都只包含该 Mac。**Windows 不会自动继承这些权限。**
-- 信令：`47.101.183.194:8900`；当前两端 `signal_tls=null`、`relay_server=null`。新节点先匹配现有配置，不擅自单端启用 TLS 或填造 Relay。
-- Mac 的 SSH 别名 `ubuntu` 当前解析为 `glory@47.101.183.194:8913`。这是可尝试的初次管理入口，Windows 是否有路由和合法 SSH 凭据须重新验证；别名和私钥不会随本文迁移。
+- 信令：从现有节点的私有 `node.json` 读取 `settings.signal_server`（含端口），在 Windows 本机设置为 `VEYTRANE_SIGNAL_SERVER` 环境变量；当前两端 `signal_tls=null`、`relay_server=null`。新节点先匹配现有配置，不擅自单端启用 TLS 或填造 Relay。
+- Mac 的 SSH 别名 `ubuntu` 使用用户 `glory` 和端口 `8913`。在 Mac 上用 `ssh -G ubuntu` 核实 `hostname`，然后在 Windows 本机设置 `VEYTRANE_UBUNTU_SSH_HOST` 环境变量。这是可尝试的初次管理入口，Windows 是否有路由和合法 SSH 凭据须重新验证；别名和私钥不会随本文迁移。
 - 源码：<https://github.com/gloryhui/Veytrane.git>，本文核对基线 `6b084199088cd578d3668f16657de291ecbdf18c`，包含 DSH 大消息吞吐与丢包链路修复。Windows 至少包含此提交或已核验的后续版本，不使用早期无此修复的旧包。
 
-本文包含路由和设备标识，不包含账户密码、私钥、管理 token、DSH 登录 token 或完整私有配置。携带本文即可开始工作；SSH 授权与各应用登录凭据需要在 Windows 本机另行提供。
+本文包含路由和设备标识，不包含账户密码、私钥、管理 token、DSH 登录 token 或完整私有配置。信令地址、SSH 主机地址、SSH 授权与各应用登录凭据需要在 Windows 本机另行提供。
 
 ## 2. 目标端口与访问方式
 
@@ -127,11 +127,14 @@ $Port = [ordered]@{
 # $Port['samba'] = 1445
 # $Port['istore-web'] = 18082
 
+if ([string]::IsNullOrWhiteSpace($env:VEYTRANE_SIGNAL_SERVER)) {
+    throw '请在当前 PowerShell 会话设置 VEYTRANE_SIGNAL_SERVER（host:port）'
+}
 $Record = Get-Content (Join-Path $DataDir 'node.json') -Raw | ConvertFrom-Json
 if ($Record.revision -ne 0) { throw '此模板仅供 revision=0 的全新节点' }
 $Draft = $Record.settings
 $Draft.PSObject.Properties.Remove('remote_auth')
-$Draft.signal_server = '47.101.183.194:8900'
+$Draft.signal_server = $env:VEYTRANE_SIGNAL_SERVER
 $Draft.signal_tls = $null
 $Draft.relay_server = $null
 $Draft.enable_tcp = $true
@@ -175,7 +178,10 @@ if ($LASTEXITCODE -ne 0) { throw '离线配置未提交成功' }
 Windows 只有监听而 Ubuntu 未授权时，无法访问这些服务。先用合法凭据验证初次管理通道，例如：
 
 ```powershell
-ssh -p 8913 glory@47.101.183.194
+if ([string]::IsNullOrWhiteSpace($env:VEYTRANE_UBUNTU_SSH_HOST)) {
+    throw '请在当前 PowerShell 会话设置 VEYTRANE_UBUNTU_SSH_HOST'
+}
+ssh -p 8913 "glory@$env:VEYTRANE_UBUNTU_SSH_HOST"
 ```
 
 验证远端 SSH 主机指纹。此通道不可用时，先完成 Windows 安装、配置与本地启动，再输出 Windows NodeId 和待追加的 12 个服务 ID，请用户通过现有 Mac 管理通道完成授权；没有凭据时不能宣称部署完成，不能尝试复制 Mac 私钥。映射后的 `61132` 不能作为尚未获授权时的初次管理通道。
