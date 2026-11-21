@@ -32,8 +32,6 @@ mod tests {
                     Page::Management,
                     Page::Diagnostics,
                     Page::Speed,
-                    Page::TaskDetails,
-                    Page::DirectoryPreview,
                 ] {
                     s.open_panel(page, cx);
                 }
@@ -44,8 +42,8 @@ mod tests {
                 timer.timer(Duration::from_millis(300)).await;
                 let _ = cx.update(|cx| {
                     let check = (|| -> Result<(), String> {
-                        if cx.windows().len() != 7 {
-                            return Err("expected main + six independent windows".into());
+                        if cx.windows().len() != 5 {
+                            return Err("expected main + four independent windows".into());
                         }
                         let handles = shell.read(cx).windows.clone();
                         for (page, handle) in &handles {
@@ -67,13 +65,13 @@ mod tests {
                             return Err("editable layout state is shared across windows".into());
                         }
                         open_panel_window(shell.clone(), Page::Settings, cx);
-                        if cx.windows().len() != 7 {
+                        if cx.windows().len() != 5 {
                             return Err("repeated open duplicated a live window".into());
                         }
                         let old = handles[&Page::Settings];
                         old.update(cx, |_, window, _| window.remove_window())
                             .map_err(|e| e.to_string())?;
-                        if cx.windows().len() != 6 || !cx.windows().contains(&main.into()) {
+                        if cx.windows().len() != 4 || !cx.windows().contains(&main.into()) {
                             return Err("closing settings removed another window".into());
                         }
                         shell.update(cx, |s, _| {
@@ -81,7 +79,7 @@ mod tests {
                         });
                         open_panel_window(shell.clone(), Page::Settings, cx);
                         let replacement = shell.read(cx).windows[&Page::Settings];
-                        if replacement == old || cx.windows().len() != 7 {
+                        if replacement == old || cx.windows().len() != 5 {
                             return Err("closed settings window was not recreated".into());
                         }
                         let message = replacement
@@ -135,8 +133,6 @@ impl Page {
             Self::Management => "Veytrane · 节点管理",
             Self::Diagnostics => "Veytrane · 连接诊断",
             Self::Speed => "Veytrane · 速度测试",
-            Self::TaskDetails => "Veytrane · 任务详情",
-            Self::DirectoryPreview => "Veytrane · 目录预览",
         }
     }
 
@@ -147,8 +143,6 @@ impl Page {
             Self::Management => (1180., 900.),
             Self::Diagnostics => (900., 520.),
             Self::Speed => (800., 360.),
-            Self::TaskDetails => (900., 480.),
-            Self::DirectoryPreview => (1000., 480.),
         }
     }
 }
@@ -209,10 +203,7 @@ fn open_panel_window(shell: Entity<AgentShell>, page: Page, cx: &mut App) {
 
 impl AgentShell {
     pub(super) fn open_panel(&mut self, page: Page, cx: &mut Context<Self>) {
-        let capabilities = self.capabilities();
-        if (page == Page::Speed && !capabilities.speed)
-            || (matches!(page, Page::TaskDetails | Page::DirectoryPreview) && !capabilities.files)
-        {
+        if page == Page::Speed && !self.speed_supported() {
             return;
         }
         let shell = cx.entity();
@@ -247,8 +238,6 @@ impl AgentShell {
         let content = match page {
             Page::Diagnostics => self.home_diagnostics(cx),
             Page::Speed => self.home_speed(cx),
-            Page::TaskDetails => self.home_detail(cx),
-            Page::DirectoryPreview => self.home_preview(cx),
             _ => unreachable!(),
         };
         div()

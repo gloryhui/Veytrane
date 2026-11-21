@@ -41,11 +41,12 @@ sub2api-gateway = ["sub2api-runtime"]
 sub2api-runtime = ["node-runtime", "dep:dirs"]
 live = ["node-runtime", "dep:axum", "dep:reqwest", "dep:dirs"]
 node = ["agent-full", "standalone-files", "sub2api-runtime"]
-agent-full = ["agent-base", "agent-files", "agent-web", "node-cli", "veytrane-web-management/files"]
+agent-standard = ["agent-base", "agent-web", "node-cli"]
+agent-full = ["agent-standard", "agent-files", "veytrane-web-management/files"]
 agent-base = ["node-runtime", "node-speed", "dep:veytrane-management"]
 agent-files = ["agent-base", "dep:veytrane-files", "veytrane-files/node-runtime"]
 agent-web = ["agent-base", "dep:veytrane-web-management"]
-node-cli = ["agent-base", "agent-web"]
+node-cli = ["agent-base", "agent-web", "veytrane-files?/cli"]
 standalone = [
     "dep:veytrane-http-auth",
     "dep:veytrane-speed",
@@ -56,11 +57,10 @@ standalone = [
 ]
 standalone-files = ["standalone", "dep:veytrane-files", "veytrane-files/legacy"]
 signaling-server = ["dep:rusqlite", "veytrane-transport/signal-tls-server"]
-gui = ["node", "desktop-client"]
+gui = ["agent-standard", "desktop-client"]
+desktop-files = ["desktop-client", "dep:veytrane-files", "veytrane-files/desktop"]
 desktop-client = [
     "dep:veytrane-desktop-ui",
-    "dep:veytrane-files",
-    "veytrane-files/desktop",
     "dep:veytrane-management",
     "dep:veytrane-node",
     "dep:gpui",

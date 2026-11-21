@@ -128,24 +128,25 @@ pub(super) fn show_main(cx: &mut App) {
     });
 }
 
-fn snapshot(shell: &AgentShell) -> StatusSnapshot {
+fn snapshot(shell: &AgentShell, cx: &App) -> StatusSnapshot {
     let node = &shell.state["node"];
     let peers = node["peers"].as_object().map_or(0, |peers| {
         peers.values().filter(|p| p["phase"] == "connected").count()
     });
-    let active = shell.ui.task_page["queue"]["active_files"]
+    #[cfg(feature = "desktop-files")]
+    let application_activity = shell.files.read(cx).tray_activity();
+    #[cfg(not(feature = "desktop-files"))]
+    let application_activity = None;
+    let speed = shell.speed_running(cx);
+    let forwarding = shell.state["forwards"]["active_streams"]
         .as_u64()
-        .unwrap_or(0) as usize;
-    let speed = shell.ui.task_page["speeds"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .any(|s| s["state"] == "Running");
+        .unwrap_or(0)
+        > 0;
     let core = if !shell.attached {
         CoreState::Offline
     } else if shell.state["core_running"] == false || node["signal"] == "failed" {
         CoreState::Error
-    } else if active > 0 || speed {
+    } else if application_activity.is_some() || forwarding || speed {
         CoreState::Active
     } else if peers > 0 || node["signal"] == "online" {
         CoreState::Online
@@ -157,7 +158,7 @@ fn snapshot(shell: &AgentShell) -> StatusSnapshot {
     StatusSnapshot {
         core,
         connected_peers: peers,
-        active_files: active,
+        application_activity,
         speed_running: speed,
         device_id: node["short_id"]
             .as_str()
@@ -165,12 +166,6 @@ fn snapshot(shell: &AgentShell) -> StatusSnapshot {
             .unwrap_or("")
             .into(),
         signal: node["signal"].as_str().unwrap_or("未知").into(),
-        queued_files: shell.ui.task_page["queue"]["pending"].as_u64().unwrap_or(0) as usize,
-        bytes_per_second: shell
-            .tasks
-            .iter()
-            .map(|t| t["rate"].as_f64().unwrap_or(0.).max(0.) as u64)
-            .fold(0u64, u64::saturating_add),
         tunnels: node["tunnels"]
             .as_object()
             .map_or(0, |t| t.values().filter(|s| **s == "running").count()),
@@ -181,7 +176,7 @@ fn snapshot(shell: &AgentShell) -> StatusSnapshot {
 
 fn poll(cx: &mut App) {
     let shell = cx.global::<TrayRuntime>().shell.clone();
-    let status = snapshot(shell.read(cx));
+    let status = snapshot(shell.read(cx), cx);
     let (actions, restore) = cx.update_global::<TrayRuntime, _>(|runtime, _| {
         if let Some(tray) = &mut runtime.tray {
             let actions = tray.poll();

@@ -11,6 +11,8 @@ pub mod command_jobs;
 pub mod download;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod drop_send;
+#[cfg(feature = "cli")]
+pub mod cli;
 #[cfg(feature = "desktop")]
 pub mod desktop;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]

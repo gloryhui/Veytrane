@@ -4,17 +4,15 @@ use crate::desktop::platform::{status, tray, window as native_window};
 use crate::desktop::ui::{components as ui_components, text_field::TextField, theme as ui_theme};
 use gpui::{
     App, Application, Bounds, ClipboardItem, Context, CursorStyle, Entity, FocusHandle, Focusable,
-    KeyBinding, MouseButton, PathPromptOptions, PromptButton, PromptLevel, SharedString, Window,
-    WindowBounds, WindowOptions, div, prelude::*, px, relative, rgb, size,
+    KeyBinding, MouseButton, SharedString, Window, WindowBounds, WindowOptions, div, prelude::*,
+    px, rgb, size,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-    time::Duration,
-};
-use std::{net::SocketAddr, ops::Range};
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf, time::Duration};
 
-use veytrane_files::management_command::FileManagementCommand;
+use serde_json::{Value, json};
+use std::sync::mpsc::{self, Receiver, SyncSender};
+#[cfg(feature = "desktop-files")]
+use veytrane_files::desktop::{FileEvent, FileHost, FileReply, FileSupport, FileWorkbench};
 use veytrane_management::{
     client::AgentClient,
     paths::AgentPaths,
@@ -22,8 +20,6 @@ use veytrane_management::{
 };
 use veytrane_node::{trusted_device::TrustedDevice, wire::validate_service_id};
 use veytrane_transport::{identity::NodeId, operation_id::TaskId, short_id::ShortId};
-use serde_json::{Value, json};
-use std::sync::mpsc::{self, Receiver, SyncSender};
 mod tray_host;
 mod windows;
 mod workbench;
@@ -32,11 +28,13 @@ mod workbench;
 enum Kind {
     Status,
     Config,
+    #[cfg(feature = "desktop-files")]
     Tasks,
     Services,
     Action,
     Apply,
     Restart,
+    #[cfg(feature = "desktop-files")]
     Location,
 }
 struct Job {
@@ -89,7 +87,6 @@ impl ClientWorker {
                 for (command, kind) in [
                     (Command::Status, Kind::Status),
                     (Command::Config, Kind::Config),
-                    (Command::Tasks { offset: 0 }, Kind::Tasks),
                 ] {
                     if !perform(Job {
                         request: Request::new(command),
@@ -98,29 +95,20 @@ impl ClientWorker {
                         return;
                     }
                 }
-                let mut offset = 0;
                 loop {
                     match jobs.recv_timeout(Duration::from_secs(2)) {
                         Ok(job) => {
-                            if let Command::Tasks { offset: page } = &job.request.command {
-                                offset = *page;
-                            }
                             if !perform(job) {
                                 break;
                             }
                         }
                         Err(mpsc::RecvTimeoutError::Disconnected) => break,
                         Err(mpsc::RecvTimeoutError::Timeout) => {
-                            for (command, kind) in [
-                                (Command::Status, Kind::Status),
-                                (Command::Tasks { offset }, Kind::Tasks),
-                            ] {
-                                if !perform(Job {
-                                    request: Request::new(command),
-                                    kind,
-                                }) {
-                                    return;
-                                }
+                            if !perform(Job {
+                                request: Request::new(Command::Status),
+                                kind: Kind::Status,
+                            }) {
+                                break;
                             }
                         }
                     }
@@ -131,6 +119,8 @@ impl ClientWorker {
 }
 struct AgentShell {
     ui: workbench::Workbench,
+    #[cfg(feature = "desktop-files")]
+    files: Entity<FileWorkbench>,
     windows: HashMap<workbench::Page, gpui::AnyWindowHandle>,
     attached: bool,
     exiting: bool,
@@ -151,8 +141,6 @@ struct AgentShell {
     management_local_password: Entity<TextField>,
     management_signal: Entity<TextField>,
     state: Value,
-    tasks: Vec<Value>,
-    previews: Vec<Value>,
     services: Vec<Value>,
     services_for: Option<String>,
     draft: Option<Value>,
@@ -167,8 +155,20 @@ struct AgentShell {
 }
 impl AgentShell {
     fn new(paths: AgentPaths, worker: ClientWorker, cx: &mut Context<Self>) -> Self {
+        #[cfg(feature = "desktop-files")]
+        let files = {
+            let files = cx.new(FileWorkbench::new);
+            cx.subscribe(&files, |shell, _, event, cx| {
+                shell.handle_file_event(event, cx)
+            })
+            .detach();
+            cx.observe(&files, |_, _, cx| cx.notify()).detach();
+            files
+        };
         let view = Self {
             ui: workbench::Workbench::new(cx),
+            #[cfg(feature = "desktop-files")]
+            files,
             windows: HashMap::new(),
             attached: false,
             exiting: false,
@@ -190,8 +190,6 @@ impl AgentShell {
             management_local_password: cx.new(|cx| TextField::new_password(cx, "本机访问密码")),
             management_signal: cx.new(|cx| TextField::new(cx, "信令地址，如signal.example:9000")),
             state: Value::Null,
-            tasks: vec![],
-            previews: vec![],
             services: vec![],
             services_for: None,
             draft: None,
@@ -216,6 +214,8 @@ impl AgentShell {
                             shell.message=match result{Ok(status) if status.success()=>"后台节点已退出。".into(),Ok(status)=>format!("后台节点启动或运行失败（{status}）；请检查旧身份迁移和节点配置，未自动替换身份。").into(),Err(error)=>format!("无法取得后台进程结果：{error}").into()};
                             shell.child_exit=None;
                         }
+                        #[cfg(feature = "desktop-files")]
+                        shell.sync_file_host(cx);
                         cx.notify();
                     })
                     .is_err()
@@ -231,19 +231,68 @@ impl AgentShell {
     fn text(field: &Entity<TextField>, cx: &Context<Self>) -> String {
         field.read(cx).content.trim().to_owned()
     }
-    fn send_file_command(
-        &mut self,
-        command: FileManagementCommand,
-        kind: Kind,
-        cx: &mut Context<Self>,
-    ) {
-        match Command::file(&command) {
-            Ok(command) => self.send(command, kind, cx),
-            Err(error) => {
-                self.message = format!("文件命令无法序列化：{error}").into();
+    #[cfg(feature = "desktop-files")]
+    fn handle_file_event(&mut self, event: &FileEvent, cx: &mut Context<Self>) {
+        match event {
+            FileEvent::Request(command, reply) => {
+                let kind = match reply {
+                    FileReply::Action => Kind::Action,
+                    FileReply::Tasks => Kind::Tasks,
+                    FileReply::Location => Kind::Location,
+                };
+                self.send(command.clone(), kind, cx);
+            }
+            FileEvent::Setting {
+                key,
+                value,
+                restart,
+            } => {
+                if !self.available() || self.dirty {
+                    self.message = "请先在节点管理中保存或放弃配置草稿。".into();
+                    cx.notify();
+                    return;
+                }
+                let Some(mut settings) = self.draft.clone() else {
+                    return;
+                };
+                settings[*key] = value.clone();
+                let (command, kind) = if *restart {
+                    (
+                        Command::ConfigureRestart {
+                            expected_revision: self.revision,
+                            settings,
+                        },
+                        Kind::Restart,
+                    )
+                } else {
+                    (
+                        Command::ApplyConfig {
+                            expected_revision: self.revision,
+                            settings,
+                        },
+                        Kind::Apply,
+                    )
+                };
+                self.send(command, kind, cx);
+            }
+            FileEvent::Resource { key, allowed } => self.resource(key, *allowed, cx),
+            FileEvent::Message(message) => {
+                self.message = message.clone();
                 cx.notify();
             }
         }
+    }
+
+    #[cfg(feature = "desktop-files")]
+    fn sync_file_host(&self, cx: &mut Context<Self>) {
+        let host = FileHost {
+            support: FileSupport::from_status(&self.state),
+            available: self.available(),
+            peer: self.selected_agent_peer(cx),
+            peer_can_send: self.peer_connected(cx) && !self.speed_running(cx),
+        };
+        self.files
+            .update(cx, |files, cx| files.sync_host(host, &self.message, cx));
     }
 
     fn send(&mut self, command: Command, kind: Kind, cx: &mut Context<Self>) {
@@ -329,6 +378,18 @@ impl AgentShell {
                     "已附着同一后台节点"
                 }
                 .into();
+                #[cfg(feature = "desktop-files")]
+                {
+                    self.sync_file_host(cx);
+                    if !self.busy
+                        && let Some(command) = self.files.read(cx).task_poll()
+                    {
+                        let _ = self.worker.send.try_send(Job {
+                            request: Request::new(command),
+                            kind: Kind::Tasks,
+                        });
+                    }
+                }
                 if !self.dirty
                     && !self.busy
                     && (self.draft.is_none()
@@ -337,31 +398,18 @@ impl AgentShell {
                     self.send(Command::Config, Kind::Config, cx);
                 }
             }
-            Kind::Tasks => {
-                let previous: HashSet<_> = self
-                    .previews
-                    .iter()
-                    .filter_map(|p| p["id"].as_str().map(str::to_owned))
-                    .collect();
-                self.ui.task_page = value.clone();
-                self.tasks = value["tasks"].as_array().cloned().unwrap_or_default();
-                self.previews = value["directory_previews"]
-                    .as_array()
-                    .cloned()
-                    .unwrap_or_default();
-                if self
-                    .previews
-                    .iter()
-                    .any(|p| p["id"].as_str().is_some_and(|id| !previous.contains(id)))
-                {
-                    self.open_panel(workbench::Page::DirectoryPreview, cx);
-                }
-            }
+            #[cfg(feature = "desktop-files")]
+            Kind::Tasks => self
+                .files
+                .update(cx, |files, cx| files.replace_task_page(value, cx)),
             Kind::Config => {
                 self.revision = value["revision"].as_u64().unwrap_or(0);
                 self.draft = Some(value["settings"].clone());
                 self.dirty = false;
                 self.ui.load_settings(&value["settings"], cx);
+                #[cfg(feature = "desktop-files")]
+                self.files
+                    .update(cx, |files, cx| files.load_settings(&value["settings"], cx));
                 if let Some(signal) = value["settings"]["signal_server"].as_str() {
                     for input in [&self.signal, &self.management_signal] {
                         input.update(cx, |field, cx| {
@@ -402,8 +450,9 @@ impl AgentShell {
                     self.draft = None;
                 }
                 self.pending = None;
-                self.message = "节点已确认命令；任务结果请查看列表。".into();
+                self.message = "节点已确认命令。".into();
             }
+            #[cfg(feature = "desktop-files")]
             Kind::Location => {
                 if let Some(path) = value["path"].as_str() {
                     cx.reveal_path(std::path::Path::new(path));
@@ -478,12 +527,8 @@ impl AgentShell {
             devices.retain(|d| d["node_id"].as_str() != Some(&peer));
             if grant {
                 devices.push(
-                    serde_json::to_value(TrustedDevice::new(
-                        node,
-                        "管理员授权".into(),
-                        None,
-                    ))
-                    .unwrap(),
+                    serde_json::to_value(TrustedDevice::new(node, "管理员授权".into(), None))
+                        .unwrap(),
                 );
                 draft["trust_sources"][&peer] = json!("administrator");
             } else {
@@ -600,16 +645,15 @@ impl AgentShell {
     fn service_directory(&self, peer: Option<&str>, cx: &Context<Self>) -> gpui::Div {
         let enabled = self.available() && peer.is_some();
         let query_peer = peer.map(str::to_owned);
-        let mut directory = ui_components::card()
-            .child("远端授权服务")
-            .child(
-                ui_components::primary_button("查询已授权服务", enabled)
-                    .on_click(cx.listener(move |shell, _, _, cx| {
-                        if enabled && let Some(peer) = query_peer.clone() {
-                            shell.send(Command::Services { peer }, Kind::Services, cx);
-                        }
-                    })),
-            );
+        let mut directory = ui_components::card().child("远端授权服务").child(
+            ui_components::primary_button("查询已授权服务", enabled).on_click(cx.listener(
+                move |shell, _, _, cx| {
+                    if enabled && let Some(peer) = query_peer.clone() {
+                        shell.send(Command::Services { peer }, Kind::Services, cx);
+                    }
+                },
+            )),
+        );
         if peer.is_none() || self.services_for.as_deref() != peer {
             return directory;
         }
@@ -674,14 +718,24 @@ impl AgentShell {
                 service,
                 if configured { "启用" } else { "禁用" },
                 if listening { "监听中" } else { "未监听" },
-                if peer_ready { "对端已连接" } else { "对端未就绪" }
+                if peer_ready {
+                    "对端已连接"
+                } else {
+                    "对端未就绪"
+                }
             ))
             .child(
                 ui_components::primary_button("启动", enabled && !listening && configured)
                     .id(SharedString::from(format!("start-forward-{start}")))
                     .on_click(cx.listener(move |shell, _, _, cx| {
                         if enabled && !listening && configured {
-                            shell.send(Command::StartForward { rule: start.clone() }, Kind::Action, cx);
+                            shell.send(
+                                Command::StartForward {
+                                    rule: start.clone(),
+                                },
+                                Kind::Action,
+                                cx,
+                            );
                         }
                     })),
             )
@@ -690,7 +744,11 @@ impl AgentShell {
                     .id(SharedString::from(format!("stop-forward-{stop}")))
                     .on_click(cx.listener(move |shell, _, _, cx| {
                         if enabled && listening {
-                            shell.send(Command::StopForward { rule: stop.clone() }, Kind::Action, cx);
+                            shell.send(
+                                Command::StopForward { rule: stop.clone() },
+                                Kind::Action,
+                                cx,
+                            );
                         }
                     })),
             )
@@ -698,20 +756,18 @@ impl AgentShell {
 
     fn home_forwarding(&self, peer: Option<String>, cx: &Context<Self>) -> gpui::Div {
         let directory = self.service_directory(peer.as_deref(), cx);
-        let mut forwards = ui_components::card()
-            .child("本机端口转发")
-            .child(
-                ui_components::secondary_button("管理转发和服务", true).on_mouse_up(
-                    MouseButton::Left,
-                    cx.listener(move |shell, _, _, cx| {
-                        if let Some(peer) = &peer {
-                            shell.edit_forwarding(peer, cx);
-                        } else {
-                            shell.open_panel(workbench::Page::Management, cx);
-                        }
-                    }),
-                ),
-            );
+        let mut forwards = ui_components::card().child("本机端口转发").child(
+            ui_components::secondary_button("管理转发和服务", true).on_mouse_up(
+                MouseButton::Left,
+                cx.listener(move |shell, _, _, cx| {
+                    if let Some(peer) = &peer {
+                        shell.edit_forwarding(peer, cx);
+                    } else {
+                        shell.open_panel(workbench::Page::Management, cx);
+                    }
+                }),
+            ),
+        );
         if let Some(draft) = &self.draft {
             for rule in draft["forwards"].as_array().into_iter().flatten() {
                 let id = rule["id"].as_str().unwrap_or("");
@@ -719,7 +775,12 @@ impl AgentShell {
                 forwards = forwards.child(self.forward_row(rule, service, cx));
             }
         }
-        div().flex().flex_col().gap_3().child(directory).child(forwards)
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(directory)
+            .child(forwards)
     }
 
     fn render_management(&mut self, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
@@ -918,15 +979,11 @@ impl AgentShell {
         }
         root = root.child(peers);
         let peer = Self::text(&self.management_peer, cx);
-        let directory = self.service_directory(
-            NodeId::from_hex(&peer).is_ok().then_some(peer.as_str()),
-            cx,
-        );
+        let directory =
+            self.service_directory(NodeId::from_hex(&peer).is_ok().then_some(peer.as_str()), cx);
         let mut permissions =
             ui_components::card().child("上述设备的本机资源授权（加入草稿后保存）");
         for (label, kind, value) in [
-            ("允许文件访问", "files", true),
-            ("撤销文件访问", "files", false),
             ("允许测速", "speed", true),
             ("禁用设备", "disabled", true),
             ("重新启用设备", "disabled", false),
@@ -934,6 +991,13 @@ impl AgentShell {
             permissions = permissions.child(
                 ui_components::primary_button(label, enabled)
                     .on_click(cx.listener(move |s, _, _, cx| s.resource(kind, value, cx))),
+            );
+        }
+        #[cfg(feature = "desktop-files")]
+        {
+            permissions = permissions.children(
+                self.files
+                    .update(cx, |files, cx| files.resource_controls(cx)),
             );
         }
         permissions = permissions
@@ -971,34 +1035,27 @@ impl AgentShell {
                 let service = draft["service_ids"][&id].as_str().unwrap_or("缺少服务 ID");
                 let row = self.forward_row(rule, service, cx);
                 let delete = id;
-                forwards =
-                    forwards.child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .items_center()
-                            .child(row)
-                            .child(
-                                ui_components::primary_button(format!("删除 {delete}"), enabled)
-                                    .on_click(cx.listener(move |s, _, _, cx| {
-                                        if s.busy {
-                                            return;
-                                        }
-                                        if let Some(draft) = &mut s.draft {
-                                            draft["forwards"]
-                                                .as_array_mut()
-                                                .unwrap()
-                                                .retain(|r| r["id"].as_str() != Some(&delete));
-                                            draft["service_ids"]
-                                                .as_object_mut()
-                                                .unwrap()
-                                                .remove(&delete);
-                                            s.dirty = true;
-                                            cx.notify();
-                                        }
-                                    })),
-                            ),
-                    );
+                forwards = forwards.child(div().flex().gap_2().items_center().child(row).child(
+                    ui_components::primary_button(format!("删除 {delete}"), enabled).on_click(
+                        cx.listener(move |s, _, _, cx| {
+                            if s.busy {
+                                return;
+                            }
+                            if let Some(draft) = &mut s.draft {
+                                draft["forwards"]
+                                    .as_array_mut()
+                                    .unwrap()
+                                    .retain(|r| r["id"].as_str() != Some(&delete));
+                                draft["service_ids"]
+                                    .as_object_mut()
+                                    .unwrap()
+                                    .remove(&delete);
+                                s.dirty = true;
+                                cx.notify();
+                            }
+                        }),
+                    ),
+                ));
             }
         }
         if let Some(draft) = &self.draft {
@@ -1111,12 +1168,12 @@ pub fn run(root: PathBuf, background: bool) {
             KeyBinding::new("home", Home, None),
             KeyBinding::new("end", End, None),
             KeyBinding::new("secondary-enter", ConnectPeer, Some("AgentWorkbench")),
-            KeyBinding::new("secondary-o", ChooseFiles, Some("AgentWorkbench")),
-            KeyBinding::new("secondary-shift-o", ChooseFolder, Some("AgentWorkbench")),
             KeyBinding::new("secondary-,", ToggleSettings, Some("AgentWorkbench")),
             KeyBinding::new("tab", NextField, Some("AgentWorkbench")),
             KeyBinding::new("shift-tab", PreviousField, Some("AgentWorkbench")),
         ]);
+        #[cfg(feature = "desktop-files")]
+        FileWorkbench::bind_keys(cx);
         let bounds = Bounds::centered(None, size(px(1180.), px(780.)), cx);
         match cx.open_window(
             WindowOptions {

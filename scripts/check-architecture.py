@@ -27,7 +27,9 @@ WORKSPACE_DEPENDENCIES = {
     "veytrane-desktop-ui": set(),
     "veytrane-transport": set(),
     "veytrane-node": {"veytrane-transport"},
-    "veytrane-files": {"veytrane-node", "veytrane-transport"},
+    "veytrane-files": {
+        "veytrane-desktop-ui", "veytrane-management", "veytrane-node", "veytrane-transport"
+    },
     "veytrane-speed": {"veytrane-node", "veytrane-transport"},
     "veytrane-tcp": {"veytrane-node", "veytrane-transport"},
     "veytrane-management": {"veytrane-transport"},
@@ -42,9 +44,13 @@ PROFILE_EXCLUSIONS = {
         "veytrane-speed", "axum", "dirs", "gpui", "rusqlite",
     },
     "agent-base": {"veytrane-files", "veytrane-web-management", "axum", "gpui", "rusqlite"},
-    "agent-base,agent-web": {"veytrane-files", "gpui", "rusqlite"},
+    "agent-standard": {"veytrane-files", "gpui", "rusqlite"},
     "agent-full": {"gpui", "rusqlite"},
     "desktop-client": {
+        "veytrane-files", "veytrane-speed", "veytrane-tcp", "veytrane-web-management",
+        "axum", "cap-std", "rusqlite",
+    },
+    "desktop-files": {
         "veytrane-speed", "veytrane-tcp", "veytrane-web-management",
         "axum", "cap-std", "rusqlite",
     },
@@ -103,6 +109,8 @@ def violations(root):
             reject(r"\b(?:node|desktop)\s*::", "foundation must not depend on node/desktop")
         if parts[:2] == ("apps", "web-management") or parts[0] == "crates":
             reject(r"\bp2p_file\s*::", "workspace packages must not borrow the root runtime")
+        if parts[:4] == ("crates", "veytrane-files", "src", "desktop"):
+            reject(r"\bAgentShell\b|\bDesktopShell\b", "file views must not depend on the desktop shell")
         if parts[0] == "apps" and parts[1] in {"live", "sub2api"}:
             reject(r"\bcrate::node::(?:adapters|api|host|local)\s*::",
                    "products must assemble their own node outside the Agent host")

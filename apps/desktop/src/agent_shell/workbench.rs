@@ -2,7 +2,7 @@
 //! This view never opens an identity, task store, network session or transfer service.
 use super::*;
 use ui_components::input_frame;
-use veytrane_files::desktop::{TaskPagination, matches_task, preview_summary, task_state};
+use veytrane_desktop_ui::format_bytes;
 use veytrane_management::protocol::SpeedtestDirection as AgentSpeedDirection;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash)]
@@ -13,63 +13,23 @@ pub(super) enum Page {
     Management,
     Diagnostics,
     Speed,
-    TaskDetails,
-    DirectoryPreview,
 }
 
 pub(super) struct Workbench {
-    pub task_page: Value,
-    search: Entity<TextField>,
     relay: Entity<TextField>,
-    upload: Entity<TextField>,
-    download: Entity<TextField>,
-    margin: Entity<TextField>,
     speed_direction: AgentSpeedDirection,
     speed_seconds: u16,
-    direction: u8,
-    state_filter: u8,
-    peer_filter: bool,
-    selected: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) struct AgentCapabilities {
-    pub(super) files: bool,
-    pub(super) speed: bool,
+fn speed_supported(state: &Value) -> bool {
+    state
+        .get("capabilities")
+        .and_then(Value::as_object)
+        .is_none_or(|capabilities| capabilities.get("speed").and_then(Value::as_bool) == Some(true))
 }
 
-fn status_capabilities(state: &Value, task_page: &Value) -> AgentCapabilities {
-    if let Some(explicit) = state.get("capabilities").and_then(Value::as_object) {
-        return AgentCapabilities {
-            files: explicit.get("files").and_then(Value::as_bool) == Some(true),
-            speed: explicit.get("speed").and_then(Value::as_bool) == Some(true),
-        };
-    }
-    let tasks_loaded = task_page.is_object();
-    AgentCapabilities {
-        files: !(tasks_loaded && task_page["queue"].is_null()),
-        speed: true,
-    }
-}
-
-fn file_action_ready(
-    capabilities: AgentCapabilities,
-    peer_connected: bool,
-    speed_running: bool,
-) -> bool {
-    capabilities.files && peer_connected && !speed_running
-}
-
-fn speed_action_ready(capabilities: AgentCapabilities, peer_connected: bool) -> bool {
-    capabilities.speed && peer_connected
-}
-
-fn speed_start_ready(
-    capabilities: AgentCapabilities,
-    peer_connected: bool,
-    speed_running: bool,
-) -> bool {
-    speed_action_ready(capabilities, peer_connected) && !speed_running
+fn speed_start_ready(supported: bool, connected: bool, running: bool) -> bool {
+    supported && connected && !running
 }
 
 fn set_text(input: &Entity<TextField>, text: String, cx: &mut Context<AgentShell>) {
@@ -83,64 +43,18 @@ fn set_text(input: &Entity<TextField>, text: String, cx: &mut Context<AgentShell
 impl Workbench {
     pub fn new(cx: &mut Context<AgentShell>) -> Self {
         Self {
-            task_page: Value::Null,
-            search: cx.new(|cx| TextField::new(cx, "搜索文件名或设备备注 / ID")),
             relay: cx.new(|cx| TextField::new(cx, "Relay 地址（可选）")),
-            upload: cx.new(|cx| TextField::new(cx, "0")),
-            download: cx.new(|cx| TextField::new(cx, "0")),
-            margin: cx.new(|cx| TextField::new(cx, "64")),
             speed_direction: AgentSpeedDirection::Both,
             speed_seconds: 30,
-            direction: 0,
-            state_filter: 0,
-            peer_filter: false,
-            selected: None,
         }
     }
 
     pub fn load_settings(&self, settings: &Value, cx: &mut Context<AgentShell>) {
-        for (input, value) in [
-            (
-                &self.relay,
-                settings["relay_server"].as_str().unwrap_or("").to_owned(),
-            ),
-            (
-                &self.upload,
-                settings["file_limits"]["upload_kib"]
-                    .as_u64()
-                    .unwrap_or(0)
-                    .to_string(),
-            ),
-            (
-                &self.download,
-                settings["file_limits"]["download_kib"]
-                    .as_u64()
-                    .unwrap_or(0)
-                    .to_string(),
-            ),
-            (
-                &self.margin,
-                settings["receive_safety_mib"]
-                    .as_u64()
-                    .unwrap_or(64)
-                    .to_string(),
-            ),
-        ] {
-            set_text(input, value, cx);
-        }
-    }
-}
-
-fn bytes(value: f64) -> String {
-    let value = if value.is_finite() { value.max(0.) } else { 0. };
-    if value >= 1024. * 1024. * 1024. {
-        format!("{:.1} GiB", value / (1024. * 1024. * 1024.))
-    } else if value >= 1024. * 1024. {
-        format!("{:.1} MiB", value / (1024. * 1024.))
-    } else if value >= 1024. {
-        format!("{:.1} KiB", value / 1024.)
-    } else {
-        format!("{value:.0} B")
+        set_text(
+            &self.relay,
+            settings["relay_server"].as_str().unwrap_or("").to_owned(),
+            cx,
+        );
     }
 }
 
@@ -154,21 +68,8 @@ impl AgentShell {
             })
             .unwrap_or(Page::Home);
         let fields = match page {
-            Page::Home => {
-                let mut fields = vec![&self.peer, &self.password];
-                if self.capabilities().files {
-                    fields.push(&self.ui.search);
-                }
-                fields
-            }
-            Page::Settings => vec![
-                &self.local_password,
-                &self.ui.upload,
-                &self.ui.download,
-                &self.ui.margin,
-                &self.signal,
-                &self.ui.relay,
-            ],
+            Page::Home => vec![&self.peer, &self.password],
+            Page::Settings => vec![&self.local_password, &self.signal, &self.ui.relay],
             Page::Management => vec![
                 &self.management_signal,
                 &self.management_peer,
@@ -181,6 +82,17 @@ impl AgentShell {
                 &self.target,
             ],
             _ => return,
+        };
+        #[cfg(feature = "desktop-files")]
+        let fields = {
+            let mut fields = fields;
+            let files = self.files.read(cx);
+            match page {
+                Page::Home => fields.extend(files.search_field()),
+                Page::Settings => fields.splice(1..1, files.settings_fields()).for_each(drop),
+                _ => (),
+            }
+            fields
         };
         let current = fields
             .iter()
@@ -205,7 +117,7 @@ impl AgentShell {
             && self.pending.is_none()
     }
 
-    fn selected_agent_peer(&self, cx: &Context<Self>) -> Option<String> {
+    pub(super) fn selected_agent_peer(&self, cx: &Context<Self>) -> Option<String> {
         let input = Self::text(&self.peer, cx);
         if let Ok(peer) = NodeId::from_hex(&input) {
             return Some(peer.to_hex());
@@ -216,19 +128,11 @@ impl AgentShell {
             .map(str::to_owned)
     }
 
-    fn can_send_files(&self, cx: &Context<Self>) -> bool {
-        file_action_ready(
-            self.capabilities(),
-            self.peer_connected(cx),
-            self.speed_running(),
-        )
+    pub(super) fn speed_supported(&self) -> bool {
+        speed_supported(&self.state)
     }
 
-    pub(super) fn capabilities(&self) -> AgentCapabilities {
-        status_capabilities(&self.state, &self.ui.task_page)
-    }
-
-    fn peer_connected(&self, cx: &Context<Self>) -> bool {
+    pub(super) fn peer_connected(&self, cx: &Context<Self>) -> bool {
         self.available()
             && self.selected_agent_peer(cx).is_some_and(|peer| {
                 let state = &self.state["node"]["peers"][&peer];
@@ -238,15 +142,15 @@ impl AgentShell {
             })
     }
 
-    fn speed_rows(&self) -> &[Value] {
-        self.state["speeds"]
-            .as_array()
-            .or_else(|| self.ui.task_page["speeds"].as_array())
-            .map_or(&[], Vec::as_slice)
+    fn speed_rows<'a>(&'a self, _cx: &'a App) -> &'a [Value] {
+        let rows = self.state["speeds"].as_array().map(Vec::as_slice);
+        #[cfg(feature = "desktop-files")]
+        let rows = rows.or_else(|| self.files.read(_cx).legacy_speed_rows());
+        rows.unwrap_or_default()
     }
 
-    fn speed_running(&self) -> bool {
-        self.speed_rows()
+    pub(super) fn speed_running(&self, cx: &App) -> bool {
+        self.speed_rows(cx)
             .iter()
             .any(|speed| speed["state"].as_str() == Some("Running"))
     }
@@ -280,98 +184,6 @@ impl AgentShell {
             Kind::Action,
             cx,
         );
-    }
-
-    fn home_pick(&mut self, directory: bool, incremental: bool, cx: &mut Context<Self>) {
-        if !self.can_send_files(cx) {
-            return;
-        }
-        let Some(peer) = self.selected_agent_peer(cx) else {
-            return;
-        };
-        let picked = cx.prompt_for_paths(PathPromptOptions {
-            files: !directory,
-            directories: directory,
-            multiple: !directory,
-            prompt: Some(
-                if directory {
-                    "选择发送目录"
-                } else {
-                    "选择发送文件"
-                }
-                .into(),
-            ),
-        });
-        cx.spawn(async move |shell, cx| match picked.await {
-            Ok(Ok(Some(paths))) => {
-                let _ = shell.update(cx, |s, cx| {
-                    if !s.can_send_files(cx) || s.selected_agent_peer(cx).as_ref() != Some(&peer) {
-                        s.message = "连接或接收设备已变化，请重新选择。".into();
-                        cx.notify();
-                        return;
-                    }
-                    let command = if incremental {
-                        let Some(path) = paths.into_iter().next() else {
-                            return;
-                        };
-                        FileManagementCommand::PreviewDirectory { peer, path }
-                    } else {
-                        FileManagementCommand::Send { peer, paths }
-                    };
-                    s.send_file_command(command, Kind::Action, cx);
-                });
-            }
-            Ok(Ok(None)) => (),
-            _ => {
-                let _ = shell.update(cx, |s, cx| {
-                    s.message = "无法打开文件选择器。".into();
-                    cx.notify();
-                });
-            }
-        })
-        .detach();
-    }
-
-    fn update_setting(&mut self, key: &str, value: Value, cx: &mut Context<Self>) {
-        if !self.available() || self.dirty {
-            self.message = "请先在节点管理中保存或放弃配置草稿。".into();
-            cx.notify();
-            return;
-        }
-        let Some(mut settings) = self.draft.clone() else {
-            return;
-        };
-        settings[key] = value;
-        self.send(
-            Command::ApplyConfig {
-                expected_revision: self.revision,
-                settings,
-            },
-            Kind::Apply,
-            cx,
-        );
-    }
-
-    fn pick_agent_receive_root(&mut self, cx: &mut Context<Self>) {
-        if !self.available() {
-            return;
-        }
-        let picked = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some("选择接收目录".into()),
-        });
-        cx.spawn(async move |shell, cx| {
-            if let Ok(Ok(Some(paths))) = picked.await
-                && let Some(path) = paths.into_iter().next()
-            {
-                let _ = shell.update(cx, |s, cx| {
-                    s.update_setting("receive_root", json!(path), cx)
-                });
-            }
-        })
-        .detach();
     }
 
     fn lifecycle_button(&self, cx: &Context<Self>) -> gpui::Div {
@@ -455,7 +267,6 @@ impl AgentShell {
             .unwrap_or_else(|| "等待信令分配设备 ID".into());
         let enabled = self.available();
         let connected = self.peer_connected(cx);
-        let capabilities = self.capabilities();
         let mut card = ui_components::card()
             .h(px(224.))
             .p(px(12.))
@@ -519,7 +330,7 @@ impl AgentShell {
                     ),
             )
             .child(input_frame(&self.password));
-        if capabilities.speed {
+        if self.speed_supported() {
             card = card.child(
                 ui_components::compact_secondary_button("速度测试", connected).on_mouse_up(
                     MouseButton::Left,
@@ -564,664 +375,12 @@ impl AgentShell {
         card
     }
 
-    fn home_receive(&self, cx: &Context<Self>) -> gpui::Div {
-        let directory = self
-            .draft
-            .as_ref()
-            .and_then(|d| d["receive_root"].as_str())
-            .unwrap_or("等待后台节点配置");
-        ui_components::card()
-            .h(px(184.))
-            .p(px(12.))
-            .gap_2()
-            .child(ui_components::section_header(
-                "▱",
-                "接收目录",
-                "接收文件默认保存在此处；目录更改仅新任务生效（仅本机可见）",
-            ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .h(px(36.))
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .px(px(10.))
-                            .rounded_md()
-                            .border_1()
-                            .border_color(rgb(ui_theme::BORDER))
-                            .bg(rgb(ui_theme::SURFACE_SUBTLE))
-                            .child(div().text_color(rgb(ui_theme::PRIMARY)).child("▱"))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_sm()
-                                    .text_color(rgb(ui_theme::TEXT_SECONDARY))
-                                    .child(directory.to_owned()),
-                            ),
-                    )
-                    .child(
-                        ui_components::secondary_button(
-                            "更改",
-                            self.available() && self.draft.is_some(),
-                        )
-                        .on_mouse_up(
-                            MouseButton::Left,
-                            cx.listener(|s, _, _, cx| s.pick_agent_receive_root(cx)),
-                        ),
-                    ),
-            )
-    }
-
-    fn home_tasks(&mut self, cx: &mut Context<Self>) -> gpui::Div {
-        let enabled = self.can_send_files(cx);
-        let query = Self::text(&self.ui.search, cx);
-        let selected_peer = self.selected_agent_peer(cx);
-        let devices = self
-            .draft
-            .as_ref()
-            .map(|d| &d["trusted_devices"])
-            .unwrap_or(&Value::Null);
-        let filtered: Vec<_> = self
-            .tasks
-            .iter()
-            .filter(|t| {
-                matches_task(
-                    t,
-                    &query,
-                    self.ui.direction,
-                    self.ui.state_filter,
-                    if self.ui.peer_filter {
-                        Some(selected_peer.as_deref().unwrap_or(""))
-                    } else {
-                        None
-                    },
-                    devices,
-                )
-            })
-            .cloned()
-            .collect();
-        let pagination = TaskPagination::from_value(&self.ui.task_page);
-        let total = pagination.total;
-        let offset = pagination.offset;
-        let next = pagination.next_offset;
-        let previous = pagination.previous_offset();
-        let mut toolbar = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_3()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .child(
-                                ui_components::compact_secondary_button("选择文件", enabled)
-                                    .on_mouse_up(
-                                        MouseButton::Left,
-                                        cx.listener(|s, _, _, cx| s.home_pick(false, false, cx)),
-                                    ),
-                            )
-                            .child(
-                                ui_components::compact_secondary_button("选择目录", enabled)
-                                    .on_mouse_up(
-                                        MouseButton::Left,
-                                        cx.listener(|s, _, _, cx| s.home_pick(true, false, cx)),
-                                    ),
-                            )
-                            .child(
-                                ui_components::compact_secondary_button("增量发送目录", enabled)
-                                    .on_mouse_up(
-                                        MouseButton::Left,
-                                        cx.listener(|s, _, _, cx| s.home_pick(true, true, cx)),
-                                    ),
-                            ),
-                    )
-                    .child(div().text_xs().text_color(rgb(ui_theme::TEXT_MUTED)).child(
-                        if enabled {
-                            "可拖入文件和目录 · 每批最多 128 项"
-                        } else {
-                            "连接并授权后可拖入文件和目录"
-                        },
-                    )),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .text_xs()
-                    .child("并发：")
-                    .child(
-                        ui_components::compact_secondary_button(
-                            self.draft
-                                .as_ref()
-                                .and_then(|d| d["send_concurrency"].as_u64())
-                                .unwrap_or(1)
-                                .to_string(),
-                            self.available(),
-                        )
-                        .on_mouse_up(
-                            MouseButton::Left,
-                            cx.listener(|s, _, _, cx| {
-                                let current = s
-                                    .draft
-                                    .as_ref()
-                                    .and_then(|d| d["send_concurrency"].as_u64())
-                                    .unwrap_or(1);
-                                s.update_setting(
-                                    "send_concurrency",
-                                    json!(if current >= 3 { 1 } else { current + 1 }),
-                                    cx,
-                                );
-                            }),
-                        ),
-                    )
-                    .child(format!("任务 {}/{total}", filtered.len())),
-            );
-        if offset > 0 || next.is_some() {
-            toolbar = toolbar.child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        ui_components::compact_secondary_button(
-                            "上一页",
-                            self.available() && offset > 0,
-                        )
-                        .on_mouse_up(
-                            MouseButton::Left,
-                            cx.listener(move |s, _, _, cx| {
-                                if offset > 0 {
-                                    s.send(Command::Tasks { offset: previous }, Kind::Tasks, cx);
-                                }
-                            }),
-                        ),
-                    )
-                    .child(
-                        ui_components::compact_secondary_button(
-                            "下一页",
-                            self.available() && next.is_some(),
-                        )
-                        .on_mouse_up(
-                            MouseButton::Left,
-                            cx.listener(move |s, _, _, cx| {
-                                if let Some(offset) = next {
-                                    s.send(Command::Tasks { offset }, Kind::Tasks, cx);
-                                }
-                            }),
-                        ),
-                    ),
-            );
-        }
-        let filters = div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(input_frame(&self.ui.search).flex_1())
-            .child(
-                ui_components::compact_secondary_button(
-                    if self.ui.peer_filter {
-                        "当前设备"
-                    } else {
-                        "全部设备"
-                    },
-                    true,
-                )
-                .on_mouse_up(
-                    MouseButton::Left,
-                    cx.listener(|s, _, _, cx| {
-                        s.ui.peer_filter = !s.ui.peer_filter;
-                        cx.notify();
-                    }),
-                ),
-            )
-            .child(
-                ui_components::compact_secondary_button(
-                    ["全部方向", "发送", "接收"][self.ui.direction as usize],
-                    true,
-                )
-                .on_mouse_up(
-                    MouseButton::Left,
-                    cx.listener(|s, _, _, cx| {
-                        s.ui.direction = (s.ui.direction + 1) % 3;
-                        cx.notify();
-                    }),
-                ),
-            )
-            .child(
-                ui_components::compact_secondary_button(
-                    ["全部状态", "进行中", "暂停/中断", "已完成", "失败"]
-                        [self.ui.state_filter as usize],
-                    true,
-                )
-                .on_mouse_up(
-                    MouseButton::Left,
-                    cx.listener(|s, _, _, cx| {
-                        s.ui.state_filter = (s.ui.state_filter + 1) % 5;
-                        cx.notify();
-                    }),
-                ),
-            )
-            .child(
-                ui_components::compact_secondary_button("重置", true).on_mouse_up(
-                    MouseButton::Left,
-                    cx.listener(|s, _, _, cx| {
-                        s.ui.direction = 0;
-                        s.ui.state_filter = 0;
-                        s.ui.peer_filter = false;
-                        set_text(&s.ui.search, String::new(), cx);
-                        cx.notify();
-                    }),
-                ),
-            )
-            .child(
-                ui_components::compact_secondary_button("清理完成历史", self.available())
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(|s, _, _, cx| s.clear_history(cx)),
-                    ),
-            );
-        let list = if filtered.is_empty() {
-            div()
-                .flex_1()
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap_2()
-                .text_color(rgb(ui_theme::TEXT_SECONDARY))
-                .child(
-                    div()
-                        .text_size(px(24.))
-                        .text_color(rgb(ui_theme::TEXT_MUTED))
-                        .child("▤"),
-                )
-                .child(div().text_sm().text_color(rgb(ui_theme::TEXT)).child(
-                    if self.tasks.is_empty() {
-                        "暂无传输任务"
-                    } else {
-                        "没有匹配的任务"
-                    },
-                ))
-                .child(div().text_xs().child("连接设备后选择文件或文件夹开始传输"))
-                .into_any_element()
-        } else {
-            gpui::uniform_list(
-                "agent-transfer-tasks",
-                filtered.len(),
-                cx.processor(move |s, range: Range<usize>, _, cx| {
-                    range
-                        .filter_map(|index| filtered.get(index))
-                        .map(|task| s.home_task_row(task, cx))
-                        .collect::<Vec<_>>()
-                }),
-            )
-            .flex_1()
-            .min_h_0()
-            .into_any_element()
-        };
-        let queue = &self.ui.task_page["queue"];
-        ui_components::card()
-            .p(px(12.))
-            .gap_2()
-            .flex_1()
-            .min_h(px(260.))
-            .flex_shrink()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_3()
-                    .child(ui_components::section_header(
-                        "▤",
-                        "文件传输",
-                        "选择文件或目录，在已认证设备之间传输",
-                    ))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(ui_theme::TEXT_SECONDARY))
-                            .child(format!(
-                                "排队 {} · 活动文件 {}/{}",
-                                queue["pending"].as_u64().unwrap_or(0),
-                                queue["active_files"].as_u64().unwrap_or(0),
-                                queue["limit"].as_u64().unwrap_or(1)
-                            )),
-                    ),
-            )
-            .child(toolbar)
-            .child(filters)
-            .child(
-                div()
-                    .w_full()
-                    .flex_1()
-                    .min_h_0()
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(rgb(ui_theme::BORDER))
-                    .child(list),
-            )
-    }
-
-    fn home_task_row(&self, task: &Value, cx: &Context<Self>) -> gpui::Div {
-        let id = task["id"].as_str().unwrap_or("").to_owned();
-        let total = task["total"].as_u64().unwrap_or(0);
-        let confirmed = task["confirmed"].as_u64().unwrap_or(0).min(total);
-        let percent = if total == 0 {
-            if task["state"] == "completed" {
-                100.
-            } else {
-                0.
-            }
-        } else {
-            confirmed as f32 / total as f32 * 100.
-        };
-        let select = id.clone();
-        let mut row = div()
-            .h(px(76.))
-            .px_3()
-            .py_2()
-            .border_b_1()
-            .border_color(rgb(ui_theme::BORDER))
-            .flex()
-            .items_center()
-            .gap_3()
-            .cursor(CursorStyle::PointingHand)
-            .when(self.ui.selected.as_ref() == Some(&id), |d| {
-                d.bg(rgb(ui_theme::PRIMARY_SOFT))
-            })
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(move |s, _, _, cx| {
-                    s.ui.selected = Some(select.clone());
-                    s.open_panel(Page::TaskDetails, cx);
-                }),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_sm()
-                            .truncate()
-                            .child(task["name"].as_str().unwrap_or("").to_owned()),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(ui_theme::TEXT_SECONDARY))
-                            .child(format!(
-                                "{} · {} · {} / {} · {}/s",
-                                if task["direction"] == "send" {
-                                    "发送"
-                                } else {
-                                    "接收"
-                                },
-                                task_state(task),
-                                bytes(confirmed as f64),
-                                bytes(total as f64),
-                                bytes(task["rate"].as_f64().unwrap_or(0.))
-                            )),
-                    )
-                    .child(
-                        div()
-                            .h(px(3.))
-                            .w_full()
-                            .rounded_sm()
-                            .bg(rgb(ui_theme::BORDER))
-                            .child(
-                                div()
-                                    .h_full()
-                                    .w(relative(percent / 100.))
-                                    .bg(rgb(ui_theme::PRIMARY)),
-                            ),
-                    ),
-            )
-            .child(div().text_xs().child(format!("{percent:.0}%")));
-        for (label, operation, allowed) in [
-            ("暂停", 0, task["can_pause"].as_bool() == Some(true)),
-            ("继续", 1, task["can_continue"].as_bool() == Some(true)),
-            (
-                "取消",
-                2,
-                task["state"] != "completed" && task["state"] != "failed",
-            ),
-            ("移除记录", 3, task["state"] == "completed"),
-        ] {
-            if !allowed {
-                continue;
-            }
-            let id = id.clone();
-            let peer = task["peer"].as_str().unwrap_or("").to_owned();
-            row = row.child(
-                ui_components::compact_secondary_button(label, self.available()).on_mouse_up(
-                    MouseButton::Left,
-                    cx.listener(move |s, _, _, cx| {
-                        cx.stop_propagation();
-                        let Ok(task) = TaskId::parse(&id) else {
-                            return;
-                        };
-                        let command = match operation {
-                            0 => FileManagementCommand::Pause { task },
-                            1 => FileManagementCommand::Resume {
-                                peer: peer.clone(),
-                                task,
-                            },
-                            2 => FileManagementCommand::Cancel { task },
-                            _ => FileManagementCommand::RemoveHistory { tasks: vec![task] },
-                        };
-                        s.send_file_command(command, Kind::Action, cx);
-                    }),
-                ),
-            );
-        }
-        row
-    }
-
-    fn clear_history(&mut self, cx: &mut Context<Self>) {
-        let tasks = self
-            .tasks
-            .iter()
-            .filter(|t| t["state"] == "completed")
-            .filter_map(|t| TaskId::parse(t["id"].as_str()?).ok())
-            .collect::<Vec<_>>();
-        if tasks.is_empty() {
-            self.message = "当前页没有已完成任务。".into();
-            cx.notify();
-            return;
-        }
-        self.send_file_command(
-            FileManagementCommand::RemoveHistory { tasks },
-            Kind::Action,
-            cx,
-        );
-    }
-
-    pub(super) fn home_preview(&self, cx: &Context<Self>) -> gpui::Div {
-        let mut card = ui_components::card().child(ui_components::section_header(
-            "▱",
-            "目录预览",
-            "确认后由后台节点发送变化的文件",
-        ));
-        for preview in &self.previews {
-            let request = preview["id"].as_str().and_then(|id| TaskId::parse(id).ok());
-            let peer = preview["peer"].as_str().unwrap_or("").to_owned();
-            let cancel = request.clone();
-            card = card.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_sm()
-                            .child(preview_summary(preview, bytes)),
-                    )
-                    .child(
-                        ui_components::secondary_button("确认发送", self.available()).on_mouse_up(
-                            MouseButton::Left,
-                            cx.listener(move |s, _, _, cx| {
-                                if let Some(request) = request.clone() {
-                                    s.send_file_command(
-                                        FileManagementCommand::ConfirmDirectory {
-                                            peer: peer.clone(),
-                                            request,
-                                        },
-                                        Kind::Action,
-                                        cx,
-                                    );
-                                }
-                            }),
-                        ),
-                    )
-                    .child(
-                        ui_components::secondary_button("取消预览", self.available()).on_mouse_up(
-                            MouseButton::Left,
-                            cx.listener(move |s, _, _, cx| {
-                                if let Some(request) = cancel.clone() {
-                                    s.send_file_command(
-                                        FileManagementCommand::CancelDirectory { request },
-                                        Kind::Action,
-                                        cx,
-                                    );
-                                }
-                            }),
-                        ),
-                    ),
-            );
-        }
-        card
-    }
-
-    pub(super) fn home_detail(&self, cx: &Context<Self>) -> gpui::Div {
-        let task = self
-            .tasks
-            .iter()
-            .find(|t| t["id"].as_str() == self.ui.selected.as_deref());
-        let mut card = ui_components::card().child(
-            div()
-                .flex()
-                .justify_between()
-                .items_center()
-                .child(ui_components::section_header(
-                    "▤",
-                    "任务详情",
-                    "状态和已确认字节来自后台持久记录",
-                ))
-                .child(
-                    ui_components::secondary_button("关闭窗口", true).on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(|_, _, window, _| window.remove_window()),
-                    ),
-                ),
-        );
-        if let Some(task) = task {
-            card = card
-                .child(task["name"].as_str().unwrap_or("").to_owned())
-                .child(format!(
-                    "设备：{} · {}",
-                    task["peer"].as_str().unwrap_or(""),
-                    task_state(task)
-                ));
-            if let Some(diagnostic) = task["diagnostic"].as_str() {
-                card = card.child(diagnostic.to_owned());
-            }
-            let id = task["id"].as_str().and_then(|id| TaskId::parse(id).ok());
-            let delete = id.clone();
-            card = card.child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        ui_components::secondary_button("定位文件", self.available()).on_mouse_up(
-                            MouseButton::Left,
-                            cx.listener(move |s, _, _, cx| {
-                                if let Some(task) = id.clone() {
-                                    s.send_file_command(
-                                        FileManagementCommand::TaskLocation { task },
-                                        Kind::Location,
-                                        cx,
-                                    );
-                                }
-                            }),
-                        ),
-                    )
-                    .when(task["can_delete_file"].as_bool() == Some(true), |d| {
-                        d.child(
-                            ui_components::secondary_button("删除接收文件", self.available())
-                                .on_mouse_up(
-                                    MouseButton::Left,
-                                    cx.listener(move |_s, _, window, cx| {
-                                        let Some(task) = delete.clone() else {
-                                            return;
-                                        };
-                                        let answer = window.prompt(
-                                            PromptLevel::Warning,
-                                            "永久删除接收文件？",
-                                            Some("此操作会删除本机文件及任务记录，无法撤销。"),
-                                            &[
-                                                PromptButton::Ok("删除".into()),
-                                                PromptButton::Cancel("取消".into()),
-                                            ],
-                                            cx,
-                                        );
-                                        cx.spawn(async move |shell, cx| {
-                                            if answer.await == Ok(0) {
-                                                let _ = shell.update(cx, |s, cx| {
-                                                    s.send_file_command(
-                                                        FileManagementCommand::DeleteReceivedFile {
-                                                            task,
-                                                        },
-                                                        Kind::Action,
-                                                        cx,
-                                                    )
-                                                });
-                                            }
-                                        })
-                                        .detach();
-                                    }),
-                                ),
-                        )
-                    }),
-            );
-        } else {
-            card = card.child("任务已移除或位于其它页。");
-        }
-        card
-    }
-
     pub(super) fn home_speed(&self, cx: &Context<Self>) -> gpui::Div {
-        let capabilities = self.capabilities();
         let connected = self.peer_connected(cx);
-        let any_speed_running = self.speed_running();
+        let any_speed_running = self.speed_running(cx);
         let selected = self.selected_agent_peer(cx);
         let speed = self
-            .speed_rows()
+            .speed_rows(cx)
             .iter()
             .find(|s| s["peer"].as_str() == selected.as_deref());
         let running = speed.is_some_and(|s| s["state"] == "Running");
@@ -1244,7 +403,7 @@ impl AgentShell {
                                 AgentSpeedDirection::Upload => "仅上传",
                                 AgentSpeedDirection::Download => "仅下载",
                             },
-                            capabilities.speed && !running,
+                            self.speed_supported() && !running,
                         )
                         .on_mouse_up(
                             MouseButton::Left,
@@ -1265,7 +424,7 @@ impl AgentShell {
                     .child(
                         ui_components::secondary_button(
                             format!("{} 秒", self.ui.speed_seconds),
-                            capabilities.speed && !running,
+                            self.speed_supported() && !running,
                         )
                         .on_mouse_up(
                             MouseButton::Left,
@@ -1293,7 +452,7 @@ impl AgentShell {
                             self.available()
                                 && (running
                                     || speed_start_ready(
-                                        self.capabilities(),
+                                        self.speed_supported(),
                                         connected,
                                         any_speed_running,
                                     )),
@@ -1314,9 +473,9 @@ impl AgentShell {
                                     );
                                 }
                             } else if speed_start_ready(
-                                s.capabilities(),
+                                s.speed_supported(),
                                 s.peer_connected(cx),
-                                s.speed_running(),
+                                s.speed_running(cx),
                             ) && let Some(peer) = s.selected_agent_peer(cx)
                             {
                                 s.send(
@@ -1336,9 +495,9 @@ impl AgentShell {
                 format!(
                     "{} · {}/s · RTT {} ms · 已传 {}",
                     speed["state"].as_str().unwrap_or(""),
-                    bytes(speed["bytes_per_second"].as_f64().unwrap_or(0.)),
+                    format_bytes(speed["bytes_per_second"].as_f64().unwrap_or(0.)),
                     speed["rtt_ms"],
-                    bytes(speed["bytes"].as_u64().unwrap_or(0) as f64)
+                    format_bytes(speed["bytes"].as_u64().unwrap_or(0) as f64)
                 )
             } else {
                 "尚未测速".into()
@@ -1350,10 +509,7 @@ impl AgentShell {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
-        let files = self.capabilities().files;
-        let drop_enabled = self.can_send_files(cx);
-        let tasks = files.then(|| self.home_tasks(cx));
-        let mut page = div()
+        let page = div()
             .size_full()
             .id("agent-workbench")
             .overflow_y_scroll()
@@ -1366,28 +522,6 @@ impl AgentShell {
             .gap_3()
             .p(px(20.))
             .text_color(rgb(ui_theme::TEXT))
-            .can_drop(move |value, _, _| {
-                drop_enabled
-                    && value
-                        .downcast_ref::<gpui::ExternalPaths>()
-                        .is_some_and(|paths| {
-                            veytrane_files::path_batch::validate(paths.paths()).is_ok()
-                        })
-            })
-            .on_drop(cx.listener(|s, paths: &gpui::ExternalPaths, _, cx| {
-                if s.can_send_files(cx)
-                    && let Some(peer) = s.selected_agent_peer(cx)
-                {
-                    s.send_file_command(
-                        FileManagementCommand::Send {
-                            peer,
-                            paths: paths.paths().to_vec(),
-                        },
-                        Kind::Action,
-                        cx,
-                    );
-                }
-            }))
             .on_action(cx.listener(|s, _: &ConnectPeer, _, cx| s.connect_from_home(cx)))
             .on_action(cx.listener(|s, _: &ToggleSettings, _, cx| {
                 s.open_panel(Page::Settings, cx);
@@ -1400,33 +534,13 @@ impl AgentShell {
             }))
             .child(self.home_header(cx))
             .when(!self.attached, |page| page.child(self.first_run_card(cx)));
-        if files {
-            page = page
-                .on_action(cx.listener(|s, _: &ChooseFiles, _, cx| s.home_pick(false, false, cx)))
-                .on_action(cx.listener(|s, _: &ChooseFolder, _, cx| s.home_pick(true, false, cx)));
-        }
-        let mut row = div()
-            .flex()
-            .gap_3()
-            .flex_shrink_0()
-            .child(div().flex_1().min_w_0().child(self.home_connection(cx)));
-        if files {
-            row = row.child(div().flex_1().min_w_0().child(self.home_receive(cx)));
-        }
-        page = page
-            .child(row)
+        let page = page
+            .child(self.home_connection(cx))
             .child(self.home_forwarding(self.selected_agent_peer(cx), cx));
-        if let Some(tasks) = tasks {
-            page = page.child(tasks);
-        }
-        if files && !self.previews.is_empty() {
-            page = page.child(
-                ui_components::secondary_button("查看待确认的目录预览", true).on_mouse_up(
-                    MouseButton::Left,
-                    cx.listener(|s, _, _, cx| s.open_panel(Page::DirectoryPreview, cx)),
-                ),
-            );
-        }
+        #[cfg(feature = "desktop-files")]
+        let page = self
+            .files
+            .update(cx, |files, cx| files.mount_home(page, cx));
         page.child(
             div()
                 .w_full()
@@ -1494,7 +608,7 @@ impl AgentShell {
         card
     }
 
-    pub(super) fn render_settings(&self, cx: &Context<Self>) -> gpui::Stateful<gpui::Div> {
+    pub(super) fn render_settings(&self, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         let enabled = self.available() && self.draft.is_some();
         let settings = self.draft.as_ref().unwrap_or(&Value::Null);
         let mut root = div()
@@ -1580,96 +694,11 @@ impl AgentShell {
                             }),
                         ),
                     ),
-            )
-            .child(
-                ui_components::card()
-                    .child(ui_components::section_header(
-                        "↻",
-                        "断网自动恢复",
-                        "恢复前重新验证设备身份与授权",
-                    ))
-                    .child(
-                        ui_components::secondary_button(
-                            if settings["auto_resume"] == true {
-                                "关闭自动恢复"
-                            } else {
-                                "开启自动恢复"
-                            },
-                            enabled,
-                        )
-                        .on_mouse_up(
-                            MouseButton::Left,
-                            cx.listener(|s, _, _, cx| {
-                                let enabled =
-                                    s.draft.as_ref().is_some_and(|d| d["auto_resume"] == true);
-                                s.update_setting("auto_resume", json!(!enabled), cx);
-                            }),
-                        ),
-                    ),
-            )
-            .child(
-                ui_components::card()
-                    .child(ui_components::section_header(
-                        "⇅",
-                        "文件限速",
-                        "单位 KiB/s；0 表示不限速",
-                    ))
-                    .child(
-                        div()
-                            .flex()
-                            .gap_3()
-                            .child(field("上传", &self.ui.upload))
-                            .child(field("下载", &self.ui.download)),
-                    )
-                    .child(
-                        ui_components::secondary_button("保存并应用限速", enabled).on_mouse_up(
-                            MouseButton::Left,
-                            cx.listener(|s, _, _, cx| {
-                                match veytrane_files::settings::FileLimits::parse(
-                                    &Self::text(&s.ui.upload, cx),
-                                    &Self::text(&s.ui.download, cx),
-                                ) {
-                                    Ok(limits) => {
-                                        s.update_setting("file_limits", json!(limits), cx)
-                                    }
-                                    Err(error) => {
-                                        s.message = error.into();
-                                        cx.notify();
-                                    }
-                                }
-                            }),
-                        ),
-                    ),
-            )
-            .child(
-                ui_components::card()
-                    .child(ui_components::section_header(
-                        "▱",
-                        "接收空间",
-                        "为接收文件保留可用空间（MiB）",
-                    ))
-                    .child(input_frame(&self.ui.margin))
-                    .child(
-                        ui_components::secondary_button("保存安全余量", enabled).on_mouse_up(
-                            MouseButton::Left,
-                            cx.listener(|s, _, _, cx| {
-                                match Self::text(&s.ui.margin, cx)
-                                    .parse::<u16>()
-                                    .ok()
-                                    .filter(|n| *n <= 4096)
-                                {
-                                    Some(value) => {
-                                        s.update_setting("receive_safety_mib", json!(value), cx)
-                                    }
-                                    None => {
-                                        s.message = "接收安全余量必须为 0..4096 MiB".into();
-                                        cx.notify();
-                                    }
-                                }
-                            }),
-                        ),
-                    ),
             );
+        #[cfg(feature = "desktop-files")]
+        {
+            root = root.children(self.files.update(cx, |files, cx| files.render_settings(cx)));
+        }
         let mut trusted = ui_components::card().child(ui_components::section_header(
             "✓",
             "可信设备",
@@ -1787,74 +816,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn explicit_capabilities_split_files_and_speed_without_connection_coupling() {
-        let capabilities = status_capabilities(
-            &json!({"capabilities":{"files":false,"speed":true,"tcp":true}}),
-            &json!({"queue":{}}),
-        );
-        assert_eq!(
-            capabilities,
-            AgentCapabilities {
-                files: false,
-                speed: true
-            }
-        );
-        assert!(!file_action_ready(capabilities, true, false));
-        assert!(speed_action_ready(capabilities, true));
-
-        let capabilities = status_capabilities(
-            &json!({"capabilities":{"files":true,"speed":false,"tcp":true}}),
-            &json!({"queue":{}}),
-        );
-        assert!(file_action_ready(capabilities, true, false));
-        assert!(!file_action_ready(capabilities, true, true));
-        assert!(!speed_action_ready(capabilities, true));
-    }
-
-    #[test]
-    fn legacy_status_defaults_full_and_uses_loaded_tasks_queue_for_old_trimmed_agents() {
-        let full = status_capabilities(&json!({}), &json!({"queue":{"pending":0}}));
-        assert_eq!(
-            full,
-            AgentCapabilities {
-                files: true,
-                speed: true
-            }
-        );
-        let before_tasks = status_capabilities(&json!({}), &Value::Null);
-        assert!(before_tasks.files && before_tasks.speed);
-        let trimmed = status_capabilities(&json!({}), &json!({"queue":null}));
-        assert_eq!(
-            trimmed,
-            AgentCapabilities {
-                files: false,
-                speed: true
-            }
-        );
-        assert!(!file_action_ready(trimmed, true, false));
-        assert!(speed_action_ready(trimmed, true));
-    }
-
-    #[test]
-    fn any_running_speed_blocks_a_second_start_without_restoring_file_actions() {
-        let capabilities = AgentCapabilities {
-            files: false,
-            speed: true,
-        };
-        assert!(speed_start_ready(capabilities, true, false));
-        assert!(!speed_start_ready(capabilities, true, true));
-        assert!(!file_action_ready(capabilities, true, false));
-        assert!(!file_action_ready(capabilities, true, true));
+    fn speed_capability_and_connection_are_both_required() {
+        assert!(speed_supported(&json!({})));
+        assert!(speed_supported(&json!({"capabilities":{"speed":true}})));
+        assert!(!speed_supported(&json!({"capabilities":{"speed":false}})));
+        assert!(!speed_start_ready(false, true, false));
+        assert!(!speed_start_ready(true, false, false));
+        assert!(speed_start_ready(true, true, false));
+        assert!(!speed_start_ready(true, true, true));
     }
 
     #[test]
     fn bytes_keeps_precision_and_clamps_invalid_values() {
-        assert_eq!(bytes(1023.), "1023 B");
-        assert_eq!(bytes(1024.), "1.0 KiB");
-        assert_eq!(bytes(1.5 * 1024. * 1024.), "1.5 MiB");
-        assert_eq!(bytes(2.25 * 1024. * 1024. * 1024.), "2.2 GiB");
-        assert_eq!(bytes(-1.), "0 B");
-        assert_eq!(bytes(f64::NAN), "0 B");
-        assert_eq!(bytes(f64::INFINITY), "0 B");
+        assert_eq!(format_bytes(1023.), "1023 B");
+        assert_eq!(format_bytes(1024.), "1.0 KiB");
+        assert_eq!(format_bytes(1.5 * 1024. * 1024.), "1.5 MiB");
+        assert_eq!(format_bytes(2.25 * 1024. * 1024. * 1024.), "2.2 GiB");
+        assert_eq!(format_bytes(-1.), "0 B");
+        assert_eq!(format_bytes(f64::NAN), "0 B");
+        assert_eq!(format_bytes(f64::INFINITY), "0 B");
     }
 }

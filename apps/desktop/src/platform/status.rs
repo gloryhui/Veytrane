@@ -15,7 +15,7 @@ impl CoreState {
             Self::Offline => "未配置 / 离线",
             Self::Connecting => "连接中",
             Self::Online => "在线",
-            Self::Active => "传输 / 测速中",
+            Self::Active => "活动中",
             Self::Error => "需要处理",
         }
     }
@@ -36,9 +36,7 @@ pub(in crate::desktop) struct StatusSnapshot {
     pub device_id: String,
     pub signal: String,
     pub connected_peers: usize,
-    pub active_files: usize,
-    pub queued_files: usize,
-    pub bytes_per_second: u64,
+    pub application_activity: Option<String>,
     pub tunnels: usize,
     pub waiting_tunnels: usize,
     pub tunnel_errors: usize,
@@ -47,13 +45,17 @@ pub(in crate::desktop) struct StatusSnapshot {
 }
 impl StatusSnapshot {
     pub fn tooltip(&self) -> String {
-        format!(
-            "Veytrane · {} · {} 台设备 · {} 个传输 · {} 个隧道",
+        let mut tooltip = format!(
+            "Veytrane · {} · {} 台设备 · {} 个转发",
             self.core.label(),
             self.connected_peers,
-            self.active_files,
             self.tunnels
-        )
+        );
+        if let Some(activity) = &self.application_activity {
+            tooltip.push_str(" · ");
+            tooltip.push_str(activity);
+        }
+        tooltip
     }
 }
 
