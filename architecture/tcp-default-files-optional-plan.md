@@ -1,0 +1,79 @@
+# Veytrane 默认端口转发与可选文件传输施工方案
+
+基线为 `8ecd261`。本方案调整默认发行组合和文件应用的装配边界。端口转发随标准 Agent 发布，原生文件传输继续维护，由用户显式选择文件增强版。标准版保留设备管理、测速诊断和现有本机导航。节点核心继续负责设备身份、可信关系、能力协商、建连、重连和撤销。
+
+## 1. 现状与改动边界
+
+| 位置 | 当前行为 | 施工目标 |
+|---|---|---|
+| [Cargo.toml](../Cargo.toml) | 默认 `node` 带 `agent-full`、`standalone`、`sub2api-runtime`。`agent-base` 已有 TCP 和测速，`agent-full` 加入文件及管理入口。`desktop-client` 自身引用文件策略包。 | 默认组合排除文件执行、文件策略和界面。增强版的 Agent、桌面和 Web 通过显式 feature 装配。旧独立 CLI 和专用产品显式构建。 |
+| [节点装配](../src/node/composition/runtime.rs) 与 [Agent 宿主](../apps/agent/src/host/agent.rs) | 文件运行时已有独立 crate。开任务库、接收目录、IPC 动作、任务快照和配置事务仍跨多个目录。 | 文件包提供运行、配置、IPC 和界面的入口。宿主装配可选能力，继续提供统一生命周期、IPC 和配置事务。 |
+| [GPUI 工作台](../apps/desktop/src/agent_shell/workbench.rs) 与 [Web 管理](../apps/web-management/src/web.html) | GPUI 首页以收发和任务为主，已有服务及转发管理；Web 同页含转发与文件操作。 | 首页优先设备、远端服务和转发。文件的菜单、窗口、拖放、任务、设置及 Web 面板由同一个包提供。 |
+| [桌面打包](../scripts/package-desktop.py) 与 [节点安装](../scripts/node-host.py) | 打包按三个二进制的 SHA、目标、版本和 IPC 校验；安装目录以 SHA 为键。 | 打包和安装另外校验发行组合。同一提交的标准版与文件增强版可各自安装、切换和回退。 |
+
+## 2. 目标构建和入口
+
+复用现有二进制名称。下列是施工后的 feature 合约。
+
+| 使用方式 | Cargo 组合 | 运行入口与内含能力 |
+|---|---|---|
+| 默认 Rust 构建 | `default = ["agent-standard"]` | `p2p-agent` 和 `p2p-node`。新节点默认启用 TCP，提供设备、服务授权、转发、测速和管理。 |
+| 最小无界面 Agent | `--no-default-features --features agent-base --bin p2p-agent` | 保留 TCP、测速和本机管理 IPC，HTTP 管理由另外的管理客户端提供。 |
+| 标准桌面包 | Agent/CLI 用 `agent-standard`，桌面用 `desktop-client` | 三个二进制同包，桌面首页展示设备、服务和转发。 |
+| 文件增强桌面包 | Agent/CLI 用 `agent-full`，桌面用 `desktop-files` | 三个二进制同包，安装后明确启用文件能力，文件入口由本机和对端的实际能力决定。 |
+| 旧独立命令与信令 | `standalone` 构建 `p2p_file`；`standalone-files` 增加旧文件命令 | `p2p_file signal-server` 沿用命令、参数和注册库。旧 `send`、`recv`、`push` 及 `serve` 的文件分支由文件 feature 装配。 |
+
+- `agent-standard = ["agent-base", "agent-web", "node-cli"]`。保留内置回环 `3001` 导航及独立 `p2p-node web` 两个现有入口。标准构建保留导航的映射、服务和 Agent 管理。
+- `agent-full = ["agent-standard", "agent-files"]`。`desktop-files` 叠加 `desktop-client` 和文件包的 GPUI feature。`gui` 调整为标准桌面开发组合，既有显式 `node` 组合继续覆盖完整回归。旧 CLI 的文件用例改为显式 `standalone-files`。`live`、`sub2api-client` 和 `sub2api-gateway` 继续使用各自的构建入口。
+- `p2p-agent` 的最低编译条件继续为 `agent-base`。文件增强版新建节点也以 `enable_files=false` 初始化，用户经现有配置重建事务启用后才打开任务库、接收目录及协商能力。沿用当前 `enable_tcp`，保留原来明确关闭 TCP 的节点设置。初始化时不自动发布任何服务或创建转发规则。
+- Agent/CLI 与桌面使用两次独立、显式的 `--no-default-features` 构建，标准版与增强版使用不同输出目录，避免 Cargo feature 合并及同名产物覆盖。先让对应的新构建在 CI 成为必过项，最后切换 `default`。
+
+## 3. 文件应用收口到一个 Cargo 包
+
+沿用 `crates/veytrane-files/`。`runtime`、`management`、`desktop`、`web` 和 `legacy` 是包内可按需编译的代码边界，沿用已有 `node-runtime` 等 feature 能表达的语义。Agent 的运行组合不拉入 GPUI 或 Web。桌面的文件组合只带文件 UI、IPC 客户端及输入校验，不拉入收发运行、多平台安全存储和接收任务恢复。Web 组合使用文件包提供的页面片段、事件脚本及契约。
+
+| 源码 | 交给文件包的内容 | 调用边界 |
+|---|---|---|
+| `crates/veytrane-files/src/`、[veytrane-file-policy](../crates/veytrane-file-policy/src/lib.rs) | 原执行代码、路径批次、限速、并发和空间策略、任务队列、目录预览、恢复、收件及本地文件操作。将 `veytrane-file-policy` 合并为包内轻量配置模块。 | 核心网络配置与转发配置无文件策略依赖。 |
+| `src/node/core/{session,control,config,task_details}.rs` 及文件专用分出口；`src/node/composition/{runtime,business,settings}.rs` | 文件命令的类型、参数校验、执行、应用事件、任务投影，文件配置和接收存储的准备与提交。 | 节点 actor 仍串行核对授权代际、协商结果和会话所有权。文件包通过小型会话接口提交操作，复用有界排队和会话取消能力。根包通过装配注入句柄，禁止文件包反向依赖根包。 |
+| `apps/agent/src/host/agent/files.rs`、`agent.rs`、`configuration.rs`、`crates/veytrane-management/src/protocol.rs` | 文件动作与查询的请求体、响应、`FilePage`、预览缓存、分页和脱敏；文件配置热更新回调。 | 管理层保留 IPC v1 封装、认证、帧限制、查询与变更分类、请求去重及配置 revision。对外沿用原命令名和 JSON 结构，文件请求只在装配点分派。 |
+| `apps/desktop/src/agent_shell.rs`、`agent_shell/{workbench,windows}.rs` | 文件/目录选择、拖放和增量发送、收件设置、任务列表与详情、目录预览与确认、历史清理、暂停和续传。 | 桌面外壳负责主窗口、系统托盘、键盘导航、通用组件、设备选择及基础 IPC。文件入口通过窄的挂载函数取得选中的设备和 IPC 客户端。需要复用的样式与组件通过现有 GPUI 类型或外壳传入，禁止模块引用 `AgentShell`。 |
+| `apps/web-management/src/{web.rs,web.html}`、`apps/node-cli/src/commands.rs` | Web 的文件动作、任务面板、前端事件绑定，以及管理 CLI 的文件子命令和参数解析。 | Web 复用现有访问校验、同源请求、token、revision 与不确定结果重试。基础 Web 只保留服务、转发及公共状态。默认 CLI 帮助里只有编入的命令。 |
+| `apps/standalone-cli/src/application.rs`、`src/transfer/`、`src/tunnel/mod.rs`、文件专用 `src/storage` / `src/protocol` | 迁入旧文件命令的业务体、接收分支及文件专用存储。使用包内现有清单、分块、校验和续传代码。 | 保留旧 P2PF 文件格式及调用行为，统一节点侧继续使用现有 P2PN 文件流。共享通道、身份、TCP 监听和信令留在各自基础模块。 |
+
+文件应用复用 `veytrane-transport` 的帧与标识、现有安全文件基础设施、`veytrane-node` 的授权、流分类、限额与连接生命周期。端口转发继续由 `veytrane-tcp` 提供。线路编号、能力位和跨应用共享的活动许可留在基础层。它们有对端互操作和资源调度的实际调用方。文件包缺席时仍能识别历史文件流类型，直接按未协商能力拒绝，避免破坏同一连接上的 TCP。
+
+禁止为搬运代码而复制通道、另建 QUIC 连接、缓存一份可信设备表或绕开连接 actor。移植文件命令时核对开始、完成、恢复三处的授权和连接代际。任务操作、撤销和重连要保持可观察行为。保持既有磁盘格式、校验与断点恢复语义。对于已无调用的文件重导出，在迁移调用者和测试后随同阶段清理。
+
+## 4. 配置、IPC 与界面行为
+
+1. **文件数据。** `node.json` 继续沿用现有 revision 和字段形状。文件包拥有 `receive_root`、`send_concurrency`、`auto_resume`、`receive_safety_mib`、`file_limits` 的类型及校验。Agent 配置装配层只保留已有文件配置的识别与原样传递，用于同一节点在不同发行组合间切换。标准版保存转发配置时要保留已有文件字段字节语义，阻止通过配置接口启用缺席的能力或编辑其设置。传输任务库、锁、暂存文件及接收数据在标准版启动和停止期间保持原样。
+2. **已启用文件的节点。** 当前校验会拒绝裁剪版加载显式启用了文件的配置。升级预检应在停止旧 Agent 前检测，提供两种明确路径：选择文件增强版并保留原设置，或先通过旧 Agent 的 revision 事务显式关停文件，再切换至标准版。若有运行中的任务，先等待完成或走现有暂停与恢复流程。切回增强版使用相同身份和数据目录，由用户启用后恢复原任务。脚本不得静默改写 `enable_files` 或清理文件数据。
+3. **管理契约。** 沿用 `Status.capabilities.files` 的生效语义，并由 Agent 另报已编入但未启用的能力，供增强版管理端决定是否提供启用入口。沿用文件方法名、旧 `Tasks` 分页及测速字段。标准版保留旧客户端需要的空任务页及 `capability_disabled` 错误。用当前发布的客户端夹具锁定这些兼容行为。默认构建的兼容层只识别旧方法名和空状态结构，文件 DTO、执行、数据读取和路径校验都由文件包提供。HTTP 和 IPC 经同一个宿主分派，共用现有帧大小、请求重试及能力校验。
+4. **GPUI。** 将现有服务目录和转发管理入口提到首页。保留设备连接状态、服务 ID、目标端、监听端、配置启用和实时监听状态，沿用现有 revision 草稿和启动/停止动作。标准版移除文件菜单、快捷键、拖放接收器、文件专属窗口和文件任务轮询。增强版在设置提供启用入口，只在 Agent 报告能力已生效后挂载文件工作台。发送动作经当前连接协商和授权。关闭能力后收起面板、终止文件轮询并清掉未提交的界面选择。
+5. **Web 与 CLI。** 默认 Web 只渲染现有节点和转发表单，文件增强版按 feature 引入文件资源，再以运行时能力显示。文件与测速的共用权限区只在增强版呈现文件授权项，默认版保存时保留已有授权的文件字段。发送和预览的本地路径语义保持现状，相关提示随文件面板迁移。默认 CLI 保留 `status`、连接、`services`、转发启停、配置与 `web`。直接调用旧文件子命令的脚本继续使用增强版 CLI。仍通过 IPC 发送历史文件请求的客户端收到明确的能力错误。
+
+## 5. 打包、安装和升级
+
+- 改 `packaging/macos-{arm64,x86_64}/build.sh`、`packaging/linux-x86_64/build.sh`、`packaging/windows-x64/build.ps1` 及 `packaging/deploy-windows.bat`。默认打标准版，显式选择 `--with-files`（PowerShell `-WithFiles`）才打增强版。桌面包仍包含桌面、Agent 和 CLI，同一版本的三者整体发布。
+- `scripts/package-desktop.py`、`verify-desktop-package.py` 及依赖/许可证生成同时读取真实构建组合。`--build-info` 用有值域约束的 `edition`、能力角色及现有 SHA、目标、IPC 信息验证包内一致性。标准/文件增强归档、校验和、候选清单和原生签名证据使用可区分的文件名及输出目录。默认候选跟随原发布渠道，增强版使用明确标注的独立资产。
+- `scripts/node-host.py` 将新候选的不可变安装键扩为提交和发行组合，沿用 `installed.json` 的真实路径进行定位，继续识别已安装的 SHA 目录。允许同一提交的两个组合并存。安装预检核验 Agent/CLI 的组合、SHA、版本和 IPC，保留既有启动项、数据目录、授权与回退记录。部署换版沿用现有停启和就绪检查，回退读取已核验的旧路径。
+- 更新 `.github/workflows/gpui.yml`、`windows.yml`、`scripts/check-architecture.py`、发布说明及仓库架构索引。将信令部署示例改为带 `--no-default-features --features standalone` 的构建。含旧文件操作的例子使用 `standalone-files`。现有生产信令命令、TLS、Relay 和 SQLite 路径沿用原设置。
+
+## 6. 施工顺序和阶段验收
+
+| 工单 | 修改与交付 | 完成条件 |
+|---|---|---|
+| P1 文件运行和策略收口 | 合并文件策略包，搬移文件运行和配置操作。先保持现有默认构建与公开行为。 | 既有文件续传、目录确认、任务恢复以及代理转发定向用例通过。生产依赖证明节点核心、运输入口、TCP 和无文件装配没有反向包依赖。 |
+| P2 管理边界收口 | 移植宿主文件命令、配置校验、快照与旧协议兼容。核对 legacy 分支与信令调用方，完成独立构建。 | IPC 固定请求、响应与帧限制通过，重复请求和 revision 冲突语义保持；旧受支持 CLI 文件互操作及信令回环通过。用同一个数据目录验证关闭文件、裁剪、重新启用。 |
+| P3 GPUI、Web、CLI 装配 | 页面提取到文件包，复用服务/转发页作为基础入口，完成标准和增强两个显式构建。 | 标准桌面和 Web 无文件节点、资源、动作及轮询。增强客户端连接标准 Agent 时，文件入口正确收起。两端具备能力时验证发文件、目录预览、接收、暂停续传。拖入路径到标准工作台不触发文件请求。 |
+| P4 发行与切换 | 三平台脚本和 CI 产出两个候选，新增安装身份、升级前检查及回退。核对既有信令和专用产品构建。 | 同一提交的双候选可独立安装，错误混包在停旧进程前被拒绝；已有安装能保留身份、信任、规则和任务数据完成升降级。候选内容、依赖清单和哈希可核对。 |
+| P5 切换默认与移除演练 | 将 Cargo、桌面打包入口、CI 默认候选和文档切到标准版，更新架构图的装配边界。 | 干净源码在 macOS、Windows、Linux 构建默认候选。在任务专用的隔离副本中，仅移除文件包目录、Cargo 注册、根装配挂载和文件专属测试/发布分支，再次构建并跑可信连接与 TCP 转发。归档涉及的触点。 |
+
+每个工单分成可审核的小步提交，提交说明记录前置提交和实际检查。依赖树检查必须使用正式生产边，分别证明标准 `p2p-agent`、`p2p-node`、桌面和 Web 都无需 `veytrane-files`、旧 `veytrane-file-policy` 或文件专属存储；文件增强版继续分离 UI 与执行的编译依赖。`Cargo.lock` 可保留仓库中显式可选包的记录，验收根据解析后的生产依赖和产物。
+
+最后在隔离配置完成两端标准版、标准版对增强版、两端增强版及已有版本升级四组测试。每组跑服务目录授权、真实 TCP 传输、并发、断线重连和撤销后监听/连接回收。增强版验证旧任务恢复及文件传输期间 TCP 并发。至少以实际候选覆盖三平台启动与回退。生产部署、线上信令切换及真实数据迁移分别确认后执行。
+
+## 给施工模型的起步指令
+
+> 以本文件和当前工作树为准，先执行 P1 的源码清册与依赖核对。文件能力从既有 `veytrane-files` 收口，复用节点会话和授权机制。保留用户工作树中的其他改动，按 P1 到 P5 分步提交，直到双候选和移除演练都有实际证据。每次对外契约变化都写明调用方，记录有效的升级与回退路径。
