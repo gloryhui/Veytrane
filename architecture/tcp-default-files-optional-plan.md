@@ -102,6 +102,8 @@
 - `57f3d05`、`37da50b`、`e6676aa` 分别实现发行版型标识、双候选和只读升级预检。macOS arm64 的同 SHA 双候选从干净源码打包，校验架构、最低部署版本、三二进制元数据、实际依赖清单、原始源码材料、归档 SHA256 和 ad-hoc 签名。Windows、Linux 及 Intel Mac 配置了独立候选及 CI 校验流程。
 - 使用 `18d114b` 的 SHA 目录旧安装与 `37da50b` 的两个原生候选，实测旧版 → 标准 → 增强 → 原 SHA 目录回退。混包和开启文件时切到标准版均在停止旧 Agent 前被拒绝。验证同一身份、信任、转发、配置与任务库保留。系统启动项由隔离测试适配，实际 Agent 进程通过真实 IPC 停启和检查所有权锁。[换版证据](/private/tmp/veytrane-native-p4.8v44vH/install-proof-hkpaqdkn/result.json)。
 - 16 项宿主测试及 9 项包验证测试通过。Linux 使用原生 systemd 用户临时单元实测标准 → 文件增强 → 标准，三个进程均经真实 IPC 就绪、退出并释放所有权，保留相同的身份、配置及 revision。隔离适配器从生成的宿主定义读取启动参数，使用临时单元替代登录注册。两阶段比较了现有 Agent 服务的 PID、启动调用 ID 和定义路径。Windows 计划任务、Linux 登录注册和 Intel Mac 原生发行仍待运行。[systemd 换版结果](../tmp/p4-linux-evidence.5K8JYj/systemd-switch.json)。
+- 从干净 `4f3be51` 源码在 macOS arm64 分别用 `--no-default-features` 构建 `live` 的 gateway/viewer、`sub2api-gateway` 和 `sub2api-client`，均生成原生可执行文件。客户端使用无私有配置的编译组合。三套构建均报告四条未使用的节点策略 API 告警；验证涵盖构建和目标架构。[Live](../tmp/p4-products.1GBs3O/live.log)、[Sub2API Gateway](../tmp/p4-products.1GBs3O/sub2api-gateway.log)、[Sub2API Client](../tmp/p4-products.1GBs3O/sub2api-client.log)。
+- [GPUI CI](../.github/workflows/gpui.yml) 提供 Windows x64 与 Intel Mac 双版型的原生构建和归档验证，入口为 PR 或对远端 ref 的手动触发。Windows runner 直接使用 Cargo 和公共打包器，Windows 安装脚本、计划任务启停与换版仍需独立验收。
 
 ### P5 默认切换与物理移除（2026-11-21）
 
