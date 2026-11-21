@@ -14,7 +14,7 @@ use crate::transfer_files as disk;
 use quinn::{Connection, RecvStream, SendStream};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -257,6 +257,27 @@ impl TransferService {
         let activity = veytrane_node::activity::Activity::new(changed.clone());
         let frame_budget = veytrane_node::frame_budget::FrameBudget::default();
         Self::new_with_shared(store, receive_root, activity, changed, frame_budget)
+    }
+    pub fn open(
+        tasks: &Path,
+        settings: crate::settings::FileSettings,
+        activity: veytrane_node::activity::Activity,
+        changed: watch::Sender<u64>,
+        frame_budget: veytrane_node::frame_budget::FrameBudget,
+    ) -> Result<Self> {
+        settings.validate().map_err(disk::failure)?;
+        veytrane_transport::permissions::ensure_directory(&settings.receive_root)?;
+        let (store, _) =
+            TaskStore::open(tasks).map_err(|error| disk::failure(&error.to_string()))?;
+        let service = Self::new_with_shared(
+            store,
+            settings.receive_root.clone(),
+            activity,
+            changed,
+            frame_budget,
+        );
+        service.apply_settings(settings)?;
+        Ok(service)
     }
     pub fn new_with_shared(
         store: TaskStore,

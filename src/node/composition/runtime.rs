@@ -6,12 +6,12 @@ use crate::node::core::control::{self, ControlEvents, NodeControl, NodeSessionCo
 use crate::node::core::session::SessionServices;
 use std::io;
 #[cfg(feature = "agent-files")]
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 #[cfg(any(feature = "node-speed", feature = "agent-files"))]
 use tokio::sync::watch;
 #[cfg(feature = "agent-files")]
-use veytrane_files::{task_store::TaskStore, transfer::TransferService};
+use veytrane_files::{settings::FileSettings, transfer::TransferService};
 #[cfg(any(feature = "node-speed", feature = "agent-files"))]
 use veytrane_node::{activity::Activity, frame_budget::FrameBudget};
 #[cfg(feature = "node-speed")]
@@ -98,26 +98,24 @@ pub(crate) fn spawn_assembled(
 }
 
 #[cfg(feature = "agent-files")]
-pub fn spawn_with_storage(
+pub(crate) fn spawn_with_storage(
     identity: Identity,
     config: NodeSessionConfig,
     tasks: &Path,
-    receive_root: PathBuf,
+    settings: FileSettings,
 ) -> crate::error::Result<RuntimeAssembly> {
     if !config.enable_files {
         return spawn_assembled(identity, config).map_err(crate::error::Error::Io);
     }
     let shared = SharedRuntime::new();
-    let (store, _) =
-        TaskStore::open(tasks).map_err(|error| crate::error::Error::Protocol(error.to_string()))?;
     let speed = config.enable_speed.then(|| shared.speed());
-    let file_service = TransferService::new_with_shared(
-        store,
-        receive_root,
+    let file_service = TransferService::open(
+        tasks,
+        settings,
         shared.activity,
         shared.changed,
         shared.frame_budget,
-    );
+    )?;
     let tcp_streams = Arc::new(veytrane_tcp::ForwardStreamOwner::new(
         veytrane_tcp::DEFAULT_MAX_NODE_TCP_STREAMS,
     ));

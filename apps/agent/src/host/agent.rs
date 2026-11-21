@@ -542,20 +542,8 @@ async fn run_with_recovery(
     #[cfg(feature = "agent-files")]
     let assembly = if session.enable_files {
         let settings = record.settings.file_settings().map_err(io::Error::other)?;
-        crate::storage::permissions::ensure_directory(&settings.receive_root)?;
-        let assembly = runtime::spawn_with_storage(
-            identity,
-            session,
-            &paths.tasks(),
-            settings.receive_root.clone(),
-        )
-        .map_err(io::Error::other)?;
-        if let Some(service) = &assembly.file_service {
-            service
-                .apply_settings(settings)
-                .map_err(io::Error::other)?;
-        }
-        assembly
+        runtime::spawn_with_storage(identity, session, &paths.tasks(), settings)
+            .map_err(io::Error::other)?
     } else {
         runtime::spawn_assembled(identity, session)?
     };
