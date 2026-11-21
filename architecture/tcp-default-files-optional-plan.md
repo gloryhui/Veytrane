@@ -76,6 +76,8 @@
 
 2026-11-21 结项时已清理原存于 `/private/tmp` 的临时验收证据，包括 P1 进程矩阵、P3 进程日志与 Web/IPC 结果、P4 macOS 换版结果、P5 架构图浏览器记录与早期 macOS 双候选清单。以下验收结论和已记录的校验值继续保留。
 
+2026-11-21，原项目 `tmp/` 中保留的验收证据、候选包和部署日志已移至外置盘归档 `/Volumes/1TB/Downloads/git/Veytrane-cleanup-archive-2026-11-21/tmp/`。下文的归档文件路径均相对于该目录。
+
 ### P1 施工与验收（2026-11-21）
 
 - `98fe06e` 迁入接收目录探针与错误分类，22 项配置测试通过。`d759050` 合并旧文件策略包，裁剪 Agent 保留旧文件配置并拒绝修改。独立裁剪构建和源码、生产依赖边界通过。裁剪 Agent 对完整 Agent 的可信 TCP、重连和文件能力拒绝实测通过。
@@ -95,22 +97,22 @@
 - 标准桌面、增强桌面、标准 Agent/CLI、增强 Agent/CLI 分别编译。生产依赖检查确认标准组合排除文件包，增强桌面排除文件安全存储和业务执行依赖。文件桌面 5 项、两套桌面各 3 项、两套 Web 各 26 项测试通过。标准 CLI 帮助不显示文件及任务命令，增强版保留 `tasks --offset`。历史 v1 请求仍可读取空任务页或收到能力错误。
 - 9 项隔离 Agent 进程验收通过，覆盖混合版型、文件校验和目录确认、任务保留、TCP 并发、恢复与撤销。
 - 两种 Web 与两种 Agent 的四个组合通过实际回环 HTTP 和原生 IPC。标准页面没有文件面板资源，增强页面按 Agent 能力判断是否挂载，历史任务页仍有响应。
-- Ubuntu 24.04 x86_64 使用原生 GPUI、隔离 X11 会话和模拟 Agent IPC 实际投递拖放。标准桌面连接文件增强 Agent、文件增强桌面连接标准 Agent 时均未请求 `tasks` 或 `send`。两端均为文件增强且对端能力已协商时，收到一次包含正确对端与文件路径的 `send`。文件执行由上述真实 Agent 进程验证。[拖放结果](../tmp/p4-linux-evidence.5K8JYj/xdnd.json)。
-- 同一 Linux 增强候选中，点击任务行打开任务详情，收到新的目录预览时打开预览窗口。模拟 Agent 停用文件能力后，两个实际窗口关闭，任务轮询停止，转发工作台继续运行。[窗口结果](../tmp/p3-file-windows.xLzOPv/visual-results.json)、[任务详情截图](../tmp/p3-file-windows.xLzOPv/verified-task-details.png)、[目录预览截图](../tmp/p3-file-windows.xLzOPv/verified-directory-preview.png)。
-- 使用 `c6ee03c` 的两个 macOS arm64 候选，在隔离 Chrome 中认证并读取四种 Web/Agent 组合的配置。四组均显示转发编辑器。标准 Web 无文件面板和三项操作的 DOM；增强 Web 仅在 Agent 启用文件能力时显示文件面板，点击刷新任务完成，清空该测试节点的管理 token 后面板隐藏。[Chrome 结果](../tmp/p3-web.hVtmyC/run.Mg3Ppr/results.json)。
+- Ubuntu 24.04 x86_64 使用原生 GPUI、隔离 X11 会话和模拟 Agent IPC 实际投递拖放。标准桌面连接文件增强 Agent、文件增强桌面连接标准 Agent 时均未请求 `tasks` 或 `send`。两端均为文件增强且对端能力已协商时，收到一次包含正确对端与文件路径的 `send`。文件执行由上述真实 Agent 进程验证。拖放结果见 `p4-linux-evidence.5K8JYj/xdnd.json`。
+- 同一 Linux 增强候选中，点击任务行打开任务详情，收到新的目录预览时打开预览窗口。模拟 Agent 停用文件能力后，两个实际窗口关闭，任务轮询停止，转发工作台继续运行。窗口结果见 `p3-file-windows.xLzOPv/visual-results.json`，任务详情和目录预览截图分别为 `p3-file-windows.xLzOPv/verified-task-details.png` 和 `p3-file-windows.xLzOPv/verified-directory-preview.png`。
+- 使用 `c6ee03c` 的两个 macOS arm64 候选，在隔离 Chrome 中认证并读取四种 Web/Agent 组合的配置。四组均显示转发编辑器。标准 Web 无文件面板和三项操作的 DOM；增强 Web 仅在 Agent 启用文件能力时显示文件面板，点击刷新任务完成，清空该测试节点的管理 token 后面板隐藏。Chrome 结果见 `p3-web.hVtmyC/run.Mg3Ppr/results.json`。
 
 ### P4 双候选与安装切换（2026-11-21）
 
 - `57f3d05`、`37da50b`、`e6676aa` 分别实现发行版型标识、双候选和只读升级预检。macOS arm64 的同 SHA 双候选从干净源码打包，校验架构、最低部署版本、三二进制元数据、实际依赖清单、原始源码材料、归档 SHA256 和 ad-hoc 签名。Windows、Linux 及 Intel Mac 配置了独立候选及 CI 校验流程。
 - 使用 `18d114b` 的 SHA 目录旧安装与 `37da50b` 的两个原生候选，实测旧版 → 标准 → 增强 → 原 SHA 目录回退。混包和开启文件时切到标准版均在停止旧 Agent 前被拒绝。验证同一身份、信任、转发、配置与任务库保留。系统启动项由隔离测试适配，实际 Agent 进程通过真实 IPC 停启和检查所有权锁。
-- 补测 macOS 实际 LaunchAgent 时，外置盘上的测试 plist 被 `launchctl bootstrap` 拒绝。从用户 LaunchAgents 目录加载同一临时标签后，向外置盘重定向日志的进程报告 `EX_CONFIG`，日志文件未生成。以 `/dev/null` 对照时 `launchd` 启动了隔离旧版进程，管理 IPC 未就绪，未进入换版。测试任务和临时注册文件均已清理，原 Agent 的 PID 和注册定义已保留。[启动诊断](../tmp/host.mac-runtime-ab4c/runner.log)、[对照结果](../tmp/host.mac-stream-ab4c/runner.log)。
-- 用同一旧版二进制直接以 `--managed` 启动的对照，IPC 在 109 毫秒内就绪，并经 CLI 正常停止。将临时 LaunchAgent 的标准错误单独重定向到用户日志目录后，仍未生成 IPC socket，且标准错误为空。故障尚未定位到应用代码或具体系统限制，启动测试未进入换版。[直接启动证据](../tmp/p4-mac-ipc.HcO1Ad/results.json)、[LaunchAgent 结果](../tmp/host.mac-ipc-ab4c/runner.log)。
-- 在临时 LaunchAgent 中加入执行探针后，确认任务可以访问外置盘上的测试配置和可执行文件。该任务调用旧版 `p2p-agent --build-info` 时超时，进程采样显示其 shell 等待子进程。同一已安装二进制用精简环境从终端执行 `--build-info` 成功。现象出现在 IPC 和节点配置加载之前，尚无证据指向具体系统限制。临时注册和日志已清理，原 Agent PID 未变。[探针日志](../tmp/host.mac-stack-ab4c/agent.stderr.log)、[采样](../tmp/host.mac-stack-ab4c/stack.txt)、[终端对照](../tmp/host.mac-stack-ab4c/direct-build-info.json)。
-- 上一项验证的是文件路径和权限元数据。后续在独立 LaunchAgent 中直接读取同一外置盘上的合成文件内容，两次均得到 `Operation not permitted`，终端可读同一文件。该探针在启动 Agent 前退出，因此未采集到子进程堆栈，也不能据此确定此前超时的具体调用。已证实当前测试任务的外置盘文件读取受限。保持原权限，清理测试注册和日志，现有 Agent PID 与启动定义未变。[探针输出](../tmp/p4-child.xOZCRS/joint-job.log)、[对照结果](../tmp/p4-child.xOZCRS/results.json)。
-- 将 `18d114b` 旧版和同 SHA 的 `ab4c34a` 标准版、文件增强版的 Agent 与 CLI 复制到系统盘隔离运行目录，原生 LaunchAgent 实际完成旧版 → 标准 → 增强 → 旧版。每次换版后通过 IPC 确认 TCP 能力、节点身份、revision 和配置字节。混包与文件仍启用时切到标准版均在停止进程前被拒绝。测试使用合成节点配置和独立标签，结束后卸载临时任务，现有 Agent 的 PID 与启动定义 SHA-256 一致。文件能力在测试中开启和关闭，未执行系统重新登录。源码、编译缓存、发行归档和验收记录保留在外置盘，此次复用已有候选。[换版结果](../tmp/p4-mac-system.6EQbja/verified-results.json)、[运行二进制 SHA-256](../tmp/p4-mac-system.6EQbja/verified-runtime-sha256.txt)。
-- 16 项宿主测试及 9 项包验证测试通过。Linux 使用原生 systemd 用户临时单元实测标准 → 文件增强 → 标准，三个进程均经真实 IPC 就绪、退出并释放所有权，保留相同的身份、配置及 revision。两阶段比较了现有 Agent 服务的 PID、启动调用 ID 和定义路径。[systemd 换版结果](../tmp/p4-linux-evidence.5K8JYj/systemd-switch.json)。
-- Linux 在隔离 HOME 与 XDG 配置中，使用 `node-host.py` 生成用户服务，再通过真实 `systemctl --user` 的客户端注册逻辑分别验证两版型的启用、`default.target.wants` 指向及禁用。标准 → 增强 → 标准均从各自注册后的 `ExecStart` 启动原生临时单元，并核对原有 Agent 的 PID、启动调用 ID 和定义路径。验证未执行物理重新登录，也未重载现有用户管理器。[注册与启动证据](../tmp/p4-login.Nz3ASU/results.json)。
-- 从干净 `4f3be51` 源码在 macOS arm64 分别用 `--no-default-features` 构建 `live` 的 gateway/viewer、`sub2api-gateway` 和 `sub2api-client`，均生成原生可执行文件。客户端使用无私有配置的编译组合。三套构建均报告四条未使用的节点策略 API 告警；验证涵盖构建和目标架构。[Live](../tmp/p4-products.1GBs3O/live.log)、[Sub2API Gateway](../tmp/p4-products.1GBs3O/sub2api-gateway.log)、[Sub2API Client](../tmp/p4-products.1GBs3O/sub2api-client.log)。
+- 补测 macOS 实际 LaunchAgent 时，外置盘上的测试 plist 被 `launchctl bootstrap` 拒绝。从用户 LaunchAgents 目录加载同一临时标签后，向外置盘重定向日志的进程报告 `EX_CONFIG`，日志文件未生成。以 `/dev/null` 对照时 `launchd` 启动了隔离旧版进程，管理 IPC 未就绪，未进入换版。测试任务和临时注册文件均已清理，原 Agent 的 PID 和注册定义已保留。启动诊断和对照结果分别见 `host.mac-runtime-ab4c/runner.log` 和 `host.mac-stream-ab4c/runner.log`。
+- 用同一旧版二进制直接以 `--managed` 启动的对照，IPC 在 109 毫秒内就绪，并经 CLI 正常停止。将临时 LaunchAgent 的标准错误单独重定向到用户日志目录后，仍未生成 IPC socket，且标准错误为空。故障尚未定位到应用代码或具体系统限制，启动测试未进入换版。直接启动记录和 LaunchAgent 结果分别见 `p4-mac-ipc.HcO1Ad/results.json` 和 `host.mac-ipc-ab4c/runner.log`。
+- 在临时 LaunchAgent 中加入执行探针后，确认任务可以访问外置盘上的测试配置和可执行文件。该任务调用旧版 `p2p-agent --build-info` 时超时，进程采样显示其 shell 等待子进程。同一已安装二进制用精简环境从终端执行 `--build-info` 成功。现象出现在 IPC 和节点配置加载之前，尚无证据指向具体系统限制。临时注册和日志已清理，原 Agent PID 未变。探针日志、采样和终端对照依次见 `host.mac-stack-ab4c/agent.stderr.log`、`host.mac-stack-ab4c/stack.txt` 和 `host.mac-stack-ab4c/direct-build-info.json`。
+- 上一项验证的是文件路径和权限元数据。后续在独立 LaunchAgent 中直接读取同一外置盘上的合成文件内容，两次均得到 `Operation not permitted`，终端可读同一文件。该探针在启动 Agent 前退出，因此未采集到子进程堆栈，也不能据此确定此前超时的具体调用。已证实当前测试任务的外置盘文件读取受限。保持原权限，清理测试注册和日志，现有 Agent PID 与启动定义未变。探针输出和对照结果分别见 `p4-child.xOZCRS/joint-job.log` 和 `p4-child.xOZCRS/results.json`。
+- 将 `18d114b` 旧版和同 SHA 的 `ab4c34a` 标准版、文件增强版的 Agent 与 CLI 复制到系统盘隔离运行目录，原生 LaunchAgent 实际完成旧版 → 标准 → 增强 → 旧版。每次换版后通过 IPC 确认 TCP 能力、节点身份、revision 和配置字节。混包与文件仍启用时切到标准版均在停止进程前被拒绝。测试使用合成节点配置和独立标签，结束后卸载临时任务，现有 Agent 的 PID 与启动定义 SHA-256 一致。文件能力在测试中开启和关闭，未执行系统重新登录。源码、编译缓存、发行归档和验收记录当时保留在外置盘，此次复用已有候选。换版结果见 `p4-mac-system.6EQbja/verified-results.json`，运行二进制的 SHA-256 记录见 `p4-mac-system.6EQbja/verified-runtime-sha256.txt`。
+- 16 项宿主测试及 9 项包验证测试通过。Linux 使用原生 systemd 用户临时单元实测标准 → 文件增强 → 标准，三个进程均经真实 IPC 就绪、退出并释放所有权，保留相同的身份、配置及 revision。两阶段比较了现有 Agent 服务的 PID、启动调用 ID 和定义路径。systemd 换版结果见 `p4-linux-evidence.5K8JYj/systemd-switch.json`。
+- Linux 在隔离 HOME 与 XDG 配置中，使用 `node-host.py` 生成用户服务，再通过真实 `systemctl --user` 的客户端注册逻辑分别验证两版型的启用、`default.target.wants` 指向及禁用。标准 → 增强 → 标准均从各自注册后的 `ExecStart` 启动原生临时单元，并核对原有 Agent 的 PID、启动调用 ID 和定义路径。验证未执行物理重新登录，也未重载现有用户管理器。注册与启动记录见 `p4-login.Nz3ASU/results.json`。
+- 从干净 `4f3be51` 源码在 macOS arm64 分别用 `--no-default-features` 构建 `live` 的 gateway/viewer、`sub2api-gateway` 和 `sub2api-client`，均生成原生可执行文件。客户端使用无私有配置的编译组合。三套构建均报告四条未使用的节点策略 API 告警；验证涵盖构建和目标架构。构建日志依次见 `p4-products.1GBs3O/live.log`、`p4-products.1GBs3O/sub2api-gateway.log` 和 `p4-products.1GBs3O/sub2api-client.log`。
 - [首次原生 CI](https://github.com/gloryhui/Veytrane/actions/runs/44878747014) 在 `fdac2e6` 通过 Linux、Apple Silicon 和 Intel Mac。Windows 回归通过后，正式打包被干净工作树检查拦截。MSVC 探针默认把 `sdk_probe.obj` 写到仓库目录，`de9af87` 将它显式输出到探针临时目录。
 - [修复后原生 CI](https://github.com/gloryhui/Veytrane/actions/runs/44880833831) 在 `de9af87d516efea8f0cf2dab0c235ea59815e1b2` 的 Windows x64、Intel Mac、Apple Silicon 和 Linux 全部通过。Windows 和 Intel Mac 分别使用正式宿主脚本构建两版型，归档校验通过。Linux 的标准版与增强版均通过严格 Clippy。
 - `d639375` 更新 Windows [计划任务换版验收入口](../packaging/node/README.md#windows-双版型隔离验收)，允许同 SHA 的标准与增强候选往返切换，并核对任务指向、TCP 能力、身份与配置。18 项本机 Python 宿主测试通过。
@@ -123,21 +125,21 @@
 | Intel Mac 标准 | `14699890428` | `abb166e59e6260c8b4d098767fe052c6abeb3545902f671c297b4bca3755e5e4` |
 | Intel Mac 增强 | `14699661002` | `1781257b7e2331151fccc37f9cd8377c01a3049711bf92a1dc2e6aa495d0e3ec` |
 
-四份归档已下载至外置盘，重新核对归档、内含三种可执行文件及依赖材料的 SHA-256。[本地归档与验证记录](../tmp/p4-ci-44880833831.hkoY9I/)。
+四份归档已下载至外置盘，重新核对归档、内含三种可执行文件及依赖材料的 SHA-256。发行归档和验证记录见 `p4-ci-44880833831.hkoY9I/`。
 
 ### P5 默认切换与物理移除（2026-11-21）
 
 - `3ae273f` 将默认构建切到 `agent-standard`，保留单独的 `standalone`、`standalone-files` 和专用产品 feature。`fc9e582` 更新[八主题架构图](layer-review.html)及可点击源码地图。
 - 本机 `8093` 站点返回的架构图与仓库文件 SHA-256 一致。使用 agent-browser 驱动隔离的本机 Chrome 窗口，逐一验证八种主题的亮色、暗色，共 16 种状态，每种均包含全部 14 个节点。实际点击导出并重新打开三张 PNG，终端暗色与蓝图亮色为 2544×2374，等距暗色为 3812×2528，三张均完整显示图例、节点和边缘连线。
 - 以 `c6ee03c` 的干净源码构建的 macOS arm64 标准候选与文件增强候选均通过完整归档校验，第三方依赖数分别为 536 和 545。
-- `a94b8a0` 调整公共工作台及诊断文案后，从干净 `ab4c34a` 源码使用正式 macOS arm64 脚本重新构建两个候选。标准与增强的三二进制版型、归档和 ad hoc 签名验证均通过，证据列出同一 SHA 的两个归档校验和。[标准候选](../tmp/p4-macos-final.3ZkW41/standard/candidate.json)、[增强候选](../tmp/p4-macos-final.3ZkW41/files/candidate.json)、[汇总](../tmp/p4-macos-final.3ZkW41/results.json)。
-- 同一源码在 Ubuntu 24.04 x86_64 通过标准和增强两个 `-D warnings` Clippy 配置，打包脚本及归档验证均通过。Linux 标准版和增强版分别列出 591 和 601 个第三方包。标准版另通过真实回环导航 API、核心重建保留 HTTP，以及 X11 窗口、托盘和退出验收。[Linux 标准候选](../tmp/p4-linux-evidence.5K8JYj/standard-candidate.json)、[增强候选](../tmp/p4-linux-evidence.5K8JYj/files-candidate.json)、[导航](../tmp/p4-linux-evidence.5K8JYj/navigation-standard.json)与[桌面](../tmp/p4-linux-evidence.5K8JYj/background-standard.json)记录保存在外置盘工作区。
+- `a94b8a0` 调整公共工作台及诊断文案后，从干净 `ab4c34a` 源码使用正式 macOS arm64 脚本重新构建两个候选。标准与增强的三二进制版型、归档和 ad hoc 签名验证均通过，证据列出同一 SHA 的两个归档校验和。标准候选、增强候选及汇总依次见 `p4-macos-final.3ZkW41/standard/candidate.json`、`p4-macos-final.3ZkW41/files/candidate.json` 和 `p4-macos-final.3ZkW41/results.json`。
+- 同一源码在 Ubuntu 24.04 x86_64 通过标准和增强两个 `-D warnings` Clippy 配置，打包脚本及归档验证均通过。Linux 标准版和增强版分别列出 591 和 601 个第三方包。标准版另通过真实回环导航 API、核心重建保留 HTTP，以及 X11 窗口、托盘和退出验收。标准候选、增强候选、导航与桌面记录依次见 `p4-linux-evidence.5K8JYj/standard-candidate.json`、`p4-linux-evidence.5K8JYj/files-candidate.json`、`p4-linux-evidence.5K8JYj/navigation-standard.json` 和 `p4-linux-evidence.5K8JYj/background-standard.json`。
 - 在从提交 `c6ee03c` 导出的隔离源码中，将 `crates/veytrane-files` 移到源码目录外。只改两份 manifest，去掉根 workspace 注册、增强版组合与依赖、文件专属测试注册，并去掉 Web 的 `files` feature 及依赖。Cargo 重新解析锁文件，生产依赖树与锁文件均无该包。同一份标准 Rust 源码构建出 Agent、CLI 和 GPUI。保留的可选装配 `cfg` 名称在剪掉注册的临时源码中触发检查提示。
-- `0195687` 的真实进程用例在主仓库编译测试程序，以 `VEYTRANE_TEST_MINIMAL_AGENT` 指向隔离副本构建的 Agent，并以 `VEYTRANE_TEST_AGENT_MIX=minimal-both` 启动两个受测进程。实测覆盖可信授权目录、四路实际 TCP、测速时并发 TCP、重连、撤销信任后旧流和授权失效、停止转发释放监听端口，并验证两端未创建文件任务库。[移除演练日志](../tmp/p5-mac-close.97wnnC/tcp-proof.log)。
+- `0195687` 的真实进程用例在主仓库编译测试程序，以 `VEYTRANE_TEST_MINIMAL_AGENT` 指向隔离副本构建的 Agent，并以 `VEYTRANE_TEST_AGENT_MIX=minimal-both` 启动两个受测进程。实测覆盖可信授权目录、四路实际 TCP、测速时并发 TCP、重连、撤销信任后旧流和授权失效、停止转发释放监听端口，并验证两端未创建文件任务库。移除演练日志见 `p5-mac-close.97wnnC/tcp-proof.log`。
 
 ### Mac 本机验收结论（2026-11-21）
 
-- 已核对 macOS arm64 双候选归档和原生 LaunchAgent 换版结果，并将文件包移除演练的编译日志、生产依赖树、TCP 日志和三种二进制校验和归档到外置盘。三种移除演练产物的 `--build-info` 均返回 `standard`、`files=false` 和 `aarch64-apple-darwin`。演练源码由 `git archive c6ee03c` 导出，产物自报的 SHA 和源码状态均为 `unknown`。[Mac 双候选](../tmp/p4-macos-final.3ZkW41/results.json)、[LaunchAgent 换版](../tmp/p4-mac-system.6EQbja/verified-results.json)、[移除证据](../tmp/p5-mac-close.97wnnC/)。
+- 已核对 macOS arm64 双候选归档和原生 LaunchAgent 换版结果，并将文件包移除演练的编译日志、生产依赖树、TCP 日志和三种二进制校验和归档到外置盘。三种移除演练产物的 `--build-info` 均返回 `standard`、`files=false` 和 `aarch64-apple-darwin`。演练源码由 `git archive c6ee03c` 导出，产物自报的 SHA 和源码状态均为 `unknown`。双候选、LaunchAgent 换版及移除演练记录依次见 `p4-macos-final.3ZkW41/results.json`、`p4-mac-system.6EQbja/verified-results.json` 和 `p5-mac-close.97wnnC/`。
 - Mac 本机验收结束。[Windows 原生计划任务实测证据](../docs/task-reports/WINDOWS_SCHEDULED_TASK_EDITION_ACCEPTANCE.md#回传证据)已回填。
 
 ## 给施工模型的起步指令
@@ -197,7 +199,7 @@ Windows 实际注销并重新登录触发计划任务、文件增强版双向收
 
 上述并发与撤销验收中，两次对端停启后均在等待约 5 秒后发起显式重连。两次单侧撤销均结束原有授权流，随后观测到的代际 `3` 在被撤销方向的信任和密码授权均为 `false`。撤销后单独观察约 3 秒，升级后的 Agent 仍持有本地监听，端口回收由单条 `stop-forward` 完成。两次重连及撤销验证期间，受测 Agent 的 PID 均保持不变。
 
-本次仅补验已有版本升级组，回退沿用 P4 的原有证据。测试结束后，临时 LaunchAgent 和测试对端均已停止，临时启动项已注销，现有 Agent 的 PID 和启动定义 SHA-256 前后一致。复用既有二进制，无新增 Cargo 输出。[独立结果 JSON](../tmp/upgrade-tcp.HJER1q/result.json)的 SHA-256 为 `7ded2f25b0f07d523750bfde8fc288e7ec2bbcc7d19909a325f4f04779f226ac`。[运行日志](../tmp/upgrade-tcp.HJER1q/runner.log)
+本次仅补验已有版本升级组，回退沿用 P4 的原有证据。测试结束后，临时 LaunchAgent 和测试对端均已停止，临时启动项已注销，现有 Agent 的 PID 和启动定义 SHA-256 前后一致。复用既有二进制，无新增 Cargo 输出。独立结果 `upgrade-tcp.HJER1q/result.json` 的 SHA-256 为 `7ded2f25b0f07d523750bfde8fc288e7ec2bbcc7d19909a325f4f04779f226ac`。运行日志见 `upgrade-tcp.HJER1q/runner.log`。
 
 #### 对端重启后的自动重连补验
 
@@ -208,7 +210,7 @@ Windows 实际注销并重新登录触发计划任务、文件增强版双向收
 | 旧版 → 标准版 | 5.382 秒 | `PASS`。代际从 `1` 的 `disconnected` 升至 `2` 的 `connected`，对端信任恢复。 |
 | 标准版 → 文件增强版 | 5.265 秒 | `PASS`。代际从 `1` 的 `disconnected` 升至 `2` 的 `connected`，对端信任恢复。 |
 
-确认已自动重连后，两次均读取到授权服务目录，并通过已保存的转发规则完成一次 TCP 回显。这次测得的两个恢复时间均超过先前的 5 秒观察窗口。受测 Agent 在对端重启期间 PID 不变。验收结束后隔离进程已退出、临时启动项已注销，现有 Agent 的 PID 和启动定义 SHA-256 前后一致。未重跑并发、撤销或监听回收用例。[自动重连结果 JSON](../tmp/upgrade-auto-reconnect.U3cWru/result.json)的 SHA-256 为 `174086ed72f4d1bb82e0933b57f3faaf66eb7c4756d63994ff5d9ab0ce25a59d`。[运行日志](../tmp/upgrade-auto-reconnect.U3cWru/runner.log)
+确认已自动重连后，两次均读取到授权服务目录，并通过已保存的转发规则完成一次 TCP 回显。这次测得的两个恢复时间均超过先前的 5 秒观察窗口。受测 Agent 在对端重启期间 PID 不变。验收结束后隔离进程已退出、临时启动项已注销，现有 Agent 的 PID 和启动定义 SHA-256 前后一致。未重跑并发、撤销或监听回收用例。自动重连结果 `upgrade-auto-reconnect.U3cWru/result.json` 的 SHA-256 为 `174086ed72f4d1bb82e0933b57f3faaf66eb7c4756d63994ff5d9ab0ce25a59d`。运行日志见 `upgrade-auto-reconnect.U3cWru/runner.log`。
 
 ## 三端生产标准版部署汇总
 
