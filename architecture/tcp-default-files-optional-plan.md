@@ -130,7 +130,12 @@
 - `a94b8a0` 调整公共工作台及诊断文案后，从干净 `ab4c34a` 源码使用正式 macOS arm64 脚本重新构建两个候选。标准与增强的三二进制版型、归档和 ad hoc 签名验证均通过，证据列出同一 SHA 的两个归档校验和。[标准候选](../tmp/p4-macos-final.3ZkW41/standard/candidate.json)、[增强候选](../tmp/p4-macos-final.3ZkW41/files/candidate.json)、[汇总](../tmp/p4-macos-final.3ZkW41/results.json)。
 - 同一源码在 Ubuntu 24.04 x86_64 通过标准和增强两个 `-D warnings` Clippy 配置，打包脚本及归档验证均通过。Linux 标准版和增强版分别列出 591 和 601 个第三方包。标准版另通过真实回环导航 API、核心重建保留 HTTP，以及 X11 窗口、托盘和退出验收。[Linux 标准候选](../tmp/p4-linux-evidence.5K8JYj/standard-candidate.json)、[增强候选](../tmp/p4-linux-evidence.5K8JYj/files-candidate.json)、[导航](../tmp/p4-linux-evidence.5K8JYj/navigation-standard.json)与[桌面](../tmp/p4-linux-evidence.5K8JYj/background-standard.json)记录保存在外置盘工作区。
 - 在从提交 `c6ee03c` 导出的隔离源码中，将 `crates/veytrane-files` 移到源码目录外。只改两份 manifest，去掉根 workspace 注册、增强版组合与依赖、文件专属测试注册，并去掉 Web 的 `files` feature 及依赖。Cargo 重新解析锁文件，生产依赖树与锁文件均无该包。同一份标准 Rust 源码构建出 Agent、CLI 和 GPUI。保留的可选装配 `cfg` 名称在剪掉注册的临时源码中触发检查提示。
-- `0195687` 的真实进程用例使用隔离复制品构建的两个 Agent，覆盖可信授权目录、四路实际 TCP、测速时并发 TCP、重连、撤销信任后旧流和授权失效、停止转发释放监听端口，并验证两端未创建文件任务库。[移除演练日志](/private/tmp/veytrane-p5-verified.ehCYB7/tcp-proof.log)。
+- `0195687` 的真实进程用例在主仓库编译测试程序，以 `VEYTRANE_TEST_MINIMAL_AGENT` 指向隔离副本构建的 Agent，并以 `VEYTRANE_TEST_AGENT_MIX=minimal-both` 启动两个受测进程。实测覆盖可信授权目录、四路实际 TCP、测速时并发 TCP、重连、撤销信任后旧流和授权失效、停止转发释放监听端口，并验证两端未创建文件任务库。[移除演练日志](../tmp/p5-mac-close.97wnnC/tcp-proof.log)。
+
+### Mac 本机验收结论（2026-11-21）
+
+- 已核对 macOS arm64 双候选归档和原生 LaunchAgent 换版结果，并将文件包移除演练的编译日志、生产依赖树、TCP 日志和三种二进制校验和归档到外置盘。三种移除演练产物的 `--build-info` 均返回 `standard`、`files=false` 和 `aarch64-apple-darwin`。演练源码由 `git archive c6ee03c` 导出，产物自报的 SHA 和源码状态均为 `unknown`。[Mac 双候选](../tmp/p4-macos-final.3ZkW41/results.json)、[LaunchAgent 换版](../tmp/p4-mac-system.6EQbja/verified-results.json)、[移除证据](../tmp/p5-mac-close.97wnnC/)。
+- Mac 本机验收结束。Windows 双版归档通过 CI，计划任务注册、启动、换版和注销由 Windows 端按[交接文档](../docs/task-reports/WINDOWS_SCHEDULED_TASK_EDITION_ACCEPTANCE.md)单独实测。
 
 ## 给施工模型的起步指令
 
