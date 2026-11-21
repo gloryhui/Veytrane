@@ -7,7 +7,7 @@ publish = false
 
 [features]
 node-runtime = ["node-tasks", "safe-storage", "dep:quinn", "tokio/macros", "tokio/rt"]
-node-tasks = ["dep:thiserror", "dep:tokio", "dep:veytrane-file-policy", "dep:veytrane-node"]
+node-tasks = ["dep:thiserror", "dep:tokio", "dep:veytrane-node"]
 safe-storage = [
     "dep:cap-fs-ext",
     "dep:cap-std",
@@ -34,7 +34,6 @@ thiserror = { version = "2.0.20", optional = true }
 tokio = { version = "1.53.1", features = ["io-util", "sync", "time"], optional = true }
 tracing = "0.1.44"
 unicode-normalization = { version = "=0.1.25", optional = true }
-veytrane-file-policy = { path = "../veytrane-file-policy", optional = true }
 veytrane-node = { path = "../veytrane-node", optional = true }
 veytrane-transport = { path = "../veytrane-transport" }
 

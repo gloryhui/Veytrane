@@ -541,24 +541,18 @@ async fn run_with_recovery(
     };
     #[cfg(feature = "agent-files")]
     let assembly = if session.enable_files {
-        crate::storage::permissions::ensure_directory(&record.settings.receive_root)?;
+        let settings = record.settings.file_settings().map_err(io::Error::other)?;
+        crate::storage::permissions::ensure_directory(&settings.receive_root)?;
         let assembly = runtime::spawn_with_storage(
             identity,
             session,
             &paths.tasks(),
-            record.settings.receive_root.clone(),
+            settings.receive_root.clone(),
         )
         .map_err(io::Error::other)?;
         if let Some(service) = &assembly.file_service {
-            service.set_auto_resume(record.settings.auto_resume);
             service
-                .set_send_limit(record.settings.send_concurrency)
-                .map_err(io::Error::other)?;
-            service
-                .set_file_limits(record.settings.file_limits)
-                .map_err(io::Error::other)?;
-            service
-                .set_receive_safety_mib(record.settings.receive_safety_mib)
+                .apply_settings(settings)
                 .map_err(io::Error::other)?;
         }
         assembly

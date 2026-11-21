@@ -1440,7 +1440,7 @@ impl AgentShell {
                     && value
                         .downcast_ref::<gpui::ExternalPaths>()
                         .is_some_and(|paths| {
-                            veytrane_file_policy::path_batch::validate(paths.paths()).is_ok()
+                            veytrane_files::path_batch::validate(paths.paths()).is_ok()
                         })
             })
             .on_drop(cx.listener(|s, paths: &gpui::ExternalPaths, _, cx| {
@@ -1692,7 +1692,7 @@ impl AgentShell {
                         ui_components::secondary_button("保存并应用限速", enabled).on_mouse_up(
                             MouseButton::Left,
                             cx.listener(|s, _, _, cx| {
-                                match veytrane_file_policy::bandwidth::FileLimits::parse(
+                                match veytrane_files::settings::FileLimits::parse(
                                     &Self::text(&s.ui.upload, cx),
                                     &Self::text(&s.ui.download, cx),
                                 ) {

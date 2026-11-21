@@ -224,6 +224,12 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
         let rejected = client.apply(&config).await;
         assert_eq!(rejected.error.unwrap().code, "capability_disabled");
         assert_eq!(fs::read(client.root.join("node.json")).unwrap(), before);
+
+        let mut config = client.config().await;
+        config["settings"]["file_limits"]["upload_kib"] = json!(64);
+        let rejected = client.apply(&config).await;
+        assert_eq!(rejected.error.unwrap().code, "capability_disabled");
+        assert_eq!(fs::read(client.root.join("node.json")).unwrap(), before);
     }
     for node in [&client, &server] {
         node.ok(Api::SetPassword {

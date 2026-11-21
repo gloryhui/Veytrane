@@ -103,6 +103,10 @@ pub fn offline_apply(paths: &AgentPaths, file: &Path, expected: u64) -> io::Resu
         }
     }
     settings.validate().map_err(io::Error::other)?;
+    #[cfg(not(feature = "agent-files"))]
+    if record.settings.file_settings_changed(&settings) {
+        return Err(io::Error::other("capability_disabled: 当前构建未包含文件服务"));
+    }
     record.settings = settings;
     record.revision = record
         .revision
@@ -177,6 +181,10 @@ impl Agent {
         if let Some(error) = settings.unsupported_capability() {
             return Err(error.into());
         }
+        #[cfg(not(feature = "agent-files"))]
+        if current.settings.file_settings_changed(&settings) {
+            return Err("capability_disabled: 当前构建未包含文件服务".into());
+        }
         settings.validate().map_err(|e| e.to_string())?;
         // These fields change network/runtime ownership. An online update must
         // never tear down a healthy node merely to learn whether it can start.
@@ -241,31 +249,29 @@ impl Agent {
         let commit_record = record.clone();
         #[cfg(feature = "agent-files")]
         let file_service = self.file_service.clone();
+        #[cfg(feature = "agent-files")]
+        let file_settings = commit_record
+            .settings
+            .file_settings()
+            .map_err(|e| e.to_string())?;
         let outcome = match self
             .control
             .commit_policy(policy, options, move || {
                 #[cfg(feature = "agent-files")]
                 if let Some(service) = &file_service
-                    && service.receive_root_path() != commit_record.settings.receive_root
+                    && service.receive_root_path() != file_settings.receive_root
                 {
-                    veytrane_files::receive_directory::validate(
-                        &commit_record.settings.receive_root,
-                    )
-                    .map_err(|e| e.to_string())?;
+                    veytrane_files::receive_directory::validate(&file_settings.receive_root)
+                        .map_err(|e| e.to_string())?;
                 }
                 let outcome = crate::storage::atomic::write_json(&path, &commit_record)
                     .map_err(|e| e.to_string())?;
                 Ok((outcome, Box::new(move || {
                     #[cfg(feature = "agent-files")]
-                    if let Some(service) = file_service {
-                        let file_settings = commit_record.settings;
-                        if service.receive_root_path() != file_settings.receive_root {
-                            service.set_receive_root(file_settings.receive_root);
-                        }
-                        service.set_auto_resume(file_settings.auto_resume);
-                        let _ = service.set_send_limit(file_settings.send_concurrency);
-                        let _ = service.set_file_limits(file_settings.file_limits);
-                        let _ = service.set_receive_safety_mib(file_settings.receive_safety_mib);
+                    if let Some(service) = file_service
+                        && let Err(error) = service.apply_settings(file_settings)
+                    {
+                        tracing::error!(%error, "已提交的文件设置无法应用");
                     }
                 })))
             })

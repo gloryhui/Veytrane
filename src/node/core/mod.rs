@@ -3,6 +3,7 @@
 #[cfg(all(test, feature = "node-speed"))]
 pub(crate) mod activity;
 pub mod authorization;
+#[cfg(any(feature = "agent-files", test))]
 pub mod bandwidth;
 pub mod config;
 pub mod connectivity;
@@ -20,6 +21,7 @@ pub(crate) mod network_state;
 pub mod protocol;
 #[cfg(all(test, feature = "agent-files"))]
 pub(crate) mod queue;
+#[cfg(test)]
 pub mod receive_policy;
 pub mod remote_auth;
 pub mod services;

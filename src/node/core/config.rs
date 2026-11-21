@@ -544,12 +544,10 @@ pub fn parse_signal_port(port: &str) -> Result<u16, ConfigError> {
     Ok(port)
 }
 
-pub fn validate_send_concurrency(value: u8) -> Result<(), ConfigError> {
-    if (1..=3).contains(&value) {
-        Ok(())
-    } else {
-        Err(ConfigError::Invalid("发送并发数仅支持 1、2 或 3".into()))
-    }
+#[cfg(test)]
+fn validate_send_concurrency(value: u8) -> Result<(), ConfigError> {
+    veytrane_files::settings::validate_send_concurrency(value)
+        .map_err(|message| ConfigError::Invalid(message.into()))
 }
 
 pub fn validate_speedtest_seconds(value: u16) -> Result<(), ConfigError> {

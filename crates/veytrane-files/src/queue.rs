@@ -44,9 +44,7 @@ impl Default for TaskQueue {
 }
 impl TaskQueue {
     pub fn set_limit(&mut self, value: u8) -> Result<(), &'static str> {
-        if !(1..=3).contains(&value) {
-            return Err("发送并发数仅支持 1、2 或 3");
-        }
+        crate::settings::validate_send_concurrency(value)?;
         self.limit = value;
         Ok(())
     }

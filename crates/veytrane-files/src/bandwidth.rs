@@ -6,7 +6,7 @@ use tokio::{
     time::{Duration, Instant},
 };
 
-pub use veytrane_file_policy::bandwidth::FileLimits;
+pub use crate::settings::FileLimits;
 #[derive(Clone)]
 pub struct ByteLimit {
     inner: Arc<Mutex<Bucket>>,

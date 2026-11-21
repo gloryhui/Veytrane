@@ -49,8 +49,7 @@ src/main.rs → apps/standalone-cli
 | `src/protocol/`、`transfer/`、`tunnel/`、`admin/` | 原独立 CLI 仍在使用的协议与执行路径；不能因与 node 同名就删除。 |
 | `crates/veytrane-transport` | 身份、QUIC 握手和端点、连接提交及端点租约、有界原始帧、信令客户端和报文、UDP 探测、Relay 接入及 OS 存储原语。 |
 | `crates/veytrane-node` | P2PN 协商、双向流分发、会话授权、设备容量、连接代际及活动许可。 |
-| `crates/veytrane-files` | P2PF 文件协议、文件收发、调度、限速、落盘、回执、任务库及断点恢复。 |
-| `crates/veytrane-file-policy` | 限速值、接收余量及路径批次格式校验，供配置、文件服务和桌面共用。 |
+| `crates/veytrane-files` | P2PF 文件协议、收发、调度、限速、落盘、回执、任务库、断点恢复与文件配置校验。 |
 | `crates/veytrane-speed` | 测速控制、数据流、租约及结果。 |
 | `crates/veytrane-tcp` | TCP 规则校验、流配额、监听和 QUIC 字节桥接。 |
 
@@ -75,7 +74,7 @@ cargo build --locked --no-default-features --features standalone --bin p2p_file
 
 `node-runtime` 提供可复用的节点会话及能力装配所需的配置。Live 和 Sub2API 的发行入口使用独立产品特性，生产构建排除管理 IPC 包、Agent 宿主、文件和测速执行。`agent-base` 通过 `node-speed` 装配测速。
 
-裁剪 Agent 初始化时把 `enable_files` 设为 `false`。读取或提交明确启用文件的配置时返回能力错误，保留当前配置文件。文件命令返回 `capability_disabled`，`Tasks` 仍返回空文件列表、空预览、可空队列与测速结果。
+裁剪 Agent 初始化时把 `enable_files` 设为 `false`。加载明确启用文件的配置、提交启用文件或修改文件设置的草稿时返回能力错误。原有文件配置随其他设置保存。文件命令返回 `capability_disabled`，`Tasks` 仍返回空文件列表、空预览、可空队列与测速结果。
 
 `Status.capabilities` 表示当前 Agent 本机已装配的业务。GPUI 根据它控制文件与测速入口，设备连接状态独立读取 peer 快照。IPC 宿主持有可选文件和测速句柄，`Tasks` 从各自服务读取事实并维持现有分页、脱敏和诊断投影。会话 actor 串行处理依赖实时对端授权和连接代际的文件与测速操作。
 

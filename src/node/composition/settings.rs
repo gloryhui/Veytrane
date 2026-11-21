@@ -32,7 +32,7 @@ pub struct NodeSettings {
     pub send_concurrency: u8,
     pub auto_resume: bool,
     pub receive_safety_mib: u16,
-    pub file_limits: crate::node::core::bandwidth::FileLimits,
+    pub file_limits: serde_json::Value,
     pub enable_files: bool,
     pub enable_speed: bool,
     pub enable_tcp: bool,
@@ -55,7 +55,7 @@ impl NodeSettings {
             send_concurrency: 1,
             auto_resume: true,
             receive_safety_mib: 64,
-            file_limits: Default::default(),
+            file_limits: serde_json::json!({"upload_kib":0,"download_kib":0}),
             enable_files: cfg!(feature = "agent-files"),
             enable_speed: cfg!(feature = "node-speed"),
             enable_tcp: true,
@@ -76,9 +76,6 @@ impl NodeSettings {
             return Err(Error::Protocol(error.into()));
         }
         self.direct.validate()?;
-        if !self.receive_root.is_absolute() || self.receive_root.as_os_str().len() > 4096 {
-            return Err(Error::Protocol("接收根必须是绝对路径".into()));
-        }
         if self.signal_server.len() > 512 || self.signal_server.chars().any(char::is_control) {
             return Err(Error::Protocol("信令地址无效".into()));
         }
@@ -93,13 +90,10 @@ impl NodeSettings {
         if let Some(verifier) = &self.remote_auth {
             verifier.validate()?;
         }
-        crate::node::core::config::validate_send_concurrency(self.send_concurrency)
-            .map_err(|e| Error::Protocol(e.to_string()))?;
-        crate::node::core::receive_policy::validate_safety_mib(self.receive_safety_mib)
-            .map_err(|e| Error::Protocol(e.to_string()))?;
-        self.file_limits
+        #[cfg(feature = "agent-files")]
+        self.file_settings()?
             .validate()
-            .map_err(|e| Error::Protocol(e.into()))?;
+            .map_err(|message| Error::Protocol(message.into()))?;
         if !self.signal_server.is_empty() {
             let (host, port) = self
                 .signal_server
@@ -155,6 +149,28 @@ impl NodeSettings {
         }
         Ok(())
     }
+
+    #[cfg(feature = "agent-files")]
+    pub(crate) fn file_settings(&self) -> Result<veytrane_files::settings::FileSettings> {
+        Ok(veytrane_files::settings::FileSettings {
+            receive_root: self.receive_root.clone(),
+            auto_resume: self.auto_resume,
+            send_concurrency: self.send_concurrency,
+            receive_safety_mib: self.receive_safety_mib,
+            file_limits: serde_json::from_value(self.file_limits.clone())
+                .map_err(|error| Error::Protocol(error.to_string()))?,
+        })
+    }
+
+    #[cfg(all(feature = "agent-base", not(feature = "agent-files")))]
+    pub(crate) fn file_settings_changed(&self, next: &Self) -> bool {
+        self.receive_root != next.receive_root
+            || self.auto_resume != next.auto_resume
+            || self.send_concurrency != next.send_concurrency
+            || self.receive_safety_mib != next.receive_safety_mib
+            || self.file_limits != next.file_limits
+    }
+
     pub fn session(&self) -> Result<crate::node::core::control::NodeSessionConfig> {
         self.validate()?;
         let mut config = crate::node::core::control::NodeSessionConfig::new(&self.signal_server);

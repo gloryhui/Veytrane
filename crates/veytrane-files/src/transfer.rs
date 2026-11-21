@@ -541,6 +541,16 @@ impl TransferService {
         self.download_limit.set_kib(limits.download_kib);
         Ok(())
     }
+    pub fn apply_settings(&self, settings: crate::settings::FileSettings) -> Result<()> {
+        settings.validate().map_err(disk::failure)?;
+        if self.receive_root_path() != settings.receive_root {
+            self.set_receive_root(settings.receive_root);
+        }
+        self.set_auto_resume(settings.auto_resume);
+        self.set_send_limit(settings.send_concurrency)?;
+        self.set_file_limits(settings.file_limits)?;
+        self.set_receive_safety_mib(settings.receive_safety_mib)
+    }
     pub fn set_receive_safety_mib(&self, value: u16) -> Result<()> {
         self.receive_space.set_safety_mib(value)
     }

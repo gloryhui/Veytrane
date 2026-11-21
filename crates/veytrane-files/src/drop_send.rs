@@ -25,7 +25,7 @@ impl Selection {
     }
 }
 pub fn validate_paths(paths: &[PathBuf]) -> Result<()> {
-    veytrane_file_policy::path_batch::validate(paths).map_err(crate::transfer_files::failure)
+    crate::path_batch::validate(paths).map_err(crate::transfer_files::failure)
 }
 pub fn normalize(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
     validate_paths(&paths)?;
@@ -85,7 +85,7 @@ pub fn classify(paths: Vec<PathBuf>) -> Result<Vec<Selection>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use veytrane_file_policy::path_batch::{MAX_PATH_BYTES, MAX_PATHS};
+    use crate::path_batch::{MAX_PATH_BYTES, MAX_PATHS};
     #[test]
     fn every_ui_admission_boundary_is_required() {
         let ready = Admission {

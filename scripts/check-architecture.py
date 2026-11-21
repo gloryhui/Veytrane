@@ -26,8 +26,7 @@ FOUNDATION = {"storage", "identity.rs", "instance_lock.rs", "nat", "net",
 WORKSPACE_DEPENDENCIES = {
     "veytrane-transport": set(),
     "veytrane-node": {"veytrane-transport"},
-    "veytrane-file-policy": set(),
-    "veytrane-files": {"veytrane-file-policy", "veytrane-node", "veytrane-transport"},
+    "veytrane-files": {"veytrane-node", "veytrane-transport"},
     "veytrane-speed": {"veytrane-node", "veytrane-transport"},
     "veytrane-tcp": {"veytrane-node", "veytrane-transport"},
     "veytrane-management": {"veytrane-transport"},
@@ -45,8 +44,8 @@ PROFILE_EXCLUSIONS = {
     "agent-base,agent-web": {"veytrane-files", "gpui", "rusqlite"},
     "agent-full": {"gpui", "rusqlite"},
     "desktop-client": {
-        "veytrane-files", "veytrane-speed", "veytrane-tcp", "veytrane-web-management",
-        "axum", "rusqlite",
+        "veytrane-speed", "veytrane-tcp", "veytrane-web-management",
+        "axum", "cap-std", "rusqlite",
     },
     "live": {
         "veytrane-management", "veytrane-files", "veytrane-web-management",

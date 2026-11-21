@@ -4443,7 +4443,6 @@ dependencies = [
  "tracing-subscriber",
  "tray-icon",
  "unicode-segmentation",
- "veytrane-file-policy",
  "veytrane-files",
  "veytrane-http-auth",
  "veytrane-management",
@@ -7101,13 +7100,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
-name = "veytrane-file-policy"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "veytrane-files"
 version = "0.1.0"
 dependencies = [
@@ -7125,7 +7117,6 @@ dependencies = [
  "tokio",
  "tracing",
  "unicode-normalization",
- "veytrane-file-policy",
  "veytrane-node",
  "veytrane-speed",
  "veytrane-transport",

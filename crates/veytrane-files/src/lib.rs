@@ -16,6 +16,7 @@ pub mod frame_budget;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod incremental;
 pub mod manifest;
+pub mod path_batch;
 #[cfg(feature = "node-tasks")]
 pub mod protocol;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
@@ -29,6 +30,7 @@ pub mod receive_policy;
 pub mod relative_path;
 #[cfg(feature = "safe-storage")]
 pub mod secure_fs;
+pub mod settings;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod space_budget;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
