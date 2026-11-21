@@ -68,9 +68,10 @@ cargo build --locked --no-default-features --features desktop-client --bin p2p-d
 cargo build --locked --no-default-features --features agent-base --bin p2p-agent
 cargo tree --locked --no-default-features --features agent-base -e normal,features
 cargo build --locked --no-default-features --features standalone --bin p2p_file
+cargo build --locked --no-default-features --features standalone-files --bin p2p_file
 ```
 
-`node` 保留完整发行组合和独立命令。`agent-full` 构建完整 Agent 和管理 CLI，排除旧 CLI、信令服务端及其 SQLite。`agent-base` 内置测速与 TCP，排除文件执行、GPUI 和 HTTP 管理。`agent-files` 增加文件能力，`agent-web` 增加同进程导航。`desktop-client` 可单独构建桌面。`standalone` 提供旧 CLI，保留原信令启动命令。Live 和 Sub2API 可用各自 feature 构建。
+`node` 保留完整发行组合和独立命令。`agent-full` 构建完整 Agent 和管理 CLI，排除旧 CLI、信令服务端及其 SQLite。`agent-base` 内置测速与 TCP，排除文件执行、GPUI 和 HTTP 管理。`agent-files` 增加文件能力，`agent-web` 增加同进程导航。`desktop-client` 可单独构建桌面。`standalone` 构建旧 CLI 的信令、TCP 和测速入口。独立 CLI 的 `send`、`recv`、`push` 和 `serve --recv-dir` 使用 `standalone-files` 构建。Live 和 Sub2API 可用各自 feature 构建。
 
 `node-runtime` 提供可复用的节点会话及能力装配所需的配置。Live 和 Sub2API 的发行入口使用独立产品特性，生产构建排除管理 IPC 包、Agent 宿主、文件和测速执行。`agent-base` 通过 `node-speed` 装配测速。
 

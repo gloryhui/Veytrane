@@ -2,8 +2,10 @@
 
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use quinn::{Connection, RecvStream, SendStream};
+use tokio::sync::Semaphore;
 
 use super::{ControlMessage, read_frame, write_frame};
 use crate::download::PartialDownload;
@@ -60,6 +62,48 @@ pub struct ReceiveReport {
     pub chunks_received: u32,
     /// 落盘的正式文件路径。
     pub output_path: PathBuf,
+}
+
+pub async fn serve_manifest(
+    mut send: SendStream,
+    recv: RecvStream,
+    manifest: FileManifest,
+    receive_root: Option<&Path>,
+    peer: NodeId,
+    receives: Arc<Semaphore>,
+) {
+    if let Err(error) = manifest.validate() {
+        tracing::warn!(peer = %peer.short(), %error, "清单非法，拒绝接收");
+        reject_manifest(&mut send, format!("清单非法: {error}")).await;
+        return;
+    }
+    let Some(receive_root) = receive_root else {
+        tracing::warn!(peer = %peer.short(), "收到文件但没配置接收目录，拒绝");
+        let _ = send.finish();
+        return;
+    };
+    let Ok(_file_permit) = receives.try_acquire_owned() else {
+        tracing::warn!(peer = %peer.short(), "文件并发接收达到上限，拒绝新文件");
+        reject_manifest(&mut send, "文件并发接收达到上限".into()).await;
+        return;
+    };
+    match receive_file_on_stream(send, recv, manifest, receive_root, peer).await {
+        Ok(report) => tracing::info!(
+            path = %report.output_path.display(),
+            bytes = report.total_len,
+            "文件接收完成"
+        ),
+        Err(error) => tracing::warn!(%error, "文件接收失败"),
+    }
+}
+
+async fn reject_manifest(send: &mut SendStream, reason: String) {
+    let _ = tokio::time::timeout(
+        TRANSFER_IDLE_TIMEOUT,
+        write_frame(send, &ControlMessage::Abort { reason }),
+    )
+    .await;
+    let _ = send.finish();
 }
 
 /// 在 `connection` 上接收一个文件，存到 `out_dir`。

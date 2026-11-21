@@ -7,6 +7,7 @@ use clap::{Args, Parser, Subcommand};
 
 use crate::discovery::signal::DEFAULT_SIGNAL_PORT;
 use crate::identity::NodeId;
+#[cfg(feature = "standalone-files")]
 use crate::protocol::manifest::{DEFAULT_CHUNK_SIZE, validate_chunk_size};
 use crate::speedtest::{
     DEFAULT_BLOCK_SIZE, DEFAULT_DURATION_SECS, MAX_BLOCK_SIZE, MAX_DURATION_SECS, MIN_BLOCK_SIZE,
@@ -18,6 +19,7 @@ use crate::speedtest::{
 /// 在这里就拒绝非法值：等进了 `manifest_from_reader` 再报错的话，`0` 之外的
 /// 超大值（例如 4 GiB）会先触发一次真实的大分配。放在 value parser 里，
 /// 参数一解析完进程就退出，什么都不会分配。
+#[cfg(feature = "standalone-files")]
 fn parse_chunk_size(raw: &str) -> std::result::Result<u32, String> {
     let value: u32 = raw
         .parse()
@@ -72,7 +74,7 @@ fn parse_admin_listen(raw: &str) -> std::result::Result<SocketAddr, String> {
 #[command(
     name = "p2p_file",
     version,
-    about = "Veytrane · 可信设备互联：QUIC 直连、服务访问与文件传输",
+    about = "Veytrane · 可信设备互联：QUIC 直连与服务访问",
     propagate_version = true
 )]
 pub struct Cli {
@@ -157,6 +159,7 @@ pub enum Command {
     Id,
 
     /// 监听端口，等待对端连接并接收文件（局域网直连用）
+    #[cfg(feature = "standalone-files")]
     Recv {
         /// 监听地址
         #[arg(long, default_value = "0.0.0.0:9000", value_name = "ADDR")]
@@ -168,6 +171,7 @@ pub enum Command {
     },
 
     /// 连接对端并发送文件（局域网直连用）
+    #[cfg(feature = "standalone-files")]
     Send {
         /// 要发送的文件
         #[arg(value_name = "FILE")]
@@ -232,7 +236,7 @@ pub enum Command {
         new_device_ids_per_ip_per_minute: u32,
     },
 
-    /// 家里那台：等对端连上来，提供端口转发和收文件
+    /// 家里那台：等对端连上来，提供端口转发
     ///
     /// 直连优先；可选 Relay 只转发端到端加密 UDP datagram。
     Serve {
@@ -251,6 +255,7 @@ pub enum Command {
         forward: Vec<SocketAddr>,
 
         /// 接收到的文件存这个目录
+        #[cfg(feature = "standalone-files")]
         #[arg(long, value_name = "DIR")]
         recv_dir: Option<PathBuf>,
 
@@ -314,6 +319,7 @@ pub enum Command {
     },
 
     /// 把文件直接推到对端（走直连）
+    #[cfg(feature = "standalone-files")]
     Push {
         #[command(flatten)]
         direct: DirectOpts,
@@ -438,7 +444,7 @@ impl RelayServerOpts {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "standalone-files"))]
 mod tests {
     use super::*;
     #[test]

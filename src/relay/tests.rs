@@ -275,6 +275,7 @@ pub(crate) async fn signaling_fixture() -> (
     signaling_fixture_with_tls(None).await
 }
 
+#[cfg(any(feature = "node", feature = "standalone-files"))]
 pub(crate) async fn signaling_fixture_with_tls(
     tls: Option<crate::discovery::signal_tls::SignalTlsServer>,
 ) -> (

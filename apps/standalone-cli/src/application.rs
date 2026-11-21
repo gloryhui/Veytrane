@@ -17,11 +17,15 @@ use p2p_file::identity::Identity;
 use p2p_file::nat::punch::PunchConfig;
 use p2p_file::net::{DirectConfig, establish};
 use p2p_file::speedtest::{SpeedTestDirection, SpeedTestReport, SpeedTestStats, run_speedtest};
+#[cfg(feature = "standalone-files")]
 use p2p_file::transfer::{receive_file, send_file};
+#[cfg(feature = "standalone-files")]
 use p2p_file::transport::quic::{client_endpoint, connect, server_endpoint};
 use p2p_file::tunnel::rules::{ClientConfig, ServePolicy, ServiceConfig};
 use p2p_file::tunnel::supervisor::{RuleSupervisor, SharedSession};
-use p2p_file::tunnel::{ServeConfig, forward_tunnel, push_file, serve_loop};
+#[cfg(feature = "standalone-files")]
+use p2p_file::tunnel::push_file;
+use p2p_file::tunnel::{ServeConfig, forward_tunnel, serve_loop};
 
 #[path = "../../signaling/src/startup.rs"]
 mod signaling;
@@ -55,17 +59,17 @@ async fn run(cli: Cli) -> Result<()> {
         command,
     } = cli;
 
-    let _identity_lease = if matches!(
-        &command,
+    let needs_identity = match &command {
         Command::Discover { .. }
-            | Command::Recv { .. }
-            | Command::Send { .. }
             | Command::Serve { .. }
             | Command::Tunnel { .. }
             | Command::Forward { .. }
-            | Command::Push { .. }
-            | Command::Speedtest { .. }
-    ) {
+            | Command::Speedtest { .. } => true,
+        #[cfg(feature = "standalone-files")]
+        Command::Recv { .. } | Command::Send { .. } | Command::Push { .. } => true,
+        _ => false,
+    };
+    let _identity_lease = if needs_identity {
         Some(p2p_file::identity::acquire_identity_lease(
             load_identity(&key_file)?.node_id(),
         )?)
@@ -77,7 +81,9 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Id => cmd_id(&key_file),
         Command::Stun { server, timeout } => cmd_stun(&server, timeout).await,
         Command::Discover { timeout, port } => cmd_discover(&key_file, timeout, port).await,
+        #[cfg(feature = "standalone-files")]
         Command::Recv { listen, out_dir } => cmd_recv(&key_file, listen, out_dir).await,
+        #[cfg(feature = "standalone-files")]
         Command::Send {
             file,
             peer,
@@ -108,6 +114,7 @@ async fn run(cli: Cli) -> Result<()> {
             direct,
             allow,
             forward,
+            #[cfg(feature = "standalone-files")]
             recv_dir,
             re_punch_after,
             config,
@@ -118,6 +125,7 @@ async fn run(cli: Cli) -> Result<()> {
                 admin,
                 allow,
                 forward,
+                #[cfg(feature = "standalone-files")]
                 recv_dir,
                 re_punch_after,
                 config,
@@ -140,6 +148,7 @@ async fn run(cli: Cli) -> Result<()> {
             service,
             client,
         } => cmd_rules(file, service, client),
+        #[cfg(feature = "standalone-files")]
         Command::Push {
             direct,
             peer,
@@ -260,13 +269,14 @@ async fn cmd_discover(key_file: &Option<PathBuf>, timeout_secs: u64, port: u16) 
     discovery.shutdown()?;
 
     if found.is_empty() {
-        println!("没有发现其他节点。确认对方也在这条局域网上，并且已经跑起 recv。");
+        println!("没有发现其他节点。确认对方也在这条局域网上并已开启设备发现。");
     } else {
         println!("\n共发现 {} 个节点。", found.len());
     }
     Ok(())
 }
 
+#[cfg(feature = "standalone-files")]
 async fn cmd_recv(key_file: &Option<PathBuf>, listen: SocketAddr, out_dir: PathBuf) -> Result<()> {
     let identity = load_identity(key_file)?;
     let endpoint = server_endpoint(listen)?;
@@ -325,6 +335,7 @@ async fn cmd_recv(key_file: &Option<PathBuf>, listen: SocketAddr, out_dir: PathB
     }
 }
 
+#[cfg(feature = "standalone-files")]
 async fn cmd_send(
     key_file: &Option<PathBuf>,
     file: PathBuf,
@@ -435,6 +446,7 @@ struct ServeArgs {
     admin: AdminOpts,
     allow: Vec<p2p_file::identity::NodeId>,
     forward: Vec<SocketAddr>,
+    #[cfg(feature = "standalone-files")]
     recv_dir: Option<PathBuf>,
     re_punch_after: u64,
     config: Option<PathBuf>,
@@ -446,6 +458,7 @@ async fn cmd_serve(key_file: &Option<PathBuf>, args: ServeArgs) -> Result<()> {
         admin,
         allow,
         forward,
+        #[cfg(feature = "standalone-files")]
         recv_dir,
         re_punch_after,
         config: config_path,
@@ -511,8 +524,12 @@ async fn cmd_serve(key_file: &Option<PathBuf>, args: ServeArgs) -> Result<()> {
     let mut config = direct_config(&direct, peer);
     config.signal_timeout = Duration::ZERO; // 0 = 一直等，不超时
 
-    if forward.is_empty() && recv_dir.is_none() && policy.is_none() {
-        println!("提示：没有 --forward、--config 也没有 --recv-dir，对端连上来也没事可做。");
+    #[cfg(feature = "standalone-files")]
+    let has_receiver = recv_dir.is_some();
+    #[cfg(not(feature = "standalone-files"))]
+    let has_receiver = false;
+    if forward.is_empty() && !has_receiver && policy.is_none() {
+        println!("提示：当前没有可提供给对端的服务。");
     }
     for target in &forward {
         println!("允许转发到 {target}");
@@ -526,6 +543,7 @@ async fn cmd_serve(key_file: &Option<PathBuf>, args: ServeArgs) -> Result<()> {
     let serve_config = ServeConfig {
         allowed_peers: allow,
         forwards: forward,
+        #[cfg(feature = "standalone-files")]
         recv_dir,
         re_punch_after: Duration::from_secs(re_punch_after),
         policy: policy.clone(),
@@ -737,6 +755,7 @@ fn spawn_sighup_reload(_sender: tokio::sync::mpsc::Sender<()>) {
     tracing::warn!("当前平台不支持 SIGHUP，客户端规则只在启动时加载");
 }
 
+#[cfg(feature = "standalone-files")]
 async fn cmd_push(
     key_file: &Option<PathBuf>,
     direct: DirectOpts,

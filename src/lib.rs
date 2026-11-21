@@ -29,7 +29,7 @@ pub mod relay;
 pub mod speedtest;
 #[cfg(any(feature = "standalone", feature = "node-runtime"))]
 pub mod storage;
-#[cfg(feature = "standalone")]
+#[cfg(feature = "standalone-files")]
 pub mod transfer;
 pub mod transport;
 #[cfg(feature = "standalone")]

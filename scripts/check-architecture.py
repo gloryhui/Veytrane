@@ -55,7 +55,10 @@ PROFILE_EXCLUSIONS = {
         "veytrane-management", "veytrane-files", "veytrane-web-management",
         "veytrane-speed", "axum", "gpui", "rusqlite"
     },
-    "standalone": {"veytrane-node", "veytrane-management", "veytrane-web-management", "gpui"},
+    "standalone": {
+        "veytrane-files", "veytrane-node", "veytrane-management", "veytrane-web-management", "gpui"
+    },
+    "standalone-files": {"veytrane-node", "veytrane-management", "veytrane-web-management", "gpui"},
 }
 
 

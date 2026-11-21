@@ -5,7 +5,17 @@
 pub use crate::protocol::raw_frame::{
     MAX_FRAME_LEN, read_raw_frame, read_raw_frame_limited, write_raw_frame, write_raw_frame_limited,
 };
+#[cfg(feature = "standalone-files")]
 pub use veytrane_files::legacy::{read_frame, write_frame};
+#[cfg(not(feature = "standalone-files"))]
+pub use veytrane_transport::legacy_control::write_frame;
+
+#[cfg(not(feature = "standalone-files"))]
+pub async fn read_frame(
+    reader: &mut (impl tokio::io::AsyncRead + Unpin),
+) -> crate::error::Result<Option<crate::protocol::message::ControlMessage>> {
+    veytrane_transport::legacy_control::read_frame(reader).await
+}
 
 #[cfg(test)]
 mod tests {

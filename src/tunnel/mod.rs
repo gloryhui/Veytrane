@@ -22,6 +22,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+#[cfg(feature = "standalone-files")]
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -41,7 +42,9 @@ pub mod supervisor;
 use crate::protocol::frame::{read_frame, write_frame};
 use crate::protocol::message::ControlMessage;
 use crate::speedtest::serve_speedtest;
-use crate::transfer::receiver::receive_file_on_stream;
+#[cfg(feature = "standalone-files")]
+use crate::transfer::receiver::serve_manifest;
+#[cfg(feature = "standalone-files")]
 use crate::transfer::sender::{SendReport, send_file_after_handshake};
 use crate::transport::handshake::handshake_responder;
 use crate::transport::quic::{
@@ -54,6 +57,7 @@ pub const DEFAULT_MAX_PENDING_HANDSHAKES: usize = 64;
 /// 单条认证连接最多同时处理的业务双向流。
 pub const DEFAULT_MAX_BUSINESS_STREAMS: usize = 16;
 /// 一个 serve 会话最多同时落盘的文件数。
+#[cfg(feature = "standalone-files")]
 pub const DEFAULT_MAX_FILE_RECEIVES: usize = 4;
 pub use veytrane_tcp::{
     DEFAULT_MAX_TUNNEL_STREAMS, ForwardStreamOwner, bridge_tcp, connect_allowed_target,
@@ -71,6 +75,7 @@ pub struct ServeConfig {
     /// 允许转发到的目标地址白名单。
     pub forwards: Vec<SocketAddr>,
     /// 接收到的文件存这个目录。为 `None` 表示不收文件。
+    #[cfg(feature = "standalone-files")]
     pub recv_dir: Option<PathBuf>,
     /// 空闲多久后重新打洞。
     ///
@@ -83,6 +88,7 @@ pub struct ServeConfig {
     /// 单条已认证 QUIC 连接的业务流上限。
     pub max_business_streams: usize,
     /// 当前 serve 会话的并发文件接收上限。
+    #[cfg(feature = "standalone-files")]
     pub max_file_receives: usize,
     /// 认证连接在没有任何业务流时允许保持多久。
     pub connection_idle_timeout: Duration,
@@ -96,10 +102,12 @@ impl ServeConfig {
         Self {
             allowed_peers: Vec::new(),
             forwards: Vec::new(),
+            #[cfg(feature = "standalone-files")]
             recv_dir: None,
             re_punch_after: DEFAULT_RE_PUNCH_AFTER,
             max_pending_handshakes: DEFAULT_MAX_PENDING_HANDSHAKES,
             max_business_streams: DEFAULT_MAX_BUSINESS_STREAMS,
+            #[cfg(feature = "standalone-files")]
             max_file_receives: DEFAULT_MAX_FILE_RECEIVES,
             connection_idle_timeout: TRANSFER_IDLE_TIMEOUT,
             policy: None,
@@ -168,8 +176,12 @@ pub async fn serve_loop(
     if !config.has_peer_authorization() {
         warn!("没有指定允许的节点（--allow 或 --config），任何知道信令服务器的人都能连进来");
     }
-    if !config.has_target_authorization() && config.recv_dir.is_none() {
-        warn!("既没有配置转发目标，也没有配置接收目录，对端连上来也没事可做");
+    #[cfg(feature = "standalone-files")]
+    let has_receiver = config.recv_dir.is_some();
+    #[cfg(not(feature = "standalone-files"))]
+    let has_receiver = false;
+    if !config.has_target_authorization() && !has_receiver {
+        warn!("当前没有可提供给对端的服务");
     }
 
     loop {
@@ -272,6 +284,7 @@ pub async fn serve_session(
     drop(incoming_tx);
     let active = Arc::new(ActiveState::new());
     let pending = Arc::new(Semaphore::new(config.max_pending_handshakes));
+    #[cfg(feature = "standalone-files")]
     let file_receives = Arc::new(Semaphore::new(config.max_file_receives));
     let connections = Arc::new(Mutex::new(ConnectionRegistry::default()));
     let grace = config.re_punch_after;
@@ -359,13 +372,18 @@ pub async fn serve_session(
                     info!(peer = %winner.peer.short(), path_kind = "relay", family = %crate::net::AddressFamily::of(connection.remote_address()), remote = %connection.remote_address(), "对端已通过端到端认证");
                     let config = config.clone();
                     let active = active.clone();
+                    #[cfg(feature = "standalone-files")]
                     let file_receives = file_receives.clone();
                     let connections = connections.clone();
                     connection_tasks.spawn(async move {
                         let id = connections.lock().unwrap().insert(connection.clone());
                         drop(winner.permit);
                         let _active = ActiveSession::new(active);
-                        if let Err(error) = serve_streams(connection, winner.peer, config, file_receives).await { warn!(%error); }
+                        if let Err(error) = serve_streams(
+                            connection, winner.peer, config,
+                            #[cfg(feature = "standalone-files")]
+                            file_receives,
+                        ).await { warn!(%error); }
                         connections.lock().unwrap().remove(id);
                     });
                 } else if let Some(Ok(Err(error))) = result { debug!(%error, "Relay attempt ended"); }
@@ -420,6 +438,7 @@ pub async fn serve_session(
         let identity = identity.clone();
         let config = config.clone();
         let active = Arc::clone(&active);
+        #[cfg(feature = "standalone-files")]
         let file_receives = Arc::clone(&file_receives);
         let connections = Arc::clone(&connections);
         let authenticated_tx = authenticated_tx.clone();
@@ -441,6 +460,7 @@ pub async fn serve_session(
                 &identity,
                 config,
                 active,
+                #[cfg(feature = "standalone-files")]
                 file_receives,
                 permit,
                 authenticated_tx,
@@ -524,7 +544,7 @@ impl<T> ConnectionRegistry<T> {
         std::mem::take(&mut self.entries).into_values()
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "standalone-files"))]
     fn len(&self) -> usize {
         self.entries.len()
     }
@@ -584,6 +604,7 @@ async fn serve_connection(
     identity: &Identity,
     config: ServeConfig,
     active: Arc<ActiveState>,
+    #[cfg(feature = "standalone-files")]
     file_receives: Arc<Semaphore>,
     pending_permit: OwnedSemaphorePermit,
     authenticated: Option<mpsc::Sender<(NodeId, Connection)>>,
@@ -619,17 +640,24 @@ async fn serve_connection(
     let _active = ActiveSession::new(active);
     info!(peer = %peer_id.short(), %remote, "对端已通过认证");
 
-    serve_streams(connection, peer_id, config, file_receives).await
+    serve_streams(
+        connection,
+        peer_id,
+        config,
+        #[cfg(feature = "standalone-files")]
+        file_receives,
+    )
+    .await
 }
 
 /// 循环处理这条连接上开出来的每一条双向流。
 ///
-/// 流的类型由第一个消息决定：`Manifest` 是传文件，`TunnelOpen` 是开隧道。
-/// 这样一个 `serve` 进程就能同时提供两种服务，不用开两个端口。
+/// 流的类型由首帧决定。启用文件模块的构建也接收 `Manifest`。
 async fn serve_streams(
     connection: Connection,
     peer_id: NodeId,
     config: ServeConfig,
+    #[cfg(feature = "standalone-files")]
     file_receives: Arc<Semaphore>,
 ) -> Result<()> {
     let streams = Arc::new(Semaphore::new(config.max_business_streams));
@@ -686,6 +714,7 @@ async fn serve_streams(
         };
 
         let config = config.clone();
+        #[cfg(feature = "standalone-files")]
         let file_receives = Arc::clone(&file_receives);
         let connection_for_stream = connection.clone();
         stream_tasks.spawn(async move {
@@ -717,56 +746,17 @@ async fn serve_streams(
                     }
                 }
 
+                #[cfg(feature = "standalone-files")]
                 ControlMessage::Manifest(manifest) => {
-                    // `read_frame` 已经在解码时校验过，这里是显式的 trust-boundary
-                    // 复查：清单一旦进了接收流程就会决定临时文件长度和分片下标。
-                    if let Err(err) = manifest.validate() {
-                        warn!(peer = %peer_id.short(), error = %err, "清单非法，拒绝接收");
-                        let _ = tokio::time::timeout(
-                            TRANSFER_IDLE_TIMEOUT,
-                            write_frame(
-                                &mut send,
-                                &ControlMessage::Abort {
-                                    reason: format!("清单非法: {err}"),
-                                },
-                            ),
-                        )
-                        .await;
-                        let _ = send.finish();
-                        return;
-                    }
-                    let Some(recv_dir) = config.recv_dir.clone() else {
-                        warn!(peer = %peer_id.short(), "收到文件但没配置接收目录，拒绝");
-                        let _ = send.finish();
-                        return;
-                    };
-                    let file_permit = match file_receives.try_acquire_owned() {
-                        Ok(permit) => permit,
-                        Err(_) => {
-                            warn!(peer = %peer_id.short(), "文件并发接收达到上限，拒绝新文件");
-                            let _ = tokio::time::timeout(
-                                TRANSFER_IDLE_TIMEOUT,
-                                write_frame(
-                                    &mut send,
-                                    &ControlMessage::Abort {
-                                        reason: "文件并发接收达到上限".into(),
-                                    },
-                                ),
-                            )
-                            .await;
-                            let _ = send.finish();
-                            return;
-                        }
-                    };
-                    let _file_permit = file_permit;
-                    match receive_file_on_stream(send, recv, *manifest, &recv_dir, peer_id).await {
-                        Ok(report) => info!(
-                            path = %report.output_path.display(),
-                            bytes = report.total_len,
-                            "文件接收完成"
-                        ),
-                        Err(err) => warn!(error = %err, "文件接收失败"),
-                    }
+                    serve_manifest(
+                        send,
+                        recv,
+                        *manifest,
+                        config.recv_dir.as_deref(),
+                        peer_id,
+                        file_receives,
+                    )
+                    .await;
                 }
 
                 ControlMessage::SpeedTestOpen {
@@ -1008,6 +998,7 @@ pub(crate) async fn open_tunnel(
 ///
 /// 先自己完成握手并核对对端身份，再把发送流程交给 [`send_file_after_handshake`]，
 /// 避免握两次手（`send_file` 内部也会握手）。
+#[cfg(feature = "standalone-files")]
 pub async fn push_file(
     link: DirectLink,
     identity: Identity,
@@ -1023,7 +1014,7 @@ pub async fn push_file(
     Ok(report)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "standalone-files"))]
 mod tests {
     use super::*;
 
