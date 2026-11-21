@@ -388,11 +388,11 @@ impl AgentShell {
                         let Some(path) = paths.into_iter().next() else {
                             return;
                         };
-                        Command::PreviewDirectory { peer, path }
+                        FileManagementCommand::PreviewDirectory { peer, path }
                     } else {
-                        Command::Send { peer, paths }
+                        FileManagementCommand::Send { peer, paths }
                     };
-                    s.send(command, Kind::Action, cx);
+                    s.send_file_command(command, Kind::Action, cx);
                 });
             }
             Ok(Ok(None)) => (),
@@ -1106,15 +1106,15 @@ impl AgentShell {
                             return;
                         };
                         let command = match operation {
-                            0 => Command::Pause { task },
-                            1 => Command::Resume {
+                            0 => FileManagementCommand::Pause { task },
+                            1 => FileManagementCommand::Resume {
                                 peer: peer.clone(),
                                 task,
                             },
-                            2 => Command::Cancel { task },
-                            _ => Command::RemoveHistory { tasks: vec![task] },
+                            2 => FileManagementCommand::Cancel { task },
+                            _ => FileManagementCommand::RemoveHistory { tasks: vec![task] },
                         };
-                        s.send(command, Kind::Action, cx);
+                        s.send_file_command(command, Kind::Action, cx);
                     }),
                 ),
             );
@@ -1134,7 +1134,11 @@ impl AgentShell {
             cx.notify();
             return;
         }
-        self.send(Command::RemoveHistory { tasks }, Kind::Action, cx);
+        self.send_file_command(
+            FileManagementCommand::RemoveHistory { tasks },
+            Kind::Action,
+            cx,
+        );
     }
 
     pub(super) fn home_preview(&self, cx: &Context<Self>) -> gpui::Div {
@@ -1165,8 +1169,8 @@ impl AgentShell {
                             MouseButton::Left,
                             cx.listener(move |s, _, _, cx| {
                                 if let Some(request) = request.clone() {
-                                    s.send(
-                                        Command::ConfirmDirectory {
+                                    s.send_file_command(
+                                        FileManagementCommand::ConfirmDirectory {
                                             peer: peer.clone(),
                                             request,
                                         },
@@ -1182,7 +1186,11 @@ impl AgentShell {
                             MouseButton::Left,
                             cx.listener(move |s, _, _, cx| {
                                 if let Some(request) = cancel.clone() {
-                                    s.send(Command::CancelDirectory { request }, Kind::Action, cx);
+                                    s.send_file_command(
+                                        FileManagementCommand::CancelDirectory { request },
+                                        Kind::Action,
+                                        cx,
+                                    );
                                 }
                             }),
                         ),
@@ -1236,7 +1244,11 @@ impl AgentShell {
                             MouseButton::Left,
                             cx.listener(move |s, _, _, cx| {
                                 if let Some(task) = id.clone() {
-                                    s.send(Command::TaskLocation { task }, Kind::Location, cx);
+                                    s.send_file_command(
+                                        FileManagementCommand::TaskLocation { task },
+                                        Kind::Location,
+                                        cx,
+                                    );
                                 }
                             }),
                         ),
@@ -1263,8 +1275,10 @@ impl AgentShell {
                                         cx.spawn(async move |shell, cx| {
                                             if answer.await == Ok(0) {
                                                 let _ = shell.update(cx, |s, cx| {
-                                                    s.send(
-                                                        Command::DeleteReceivedFile { task },
+                                                    s.send_file_command(
+                                                        FileManagementCommand::DeleteReceivedFile {
+                                                            task,
+                                                        },
                                                         Kind::Action,
                                                         cx,
                                                     )
@@ -1447,8 +1461,8 @@ impl AgentShell {
                 if s.can_send_files(cx)
                     && let Some(peer) = s.selected_agent_peer(cx)
                 {
-                    s.send(
-                        Command::Send {
+                    s.send_file_command(
+                        FileManagementCommand::Send {
                             peer,
                             paths: paths.paths().to_vec(),
                         },

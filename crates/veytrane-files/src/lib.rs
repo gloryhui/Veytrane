@@ -19,6 +19,7 @@ pub mod frame_budget;
 pub mod incremental;
 #[cfg(feature = "node-runtime")]
 pub mod management;
+pub mod management_command;
 pub mod manifest;
 pub mod path_batch;
 #[cfg(feature = "node-tasks")]

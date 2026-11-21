@@ -1,7 +1,11 @@
 //! Management request/response contracts and bounded IPC v1 framing.
 
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::{io, path::PathBuf};
+use serde::{
+    Deserialize, Serialize,
+    de::{self, DeserializeOwned, MapAccess, Visitor},
+};
+use serde_json::{Map, Value};
+use std::{fmt, io};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use veytrane_transport::operation_id::TaskId;
 
@@ -85,40 +89,6 @@ pub enum Command {
     Disconnect {
         peer: String,
     },
-    Send {
-        peer: String,
-        paths: Vec<PathBuf>,
-    },
-    PreviewDirectory {
-        peer: String,
-        path: PathBuf,
-    },
-    Pause {
-        task: TaskId,
-    },
-    Resume {
-        peer: String,
-        task: TaskId,
-    },
-    Cancel {
-        task: TaskId,
-    },
-    RemoveHistory {
-        tasks: Vec<TaskId>,
-    },
-    DeleteReceivedFile {
-        task: TaskId,
-    },
-    TaskLocation {
-        task: TaskId,
-    },
-    ConfirmDirectory {
-        peer: String,
-        request: TaskId,
-    },
-    CancelDirectory {
-        request: TaskId,
-    },
     StartSpeed {
         peer: String,
         direction: SpeedtestDirection,
@@ -153,9 +123,18 @@ pub enum Command {
         password: String,
     },
     Stop,
+    #[serde(untagged)]
+    File(FileRequest),
 }
 
 impl Command {
+    pub fn file(command: &impl Serialize) -> io::Result<Self> {
+        let fields = serde_json::to_value(command)?;
+        serde_json::from_value(fields)
+            .map(Self::File)
+            .map_err(Into::into)
+    }
+
     pub fn is_query(&self) -> bool {
         matches!(
             self,
@@ -165,8 +144,61 @@ impl Command {
                 | Self::Tasks { .. }
                 | Self::Events { .. }
                 | Self::Services { .. }
-                | Self::TaskLocation { .. }
-        )
+        ) || matches!(self, Self::File(request) if request.method() == "task_location")
+    }
+}
+
+#[derive(Clone, Serialize)]
+#[serde(transparent)]
+pub struct FileRequest(Map<String, Value>);
+
+impl FileRequest {
+    fn method(&self) -> &str {
+        self.0["method"].as_str().expect("validated file method")
+    }
+
+    pub fn decode<T: DeserializeOwned>(self) -> serde_json::Result<T> {
+        serde_json::from_value(Value::Object(self.0))
+    }
+}
+
+impl<'de> Deserialize<'de> for FileRequest {
+    fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct FileRequestVisitor;
+
+        impl<'de> Visitor<'de> for FileRequestVisitor {
+            type Value = FileRequest;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a legacy IPC v1 file command")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<FileRequest, A::Error> {
+                let mut fields = Map::new();
+                while let Some((key, value)) = map.next_entry::<String, Value>()? {
+                    if fields.insert(key, value).is_some() {
+                        return Err(de::Error::custom("duplicate file command field"));
+                    }
+                }
+                match fields.get("method").and_then(Value::as_str) {
+                    Some(
+                        "send"
+                        | "preview_directory"
+                        | "pause"
+                        | "resume"
+                        | "cancel"
+                        | "remove_history"
+                        | "delete_received_file"
+                        | "task_location"
+                        | "confirm_directory"
+                        | "cancel_directory",
+                    ) => Ok(FileRequest(fields)),
+                    _ => Err(de::Error::custom("unknown file command method")),
+                }
+            }
+        }
+
+        deserializer.deserialize_map(FileRequestVisitor)
     }
 }
 
@@ -235,7 +267,7 @@ pub async fn write<T: Serialize>(
 
 #[cfg(test)]
 mod tests {
-    use super::Request;
+    use super::{Command, Request};
     use serde_json::json;
 
     #[test]
@@ -258,5 +290,26 @@ mod tests {
             request.validate().unwrap();
             assert_eq!(serde_json::to_value(request).unwrap(), value);
         }
+    }
+
+    #[test]
+    fn file_extension_cannot_accept_core_methods_or_duplicate_fields() {
+        for command in [
+            r#"{"method":"services","peer":"11111111111111111111111111111111","task":"22222222222222222222222222222222"}"#,
+            r#"{"method":"missing"}"#,
+            r#"{"method":"pause","task":"one","task":"two"}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<Command>(command).is_err(),
+                "{command}"
+            );
+        }
+        let location = Command::file(&json!({
+            "method": "task_location",
+            "task": "22222222222222222222222222222222",
+        }))
+        .unwrap();
+        assert!(location.is_query());
+        assert!(Command::file(&json!({"method": "status"})).is_err());
     }
 }

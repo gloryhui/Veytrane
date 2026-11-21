@@ -14,6 +14,7 @@ use std::{
 };
 use std::{net::SocketAddr, ops::Range};
 
+use veytrane_files::management_command::FileManagementCommand;
 use veytrane_management::{
     client::AgentClient,
     paths::AgentPaths,
@@ -228,6 +229,21 @@ impl AgentShell {
     fn text(field: &Entity<TextField>, cx: &Context<Self>) -> String {
         field.read(cx).content.trim().to_owned()
     }
+    fn send_file_command(
+        &mut self,
+        command: FileManagementCommand,
+        kind: Kind,
+        cx: &mut Context<Self>,
+    ) {
+        match Command::file(&command) {
+            Ok(command) => self.send(command, kind, cx),
+            Err(error) => {
+                self.message = format!("文件命令无法序列化：{error}").into();
+                cx.notify();
+            }
+        }
+    }
+
     fn send(&mut self, command: Command, kind: Kind, cx: &mut Context<Self>) {
         if self.busy {
             return;
@@ -590,11 +606,11 @@ impl AgentShell {
                         let Some(path) = paths.into_iter().next() else {
                             return;
                         };
-                        Command::PreviewDirectory { peer, path }
+                        FileManagementCommand::PreviewDirectory { peer, path }
                     } else {
-                        Command::Send { peer, paths }
+                        FileManagementCommand::Send { peer, paths }
                     };
-                    shell.send(command, Kind::Action, cx)
+                    shell.send_file_command(command, Kind::Action, cx)
                 });
             }
         })
@@ -1013,8 +1029,8 @@ impl AgentShell {
                         ui_components::primary_button(format!("确认目录 {request}"), enabled)
                             .on_click(cx.listener(move |s, _, _, cx| {
                                 if let Ok(request) = TaskId::parse(&request) {
-                                    s.send(
-                                        Command::ConfirmDirectory {
+                                    s.send_file_command(
+                                        FileManagementCommand::ConfirmDirectory {
                                             peer: peer.clone(),
                                             request,
                                         },
@@ -1028,7 +1044,11 @@ impl AgentShell {
                         ui_components::primary_button(format!("取消预览 {cancel}"), enabled)
                             .on_click(cx.listener(move |s, _, _, cx| {
                                 if let Ok(request) = TaskId::parse(&cancel) {
-                                    s.send(Command::CancelDirectory { request }, Kind::Action, cx);
+                                    s.send_file_command(
+                                        FileManagementCommand::CancelDirectory { request },
+                                        Kind::Action,
+                                        cx,
+                                    );
                                 }
                             })),
                     ),
@@ -1052,14 +1072,14 @@ impl AgentShell {
                         cx.listener(move |s, _, _, cx| {
                             if let Ok(task) = TaskId::parse(&id) {
                                 let command = match operation {
-                                    0 => Command::Pause { task },
-                                    1 => Command::Resume {
+                                    0 => FileManagementCommand::Pause { task },
+                                    1 => FileManagementCommand::Resume {
                                         peer: peer.clone(),
                                         task,
                                     },
-                                    _ => Command::Cancel { task },
+                                    _ => FileManagementCommand::Cancel { task },
                                 };
-                                s.send(command, Kind::Action, cx);
+                                s.send_file_command(command, Kind::Action, cx);
                             }
                         }),
                     ),

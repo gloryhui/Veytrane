@@ -18,6 +18,11 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use veytrane_files::management_command::FileManagementCommand as FileApi;
+
+fn file_request(command: FileApi) -> Api {
+    Api::file(&command).unwrap()
+}
 
 struct Sandbox(PathBuf);
 impl Sandbox {
@@ -508,10 +513,22 @@ async fn three_agent_processes_unified_files_directory_four_forwards_and_revocat
     let directory = mac.root.join("directory-fixture");
     fs::create_dir_all(directory.join("empty")).unwrap();
     fs::write(directory.join("inside.txt"), b"directory payload").unwrap();
-    mac.ok(Api::PreviewDirectory {
+    let malformed = mac
+        .response(
+            Api::file(&json!({
+                "method": "preview_directory",
+                "peer": home_id,
+                "path": directory,
+                "unexpected": true
+            }))
+            .unwrap(),
+        )
+        .await;
+    assert_eq!(malformed.error.unwrap().code, "invalid_request");
+    mac.ok(file_request(FileApi::PreviewDirectory {
         peer: home_id.clone(),
         path: directory,
-    })
+    }))
     .await;
     let until = Instant::now() + Duration::from_secs(20);
     let preview = loop {
@@ -529,10 +546,10 @@ async fn three_agent_processes_unified_files_directory_four_forwards_and_revocat
         preview.get("source").is_none(),
         "absolute source leaked into preview"
     );
-    mac.ok(Api::ConfirmDirectory {
+    mac.ok(file_request(FileApi::ConfirmDirectory {
         peer: home_id.clone(),
         request: serde_json::from_value(preview["id"].clone()).unwrap(),
-    })
+    }))
     .await;
     let until = Instant::now() + Duration::from_secs(20);
     while !home
@@ -562,10 +579,10 @@ async fn three_agent_processes_unified_files_directory_four_forwards_and_revocat
     assert!(home.apply(&changed_root).await.error.is_none());
     let second = mac.root.join("new-location.txt");
     fs::write(&second, b"new destination").unwrap();
-    mac.ok(Api::Send {
+    mac.ok(file_request(FileApi::Send {
         peer: home_id.clone(),
         paths: vec![second],
-    })
+    }))
     .await;
     let deadline = Instant::now() + Duration::from_secs(20);
     let received = loop {
@@ -603,12 +620,12 @@ async fn three_agent_processes_unified_files_directory_four_forwards_and_revocat
         .unwrap();
     let other_client = AgentClient::new(AgentPaths::new(&home.root).unwrap());
     let (location, previous_location) = tokio::join!(
-        home.ok(Api::TaskLocation {
+        home.ok(file_request(FileApi::TaskLocation {
             task: serde_json::from_value(received.clone()).unwrap(),
-        }),
-        other_client.execute(Api::TaskLocation {
+        })),
+        other_client.execute(file_request(FileApi::TaskLocation {
             task: serde_json::from_value(earlier["id"].clone()).unwrap(),
-        })
+        }))
     );
     assert_eq!(
         fs::canonicalize(location["path"].as_str().unwrap()).unwrap(),
@@ -619,9 +636,9 @@ async fn three_agent_processes_unified_files_directory_four_forwards_and_revocat
         fs::canonicalize(previous_location["path"].as_str().unwrap()).unwrap(),
         fs::canonicalize(home.root.join("receive/payload.bin")).unwrap()
     );
-    home.ok(Api::DeleteReceivedFile {
+    home.ok(file_request(FileApi::DeleteReceivedFile {
         task: serde_json::from_value(received).unwrap(),
-    })
+    }))
     .await;
     assert!(!new_root.join("new-location.txt").exists());
     let tasks = mac.ok(Api::Tasks { offset: 0 }).await;
@@ -631,9 +648,9 @@ async fn three_agent_processes_unified_files_directory_four_forwards_and_revocat
         .iter()
         .find(|t| t["name"] == "payload.bin" && t["state"] == "completed")
         .unwrap();
-    mac.ok(Api::RemoveHistory {
+    mac.ok(file_request(FileApi::RemoveHistory {
         tasks: vec![serde_json::from_value(completed["id"].clone()).unwrap()],
-    })
+    }))
     .await;
     assert!(
         source.is_file(),
@@ -644,10 +661,10 @@ async fn three_agent_processes_unified_files_directory_four_forwards_and_revocat
     assert!(mac.apply(&limits).await.error.is_none());
     let slow = mac.root.join("pause-cancel.bin");
     fs::write(&slow, vec![0x71u8; 8 * 1024 * 1024]).unwrap();
-    mac.ok(Api::Send {
+    mac.ok(file_request(FileApi::Send {
         peer: home_id.clone(),
         paths: vec![slow],
-    })
+    }))
     .await;
     let until = Instant::now() + Duration::from_secs(15);
     let task = loop {
@@ -664,7 +681,7 @@ async fn three_agent_processes_unified_files_directory_four_forwards_and_revocat
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
     let task_id = serde_json::from_value(task.clone()).unwrap();
-    mac.ok(Api::Pause { task: task_id }).await;
+    mac.ok(file_request(FileApi::Pause { task: task_id })).await;
     let until = Instant::now() + Duration::from_secs(15);
     loop {
         let tasks = mac.ok(Api::Tasks { offset: 0 }).await;
@@ -695,14 +712,14 @@ async fn three_agent_processes_unified_files_directory_four_forwards_and_revocat
     })
     .await;
     wait_peer(&mac, &home_id).await;
-    mac.ok(Api::Resume {
+    mac.ok(file_request(FileApi::Resume {
         peer: home_id.clone(),
         task: serde_json::from_value(task.clone()).unwrap(),
-    })
+    }))
     .await;
-    mac.ok(Api::Cancel {
+    mac.ok(file_request(FileApi::Cancel {
         task: serde_json::from_value(task.clone()).unwrap(),
-    })
+    }))
     .await;
     let tasks = mac.ok(Api::Tasks { offset: 0 }).await;
     assert!(

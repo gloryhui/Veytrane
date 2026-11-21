@@ -221,22 +221,14 @@ impl Agent {
                     .await?;
                 Ok(json!({"disconnected":true}))
             }
-            request @ (
-                Command::Send { .. }
-                    | Command::PreviewDirectory { .. }
-                    | Command::Pause { .. }
-                    | Command::Resume { .. }
-                    | Command::Cancel { .. }
-                    | Command::RemoveHistory { .. }
-                    | Command::DeleteReceivedFile { .. }
-                    | Command::TaskLocation { .. }
-                    | Command::ConfirmDirectory { .. }
-                    | Command::CancelDirectory { .. }
-            ) => {
+            Command::File(request) => {
                 #[cfg(feature = "agent-files")]
                 if let Some(service) = &self.file_service {
+                    let command = request
+                        .decode()
+                        .map_err(|error| format!("invalid_request: {error}"))?;
                     return self
-                        .execute_files(service, self.control.file_commands(), request)
+                        .execute_files(service, self.control.file_commands(), command)
                         .await;
                 }
                 #[cfg(not(feature = "agent-files"))]
@@ -761,6 +753,7 @@ fn read_candidate(path: &std::path::Path) -> io::Result<Request> {
 
 fn error_code(message: &str) -> &'static str {
     for code in [
+        "invalid_request",
         "revision_conflict",
         "restart_required",
         "recovery_required",

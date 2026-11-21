@@ -268,10 +268,10 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
         }
     }
     let rejected = client
-        .response(Api::Send {
+        .response(file_request(FileApi::Send {
             peer: server_id.clone(),
             paths: vec![client.root.join("not-a-file")],
-        })
+        }))
         .await;
     assert_eq!(rejected.error.unwrap().code, "capability_disabled");
     let speed = Api::StartSpeed {

@@ -7,6 +7,8 @@ use std::{
     io::{self, Read},
     path::PathBuf,
 };
+#[cfg(feature = "agent-files")]
+use veytrane_files::management_command::FileManagementCommand;
 use veytrane_management::client::AgentClient;
 use veytrane_management::paths::AgentPaths;
 use veytrane_management::protocol::{Command, Request, Response, SpeedtestDirection};
@@ -56,29 +58,36 @@ pub enum Action {
     Disconnect {
         peer: String,
     },
+    #[cfg(feature = "agent-files")]
     Send {
         peer: String,
         #[arg(required = true)]
         paths: Vec<PathBuf>,
     },
+    #[cfg(feature = "agent-files")]
     Pause {
         task: String,
     },
+    #[cfg(feature = "agent-files")]
     PreviewDirectory {
         peer: String,
         path: PathBuf,
     },
+    #[cfg(feature = "agent-files")]
     Resume {
         peer: String,
         task: String,
     },
+    #[cfg(feature = "agent-files")]
     Cancel {
         task: String,
     },
+    #[cfg(feature = "agent-files")]
     ConfirmDirectory {
         peer: String,
         request: String,
     },
+    #[cfg(feature = "agent-files")]
     CancelDirectory {
         request: String,
     },
@@ -196,34 +205,47 @@ pub async fn run(args: Args) -> io::Result<Response> {
             },
         },
         Action::Disconnect { peer } => Command::Disconnect { peer },
-        Action::Send { peer, paths } => Command::Send {
+        #[cfg(feature = "agent-files")]
+        Action::Send { peer, paths } => Command::file(&FileManagementCommand::Send {
             peer,
             paths: paths
                 .into_iter()
                 .map(std::path::absolute)
                 .collect::<io::Result<_>>()?,
-        },
-        Action::Pause { task } => Command::Pause {
+        })?,
+        #[cfg(feature = "agent-files")]
+        Action::Pause { task } => Command::file(&FileManagementCommand::Pause {
             task: TaskId::parse(&task).map_err(io::Error::other)?,
-        },
-        Action::PreviewDirectory { peer, path } => Command::PreviewDirectory {
-            peer,
-            path: std::path::absolute(path)?,
-        },
-        Action::Resume { peer, task } => Command::Resume {
+        })?,
+        #[cfg(feature = "agent-files")]
+        Action::PreviewDirectory { peer, path } => {
+            Command::file(&FileManagementCommand::PreviewDirectory {
+                peer,
+                path: std::path::absolute(path)?,
+            })?
+        }
+        #[cfg(feature = "agent-files")]
+        Action::Resume { peer, task } => Command::file(&FileManagementCommand::Resume {
             peer,
             task: TaskId::parse(&task).map_err(io::Error::other)?,
-        },
-        Action::Cancel { task } => Command::Cancel {
+        })?,
+        #[cfg(feature = "agent-files")]
+        Action::Cancel { task } => Command::file(&FileManagementCommand::Cancel {
             task: TaskId::parse(&task).map_err(io::Error::other)?,
-        },
-        Action::ConfirmDirectory { peer, request } => Command::ConfirmDirectory {
-            peer,
-            request: TaskId::parse(&request).map_err(io::Error::other)?,
-        },
-        Action::CancelDirectory { request } => Command::CancelDirectory {
-            request: TaskId::parse(&request).map_err(io::Error::other)?,
-        },
+        })?,
+        #[cfg(feature = "agent-files")]
+        Action::ConfirmDirectory { peer, request } => {
+            Command::file(&FileManagementCommand::ConfirmDirectory {
+                peer,
+                request: TaskId::parse(&request).map_err(io::Error::other)?,
+            })?
+        }
+        #[cfg(feature = "agent-files")]
+        Action::CancelDirectory { request } => {
+            Command::file(&FileManagementCommand::CancelDirectory {
+                request: TaskId::parse(&request).map_err(io::Error::other)?,
+            })?
+        }
         Action::Speed {
             peer,
             seconds,
