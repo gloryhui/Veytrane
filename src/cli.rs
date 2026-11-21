@@ -720,7 +720,7 @@ mod tests {
             "p2p_file",
             "serve",
             "--signal",
-            "1.2.3.4:7000",
+            "192.0.2.55:7000",
             "--allow",
             peer,
             "--forward",
@@ -746,7 +746,7 @@ mod tests {
                 assert_eq!(re_punch_after, 60);
                 assert_eq!(config, None);
                 assert_eq!(admin.admin_listen, None);
-                assert_eq!(direct.signal, "1.2.3.4:7000");
+                assert_eq!(direct.signal, "192.0.2.55:7000");
                 assert_eq!(direct.port, 9100);
                 assert_eq!(allow.len(), 1);
                 assert_eq!(allow[0].to_hex(), peer);
@@ -765,7 +765,7 @@ mod tests {
             "p2p_file",
             "tunnel",
             "--signal",
-            "1.2.3.4:7000",
+            "192.0.2.55:7000",
             "--peer",
             peer,
             "--listen",
@@ -798,13 +798,13 @@ mod tests {
             "p2p_file",
             "forward",
             "--signal",
-            "1.2.3.4:7000",
+            "192.0.2.55:7000",
             "--config",
             "/etc/p2p_file/client.json",
         ]);
         match cli.command {
             Command::Forward { direct, config, .. } => {
-                assert_eq!(direct.signal, "1.2.3.4:7000");
+                assert_eq!(direct.signal, "192.0.2.55:7000");
                 assert_eq!(config, PathBuf::from("/etc/p2p_file/client.json"));
             }
             other => panic!("解析结果不对: {other:?}"),
@@ -817,7 +817,7 @@ mod tests {
             "p2p_file",
             "forward",
             "--signal",
-            "1.2.3.4:7000",
+            "192.0.2.55:7000",
             "--config",
             "/etc/p2p_file/client.json",
             "--admin-listen",
@@ -840,7 +840,7 @@ mod tests {
                 "p2p_file",
                 "forward",
                 "--signal",
-                "1.2.3.4:7000",
+                "192.0.2.55:7000",
                 "--config",
                 "/etc/p2p_file/client.json",
                 "--admin-listen",
@@ -853,7 +853,7 @@ mod tests {
                 "p2p_file",
                 "forward",
                 "--signal",
-                "1.2.3.4:7000",
+                "192.0.2.55:7000",
                 "--config",
                 "/etc/p2p_file/client.json",
                 "--admin-token-file",
@@ -871,7 +871,7 @@ mod tests {
                 "p2p_file",
                 "serve",
                 "--signal",
-                "1.2.3.4:7000",
+                "192.0.2.55:7000",
                 "--allow",
                 peer,
                 "--config",
@@ -884,7 +884,7 @@ mod tests {
                 "p2p_file",
                 "serve",
                 "--signal",
-                "1.2.3.4:7000",
+                "192.0.2.55:7000",
                 "--forward",
                 "127.0.0.1:22",
                 "--config",
@@ -923,7 +923,7 @@ mod tests {
             "p2p_file",
             "push",
             "--signal",
-            "1.2.3.4:7000",
+            "192.0.2.55:7000",
             "--peer",
             peer,
             "/tmp/big.bin",
@@ -954,7 +954,7 @@ mod tests {
             "p2p_file",
             "speedtest",
             "--signal",
-            "1.2.3.4:7000",
+            "192.0.2.55:7000",
             "--peer",
             peer,
         ]);
@@ -966,7 +966,7 @@ mod tests {
                 direction,
                 block_size,
             } => {
-                assert_eq!(direct.signal, "1.2.3.4:7000");
+                assert_eq!(direct.signal, "192.0.2.55:7000");
                 assert_eq!(parsed_peer.to_hex(), peer);
                 assert_eq!(duration, DEFAULT_DURATION_SECS);
                 assert_eq!(direction, SpeedTestDirection::Both);
@@ -988,7 +988,7 @@ mod tests {
                 "p2p_file",
                 "speedtest",
                 "--signal",
-                "1.2.3.4:7000",
+                "192.0.2.55:7000",
                 "--peer",
                 peer,
                 "--direction",
@@ -1010,7 +1010,7 @@ mod tests {
                     "p2p_file",
                     "speedtest",
                     "--signal",
-                    "1.2.3.4:7000",
+                    "192.0.2.55:7000",
                     "--peer",
                     peer,
                     "--duration",
@@ -1025,7 +1025,7 @@ mod tests {
                     "p2p_file",
                     "speedtest",
                     "--signal",
-                    "1.2.3.4:7000",
+                    "192.0.2.55:7000",
                     "--peer",
                     peer,
                     "--duration",
@@ -1041,7 +1041,7 @@ mod tests {
                     "p2p_file",
                     "speedtest",
                     "--signal",
-                    "1.2.3.4:7000",
+                    "192.0.2.55:7000",
                     "--peer",
                     peer,
                     "--block-size",
@@ -1056,7 +1056,7 @@ mod tests {
                 "p2p_file",
                 "speedtest",
                 "--signal",
-                "1.2.3.4:7000",
+                "192.0.2.55:7000",
                 "--peer",
                 peer,
                 "--direction",
@@ -1073,7 +1073,7 @@ mod tests {
                 "p2p_file",
                 "tunnel",
                 "--signal",
-                "1.2.3.4:7000",
+                "192.0.2.55:7000",
                 "--peer",
                 "太短了",
                 "--listen",
@@ -1092,7 +1092,7 @@ mod tests {
                 "p2p_file",
                 "tunnel",
                 "--signal",
-                "1.2.3.4:7000",
+                "192.0.2.55:7000",
                 "--peer",
                 "00112233445566778899aabbccddeeff",
             ])
@@ -1129,7 +1129,7 @@ mod tests {
                 "p2p_file",
                 "push",
                 "--signal",
-                "1.2.3.4:7000",
+                "192.0.2.55:7000",
                 "--peer",
                 "00112233445566778899aabbccddeeff",
                 "/tmp/b.bin",

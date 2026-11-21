@@ -1104,7 +1104,7 @@ mod tests {
     fn 事务_id_不匹配时过滤() {
         let mut a = Message::binding_request([1u8; 12]);
         a.attributes
-            .push(Attribute::XorMappedAddress("1.2.3.4:5".parse().unwrap()));
+            .push(Attribute::XorMappedAddress("192.0.2.55:5".parse().unwrap()));
         let decoded = Message::decode(&a.encode()).unwrap();
         assert_ne!(decoded.transaction_id, [2u8; 12]);
         assert_eq!(decoded.transaction_id, [1u8; 12]);
