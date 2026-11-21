@@ -5,15 +5,15 @@ use std::path::Path;
 
 use quinn::Connection;
 
+use super::{ControlMessage, read_frame, write_frame};
+use crate::chunk_bitmap::ChunkBitmap;
+use crate::chunker::{manifest_from_path, read_chunk};
 use crate::error::{Error, Result};
-use crate::identity::{Identity, NodeId};
-use crate::protocol::frame::{read_frame, write_frame};
-use crate::protocol::message::ControlMessage;
-use crate::storage::chunk_bitmap::ChunkBitmap;
-use crate::transfer::chunker::{manifest_from_path, read_chunk};
-use crate::transport::handshake::handshake_initiator;
-use crate::transport::quic::{
-    ACCEPT_FIRST_BI_STREAM_TIMEOUT, ChannelBinding, TRANSFER_IDLE_TIMEOUT,
+use veytrane_transport::{
+    ACCEPT_FIRST_BI_STREAM_TIMEOUT, TRANSFER_IDLE_TIMEOUT,
+    channel_binding::ChannelBinding,
+    handshake::handshake_initiator,
+    identity::{Identity, NodeId},
 };
 
 /// 发送结果。

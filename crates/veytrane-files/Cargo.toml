@@ -6,6 +6,7 @@ rust-version = "1.90"
 publish = false
 
 [features]
+legacy = ["dep:quinn", "dep:tokio", "veytrane-transport/legacy-control", "veytrane-transport/quic"]
 node-runtime = ["node-tasks", "safe-storage", "dep:quinn", "tokio/macros", "tokio/rt"]
 node-tasks = ["dep:thiserror", "dep:tokio", "dep:veytrane-node"]
 safe-storage = [

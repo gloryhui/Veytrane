@@ -47,6 +47,7 @@ agent-web = ["agent-base", "dep:veytrane-web-management"]
 node-cli = ["agent-base", "agent-web"]
 standalone = [
     "dep:veytrane-files",
+    "veytrane-files/legacy",
     "dep:veytrane-http-auth",
     "dep:veytrane-speed",
     "dep:veytrane-tcp",

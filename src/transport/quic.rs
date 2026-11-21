@@ -43,13 +43,9 @@ const MAX_AUTHORIZED_PUNCH_SOURCES: usize = 128;
 /// 等待 QUIC transport handshake 完成的最大时间；与应用层四阶段握手分开计时。
 pub const QUIC_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// 等待一条连接的第一条双向业务流的最大时间。
-pub const ACCEPT_FIRST_BI_STREAM_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// 等待业务流首帧的最大时间。
-pub const STREAM_FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(10);
-
-pub use veytrane_transport::TRANSFER_IDLE_TIMEOUT;
+pub use veytrane_transport::{
+    ACCEPT_FIRST_BI_STREAM_TIMEOUT, STREAM_FIRST_FRAME_TIMEOUT, TRANSFER_IDLE_TIMEOUT,
+};
 pub use veytrane_transport::channel_binding::{
     CHANNEL_BINDING_LABEL, CHANNEL_BINDING_LEN, ChannelBinding,
 };

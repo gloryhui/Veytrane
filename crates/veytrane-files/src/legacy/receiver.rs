@@ -5,16 +5,15 @@ use std::path::{Path, PathBuf};
 
 use quinn::{Connection, RecvStream, SendStream};
 
+use super::{ControlMessage, read_frame, write_frame};
+use crate::download::PartialDownload;
 use crate::error::{Error, Result};
-use crate::identity::{Identity, NodeId};
-use crate::protocol::frame::{read_frame, write_frame};
-use crate::protocol::manifest::FileManifest;
-use crate::protocol::message::ControlMessage;
-use crate::storage::PartialDownload;
-use crate::transport::handshake::handshake_responder;
-use crate::transport::quic::{
-    ACCEPT_FIRST_BI_STREAM_TIMEOUT, ChannelBinding, STREAM_FIRST_FRAME_TIMEOUT,
-    TRANSFER_IDLE_TIMEOUT,
+use crate::manifest::FileManifest;
+use veytrane_transport::{
+    ACCEPT_FIRST_BI_STREAM_TIMEOUT, STREAM_FIRST_FRAME_TIMEOUT, TRANSFER_IDLE_TIMEOUT,
+    channel_binding::ChannelBinding,
+    handshake::handshake_responder,
+    identity::{Identity, NodeId},
 };
 
 /// 同时在途的请求数。

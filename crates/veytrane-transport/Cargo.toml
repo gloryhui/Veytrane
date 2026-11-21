@@ -6,6 +6,7 @@ rust-version = "1.90"
 publish = false
 
 [features]
+legacy-control = []
 private-storage = ["dep:rustix", "dep:windows-sys"]
 quic = ["dep:quinn", "dep:rcgen", "dep:socket2", "dep:tracing", "tokio/macros", "tokio/net", "tokio/sync", "tokio/time"]
 signal-tls = ["quic", "dep:tokio-rustls", "dep:webpki-roots", "dep:zeroize", "tokio/rt"]

@@ -1,9 +1,8 @@
 //! 分片、续传、发送与接收。
 
 pub mod chunker;
-pub mod receiver;
 pub mod resume;
-pub mod sender;
+pub use veytrane_files::legacy::{receiver, sender};
 
 pub use chunker::{
     manifest_from_path, manifest_from_path_default, manifest_from_reader, read_chunk,

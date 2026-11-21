@@ -2,45 +2,16 @@
 //!
 //! QUIC 的流是字节流，本身不保留消息边界，所以自己做一层定长头。
 
-use tokio::io::{AsyncRead, AsyncWrite};
-
-use crate::error::{Error, Result};
-use crate::protocol::message::ControlMessage;
 pub use crate::protocol::raw_frame::{
     MAX_FRAME_LEN, read_raw_frame, read_raw_frame_limited, write_raw_frame, write_raw_frame_limited,
 };
-
-/// 写一帧控制消息。
-pub async fn write_frame<W>(writer: &mut W, message: &ControlMessage) -> Result<()>
-where
-    W: AsyncWrite + Unpin,
-{
-    let payload = message.encode()?;
-    if payload.len() > MAX_FRAME_LEN as usize {
-        return Err(Error::Protocol(format!(
-            "{} 帧过大：{} 字节，上限 {MAX_FRAME_LEN}",
-            message.kind(),
-            payload.len()
-        )));
-    }
-    write_raw_frame(writer, &payload).await
-}
-
-/// 读一帧控制消息。
-pub async fn read_frame<R>(reader: &mut R) -> Result<Option<ControlMessage>>
-where
-    R: AsyncRead + Unpin,
-{
-    match read_raw_frame(reader).await? {
-        Some(payload) => Ok(Some(ControlMessage::decode(&payload)?)),
-        None => Ok(None),
-    }
-}
+pub use veytrane_files::legacy::{read_frame, write_frame};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::message::PROTOCOL_VERSION;
+    use crate::error::Error;
+    use crate::protocol::message::{ControlMessage, PROTOCOL_VERSION};
     use tokio::io::AsyncWriteExt;
 
     #[tokio::test]
