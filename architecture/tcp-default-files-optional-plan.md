@@ -93,7 +93,9 @@
 - 标准桌面、增强桌面、标准 Agent/CLI、增强 Agent/CLI 分别编译。生产依赖检查确认标准组合排除文件包，增强桌面排除文件安全存储和业务执行依赖。文件桌面 5 项、两套桌面各 3 项、两套 Web 各 26 项测试通过。标准 CLI 帮助不显示文件及任务命令，增强版保留 `tasks --offset`。历史 v1 请求仍可读取空任务页或收到能力错误。
 - 9 项隔离 Agent 进程验收通过，覆盖混合版型、文件校验和目录确认、任务保留、TCP 并发、恢复与撤销。[进程日志](/private/tmp/veytrane-p3-agents.lmvVbT/agent-process-final.log)。
 - 两种 Web 与两种 Agent 的四个组合通过实际回环 HTTP 和原生 IPC。标准页面没有文件面板资源，增强页面按 Agent 能力判断是否挂载，历史任务页仍有响应。[HTTP 证据](/private/tmp/veytrane-p3-entry.pdkpCo/web-ipc-proof.json)。
-- Ubuntu 24.04 x86_64 使用原生 GPUI、隔离 X11 会话和模拟 Agent IPC 实际投递拖放。标准桌面连接文件增强 Agent、文件增强桌面连接标准 Agent 时均未请求 `tasks` 或 `send`。两端均为文件增强且对端能力已协商时，收到一次包含正确对端与文件路径的 `send`。文件执行由上述真实 Agent 进程验证。文件次级窗口与 Web 文件面板的独立视觉验收待补。[拖放结果](../tmp/p4-linux-evidence.5K8JYj/xdnd.json)。
+- Ubuntu 24.04 x86_64 使用原生 GPUI、隔离 X11 会话和模拟 Agent IPC 实际投递拖放。标准桌面连接文件增强 Agent、文件增强桌面连接标准 Agent 时均未请求 `tasks` 或 `send`。两端均为文件增强且对端能力已协商时，收到一次包含正确对端与文件路径的 `send`。文件执行由上述真实 Agent 进程验证。[拖放结果](../tmp/p4-linux-evidence.5K8JYj/xdnd.json)。
+- 同一 Linux 增强候选中，点击任务行打开任务详情，收到新的目录预览时打开预览窗口。模拟 Agent 停用文件能力后，两个实际窗口关闭，任务轮询停止，转发工作台继续运行。[窗口结果](../tmp/p3-file-windows.xLzOPv/visual-results.json)、[任务详情截图](../tmp/p3-file-windows.xLzOPv/verified-task-details.png)、[目录预览截图](../tmp/p3-file-windows.xLzOPv/verified-directory-preview.png)。
+- 使用 `c6ee03c` 的两个 macOS arm64 候选，在隔离 Chrome 中认证并读取四种 Web/Agent 组合的配置。四组均显示转发编辑器。标准 Web 无文件面板和三项操作的 DOM；增强 Web 仅在 Agent 启用文件能力时显示文件面板，点击刷新任务完成，清空该测试节点的管理 token 后面板隐藏。[Chrome 结果](../tmp/p3-web.hVtmyC/run.Mg3Ppr/results.json)。
 
 ### P4 双候选与安装切换（2026-11-21）
 
