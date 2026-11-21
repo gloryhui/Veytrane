@@ -78,6 +78,8 @@ Direct 连接成功时，业务数据在设备间传输，信令服务器负责�
 
 通用版由**一个常驻 Agent 持有节点状态，桌面、CLI 和 Web 经本机 IPC 管理同一个节点**。授权 TCP 转发是标准版的默认业务。文件增强版在同一会话、认证和授权机制上装配文件能力。
 
+![Veytrane 节点架构图：管理入口经本机 IPC 接入 Agent，共享节点核心，默认提供 TCP 转发与测速，可选文件收发。](docs/assets/readme/node-architecture.png)
+
 [打开新版交互架构图](architecture/layer-review.html)可在本地浏览器离线查看，支持八种主题、独立亮暗切换和整图 PNG 导出。
 
 | 层次 | 主要模块 | 职责 |
