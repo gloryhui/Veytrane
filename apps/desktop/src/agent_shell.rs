@@ -154,6 +154,7 @@ struct AgentShell {
     tasks: Vec<Value>,
     previews: Vec<Value>,
     services: Vec<Value>,
+    services_for: Option<String>,
     draft: Option<Value>,
     revision: u64,
     message: SharedString,
@@ -192,6 +193,7 @@ impl AgentShell {
             tasks: vec![],
             previews: vec![],
             services: vec![],
+            services_for: None,
             draft: None,
             revision: 0,
             message: "关闭窗口后后台节点继续运行。".into(),
@@ -372,6 +374,9 @@ impl AgentShell {
             }
             Kind::Services => {
                 self.services = value.as_array().cloned().unwrap_or_default();
+                if let Command::Services { peer } = update.job.request.command {
+                    self.services_for = Some(peer);
+                }
             }
             Kind::Apply | Kind::Restart => {
                 self.revision = value["revision"].as_u64().unwrap_or(self.revision);
@@ -592,6 +597,131 @@ impl Render for AgentShell {
     }
 }
 impl AgentShell {
+    fn service_directory(&self, peer: Option<&str>, cx: &Context<Self>) -> gpui::Div {
+        let enabled = self.available() && peer.is_some();
+        let query_peer = peer.map(str::to_owned);
+        let mut directory = ui_components::card()
+            .child("远端授权服务")
+            .child(
+                ui_components::primary_button("查询已授权服务", enabled)
+                    .on_click(cx.listener(move |shell, _, _, cx| {
+                        if enabled && let Some(peer) = query_peer.clone() {
+                            shell.send(Command::Services { peer }, Kind::Services, cx);
+                        }
+                    })),
+            );
+        if peer.is_none() || self.services_for.as_deref() != peer {
+            return directory;
+        }
+        if self.services.is_empty() {
+            return directory.child("当前设备暂无已授权服务。");
+        }
+        for service in &self.services {
+            let id = service["id"].as_str().unwrap_or("").to_owned();
+            let text = format!("{} · {}", service["name"].as_str().unwrap_or(""), id);
+            let peer = peer.map(str::to_owned);
+            directory = directory.child(ui_components::primary_button(text, enabled).on_click(
+                cx.listener(move |shell, _, _, cx| {
+                    if !enabled {
+                        return;
+                    }
+                    shell.service.update(cx, |field, cx| {
+                        field.content = id.clone().into();
+                        field.selected_range = field.content.len()..field.content.len();
+                        cx.notify();
+                    });
+                    if let Some(peer) = &peer {
+                        shell.edit_forwarding(peer, cx);
+                    }
+                }),
+            ));
+        }
+        directory
+    }
+
+    fn edit_forwarding(&mut self, peer: &str, cx: &mut Context<Self>) {
+        self.management_peer.update(cx, |field, cx| {
+            field.content = peer.to_owned().into();
+            field.selected_range = field.content.len()..field.content.len();
+            cx.notify();
+        });
+        self.open_panel(workbench::Page::Management, cx);
+    }
+
+    fn forward_row(&self, rule: &Value, service: &str, cx: &Context<Self>) -> gpui::Div {
+        let id = rule["id"].as_str().unwrap_or("").to_owned();
+        let status = self.state["forwards"]["rules"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|row| row["id"].as_str() == Some(&id));
+        let listening = status.is_some_and(|row| row["listening"] == true);
+        let peer_ready = status.is_some_and(|row| row["peer_ready"] == true);
+        let configured = rule["enabled"] == true;
+        let enabled = self.available() && status.is_some();
+        let start = id.clone();
+        let stop = id;
+        div()
+            .flex()
+            .flex_wrap()
+            .gap_2()
+            .items_center()
+            .child(format!(
+                "{} · {} → {} / {} · 配置{} · {} · {}",
+                rule["name"].as_str().unwrap_or(""),
+                rule["listen"].as_str().unwrap_or(""),
+                rule["peer_node_id"].as_str().unwrap_or(""),
+                service,
+                if configured { "启用" } else { "禁用" },
+                if listening { "监听中" } else { "未监听" },
+                if peer_ready { "对端已连接" } else { "对端未就绪" }
+            ))
+            .child(
+                ui_components::primary_button("启动", enabled && !listening && configured)
+                    .id(SharedString::from(format!("start-forward-{start}")))
+                    .on_click(cx.listener(move |shell, _, _, cx| {
+                        if enabled && !listening && configured {
+                            shell.send(Command::StartForward { rule: start.clone() }, Kind::Action, cx);
+                        }
+                    })),
+            )
+            .child(
+                ui_components::primary_button("停止", enabled && listening)
+                    .id(SharedString::from(format!("stop-forward-{stop}")))
+                    .on_click(cx.listener(move |shell, _, _, cx| {
+                        if enabled && listening {
+                            shell.send(Command::StopForward { rule: stop.clone() }, Kind::Action, cx);
+                        }
+                    })),
+            )
+    }
+
+    fn home_forwarding(&self, peer: Option<String>, cx: &Context<Self>) -> gpui::Div {
+        let directory = self.service_directory(peer.as_deref(), cx);
+        let mut forwards = ui_components::card()
+            .child("本机端口转发")
+            .child(
+                ui_components::secondary_button("管理转发和服务", true).on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(move |shell, _, _, cx| {
+                        if let Some(peer) = &peer {
+                            shell.edit_forwarding(peer, cx);
+                        } else {
+                            shell.open_panel(workbench::Page::Management, cx);
+                        }
+                    }),
+                ),
+            );
+        if let Some(draft) = &self.draft {
+            for rule in draft["forwards"].as_array().into_iter().flatten() {
+                let id = rule["id"].as_str().unwrap_or("");
+                let service = draft["service_ids"][id].as_str().unwrap_or("缺少服务 ID");
+                forwards = forwards.child(self.forward_row(rule, service, cx));
+            }
+        }
+        div().flex().flex_col().gap_3().child(directory).child(forwards)
+    }
+
     fn render_management(&mut self, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
         let enabled = !self.busy;
         let mut root = div()
@@ -738,20 +868,7 @@ impl AgentShell {
                                         cx,
                                     )
                                 }),
-                            ))
-                            .child(
-                                ui_components::primary_button("查询授权服务", enabled).on_click(
-                                    cx.listener(|s, _, _, cx| {
-                                        s.send(
-                                            Command::Services {
-                                                peer: Self::text(&s.management_peer, cx),
-                                            },
-                                            Kind::Services,
-                                            cx,
-                                        )
-                                    }),
-                                ),
-                            ),
+                            )),
                     )
                     .child(field("设置本机访问密码", &self.management_local_password))
                     .child(
@@ -800,20 +917,11 @@ impl AgentShell {
             peers = peers.child(message.chars().take(512).collect::<String>());
         }
         root = root.child(peers);
-        let mut directory = ui_components::card().child("远端授权服务（点击选择）");
-        for service in &self.services {
-            let id = service["id"].as_str().unwrap_or("").to_owned();
-            let text = format!("{} · {}", service["name"].as_str().unwrap_or(""), id);
-            directory = directory.child(ui_components::primary_button(text, enabled).on_click(
-                cx.listener(move |s, _, _, cx| {
-                    s.service.update(cx, |field, cx| {
-                        field.content = id.clone().into();
-                        field.selected_range = field.content.len()..field.content.len();
-                        cx.notify();
-                    });
-                }),
-            ));
-        }
+        let peer = Self::text(&self.management_peer, cx);
+        let directory = self.service_directory(
+            NodeId::from_hex(&peer).is_ok().then_some(peer.as_str()),
+            cx,
+        );
         let mut permissions =
             ui_components::card().child("上述设备的本机资源授权（加入草稿后保存）");
         for (label, kind, value) in [
@@ -860,45 +968,18 @@ impl AgentShell {
         if let Some(draft) = &self.draft {
             for rule in draft["forwards"].as_array().into_iter().flatten() {
                 let id = rule["id"].as_str().unwrap_or("").to_owned();
-                let start = id.clone();
-                let stop = id.clone();
-                let delete = id.clone();
+                let service = draft["service_ids"][&id].as_str().unwrap_or("缺少服务 ID");
+                let row = self.forward_row(rule, service, cx);
+                let delete = id;
                 forwards =
                     forwards.child(
                         div()
                             .flex()
                             .gap_2()
                             .items_center()
-                            .child(format!(
-                                "{} · {} → {}",
-                                rule["name"].as_str().unwrap_or(""),
-                                rule["listen"].as_str().unwrap_or(""),
-                                draft["service_ids"][&id].as_str().unwrap_or("缺少服务 ID")
-                            ))
+                            .child(row)
                             .child(
-                                ui_components::primary_button(format!("启动 {id}"), enabled)
-                                    .on_click(cx.listener(move |s, _, _, cx| {
-                                        s.send(
-                                            Command::StartForward {
-                                                rule: start.clone(),
-                                            },
-                                            Kind::Action,
-                                            cx,
-                                        )
-                                    })),
-                            )
-                            .child(
-                                ui_components::primary_button(format!("停止 {id}"), enabled)
-                                    .on_click(cx.listener(move |s, _, _, cx| {
-                                        s.send(
-                                            Command::StopForward { rule: stop.clone() },
-                                            Kind::Action,
-                                            cx,
-                                        )
-                                    })),
-                            )
-                            .child(
-                                ui_components::primary_button(format!("删除 {id}"), enabled)
+                                ui_components::primary_button(format!("删除 {delete}"), enabled)
                                     .on_click(cx.listener(move |s, _, _, cx| {
                                         if s.busy {
                                             return;

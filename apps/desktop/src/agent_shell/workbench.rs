@@ -197,7 +197,7 @@ impl AgentShell {
             .child(self.connection_note.clone())
             .child(self.lifecycle_button(cx))
     }
-    fn available(&self) -> bool {
+    pub(super) fn available(&self) -> bool {
         !self.exiting
             && self.attached
             && self.state["core_running"].as_bool() == Some(true)
@@ -1413,7 +1413,9 @@ impl AgentShell {
         if files {
             row = row.child(div().flex_1().min_w_0().child(self.home_receive(cx)));
         }
-        page = page.child(row);
+        page = page
+            .child(row)
+            .child(self.home_forwarding(self.selected_agent_peer(cx), cx));
         if let Some(tasks) = tasks {
             page = page.child(tasks);
         }
