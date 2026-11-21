@@ -64,10 +64,12 @@ jobs:
           ./packaging/macos-x86_64/doctor.sh
       - name: Check native desktop shell
         run: cargo check --locked --no-default-features --features desktop-client --bin p2p-desktop --target ${{ matrix.target }}
+      - name: Check optional file desktop shell
+        run: cargo check --locked --no-default-features --features desktop-files --bin p2p-desktop --target ${{ matrix.target }}
       - name: Build native desktop shell
         run: cargo build --locked --no-default-features --features desktop-client --bin p2p-desktop --target ${{ matrix.target }}
       - name: Build native Agent and management CLI
-        run: cargo build --locked --no-default-features --features agent-full --bin p2p-agent --bin p2p-node --target ${{ matrix.target }}
+        run: cargo build --locked --no-default-features --features agent-standard --bin p2p-agent --bin p2p-node --target ${{ matrix.target }}
       - name: Verify native navigation and isolated Agent restart
         run: python scripts/navigation-native-smoke.py --bin-dir target/${{ matrix.target }}/debug
       - name: Verify Unix IPC peer ownership and permissions
@@ -95,33 +97,42 @@ jobs:
       - name: Run full GUI library regressions
         run: |
           cargo test --locked -p veytrane-desktop-ui --lib --target ${{ matrix.target }}
-          cargo test --locked --features gui --lib --target ${{ matrix.target }}
+          cargo test --locked -p veytrane-files --features desktop --lib desktop:: --target ${{ matrix.target }}
+          cargo test --locked --no-default-features --features node,desktop-files --lib --target ${{ matrix.target }}
       - name: Run native IPv6 loopback regressions with capability diagnostics
-        run: "cargo test --locked --features gui ipv6 --lib --target ${{ matrix.target }} -- --nocapture"
+        run: "cargo test --locked --no-default-features --features node ipv6 --lib --target ${{ matrix.target }} -- --nocapture"
       - name: Run local authenticated Relay regressions (native IPv4/IPv6, no public network)
-        run: "cargo test --locked --features gui relay_ --lib --target ${{ matrix.target }} -- --nocapture"
+        run: "cargo test --locked --no-default-features --features agent-standard relay_ --lib --target ${{ matrix.target }} -- --nocapture"
       - name: Run IPv6 CLI send regression
-        run: "cargo test --locked --test ipv6_cli_send --target ${{ matrix.target }} -- --nocapture"
+        run: "cargo test --locked --no-default-features --features standalone-files --test ipv6_cli_send --target ${{ matrix.target }} -- --nocapture"
       - name: Run verified-TLS signaling CLI transfer and hostname rejection
-        run: "cargo test --locked --test signaling_tls_cli --target ${{ matrix.target }} -- --nocapture"
-      - name: Build optimized native candidate
+        run: "cargo test --locked --no-default-features --features standalone-files --test signaling_tls_cli --target ${{ matrix.target }} -- --nocapture"
+      - name: Build optimized native candidates
         if: matrix.target != 'x86_64-apple-darwin'
         env:
           MACOSX_DEPLOYMENT_TARGET: '13.0'
         run: |
-          cargo build --locked --release --no-default-features --features desktop-client --bin p2p-desktop --target ${{ matrix.target }}
-          cargo build --locked --release --no-default-features --features agent-full --bin p2p-agent --bin p2p-node --target ${{ matrix.target }}
-      - name: Package and verify the literal-head native candidate
+          cargo build --locked --release --no-default-features --features desktop-client --bin p2p-desktop --target ${{ matrix.target }} --target-dir target/desktop-standard
+          cargo build --locked --release --no-default-features --features agent-standard --bin p2p-agent --bin p2p-node --target ${{ matrix.target }} --target-dir target/desktop-standard
+          cargo build --locked --release --no-default-features --features desktop-files --bin p2p-desktop --target ${{ matrix.target }} --target-dir target/desktop-files
+          cargo build --locked --release --no-default-features --features agent-full --bin p2p-agent --bin p2p-node --target ${{ matrix.target }} --target-dir target/desktop-files
+      - name: Package and verify the literal-head native candidates
         if: matrix.target != 'x86_64-apple-darwin'
         run: |
-          python scripts/package-desktop.py --binary target/${{ matrix.target }}/release/${{ matrix.executable }} --target ${{ matrix.target }} --output "${{ runner.temp }}/p2p-desktop-candidate"
+          python scripts/package-desktop.py --binary target/desktop-standard/${{ matrix.target }}/release/${{ matrix.executable }} --target ${{ matrix.target }} --edition standard --output "${{ runner.temp }}/p2p-desktop-candidate"
           python scripts/verify-desktop-package.py "${{ runner.temp }}/p2p-desktop-candidate/candidate.json"
+          python scripts/package-desktop.py --binary target/desktop-files/${{ matrix.target }}/release/${{ matrix.executable }} --target ${{ matrix.target }} --edition files --output "${{ runner.temp }}/p2p-desktop-candidate-files"
+          python scripts/verify-desktop-package.py "${{ runner.temp }}/p2p-desktop-candidate-files/candidate.json"
       - name: Verify the native Intel Mac build and packaging entrypoint
         if: matrix.target == 'x86_64-apple-darwin'
-        run: ./packaging/macos-x86_64/build.sh --output "${{ runner.temp }}/p2p-desktop-candidate"
+        run: |
+          ./packaging/macos-x86_64/build.sh --output "${{ runner.temp }}/p2p-desktop-candidate"
+          ./packaging/macos-x86_64/build.sh --with-files --output "${{ runner.temp }}/p2p-desktop-candidate-files"
       - name: Run GUI Clippy
         if: runner.os == 'Linux'
-        run: cargo clippy --locked --features gui --all-targets --target ${{ matrix.target }} -- -D warnings
+        run: |
+          cargo clippy --locked --no-default-features --features gui --all-targets --target ${{ matrix.target }} -- -D warnings
+          cargo clippy --locked --no-default-features --features node,desktop-files --all-targets --target ${{ matrix.target }} -- -D warnings
       - uses: actions/upload-artifact@v4
         with:
           name: veytrane-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}
@@ -133,10 +144,21 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: veytrane-files-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/p2p-desktop-candidate-files/*.tar.gz
+            ${{ runner.temp }}/p2p-desktop-candidate-files/*.zip
+            ${{ runner.temp }}/p2p-desktop-candidate-files/*.sha256
+            ${{ runner.temp }}/p2p-desktop-candidate-files/candidate.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
       - name: Package lightweight macOS app with license material
         if: runner.os == 'macOS'
         run: |
-          python scripts/package-desktop.py --binary target/${{ matrix.target }}/release/${{ matrix.executable }} --target ${{ matrix.target }} --output "${{ runner.temp }}/p2p-desktop-app-only" --app-only
+          python scripts/package-desktop.py --binary target/desktop-standard/${{ matrix.target }}/release/${{ matrix.executable }} --target ${{ matrix.target }} --output "${{ runner.temp }}/p2p-desktop-app-only" --app-only
           cd "${{ runner.temp }}/p2p-desktop-app-only"
           ditto -c -k --keepParent "Veytrane.app" "veytrane-app-only-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}.zip"
           shasum -a256 "veytrane-app-only-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}.zip" > "veytrane-app-only-${{ matrix.target }}-${{ github.event.pull_request.head.sha || github.sha }}.zip.sha256"

@@ -1,4 +1,4 @@
-//! File-transfer workbench backed by Agent IPC.
+//! Native management workbench backed by Agent IPC.
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 use clap::Parser;
 #[derive(Parser)]
@@ -26,9 +26,19 @@ fn main() {
         return;
     }
     if args.build_info {
+        let files = cfg!(feature = "desktop-files");
         println!(
             "{}",
-            serde_json::json!({"name":"p2p-desktop","version":env!("CARGO_PKG_VERSION"),"build_sha":env!("P2P_BUILD_SHA"),"target":env!("P2P_BUILD_TARGET"),"source_state":env!("P2P_BUILD_STATE")})
+            serde_json::json!({
+                "name": "p2p-desktop",
+                "version": env!("CARGO_PKG_VERSION"),
+                "api_version": veytrane_management::protocol::API_VERSION,
+                "build_sha": env!("P2P_BUILD_SHA"),
+                "target": env!("P2P_BUILD_TARGET"),
+                "source_state": env!("P2P_BUILD_STATE"),
+                "edition": if files { "files" } else { "standard" },
+                "files": files,
+            })
         );
         return;
     }

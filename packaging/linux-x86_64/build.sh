@@ -6,13 +6,16 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd -P)
 TARGET=x86_64-unknown-linux-gnu
+EDITION=standard
 REQUESTED_OUTPUT=
 
 usage() {
     cat <<'USAGE'
-Usage: build.sh [--output PATH]
+Usage: build.sh [--output PATH] [--with-files]
 
   --output PATH  Write outside the repository; paths may contain spaces.
+  --with-files   Build the files edition (desktop-files + agent-full);
+                 default is standard (desktop-client + agent-standard).
 USAGE
 }
 
@@ -26,6 +29,10 @@ while (($#)); do
             REQUESTED_OUTPUT=$2
             shift 2
             ;;
+        --with-files)
+            EDITION=files
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -37,6 +44,19 @@ while (($#)); do
             ;;
     esac
 done
+
+case "$EDITION" in
+    standard)
+        DESKTOP_FEATURES=desktop-client
+        AGENT_FEATURES=agent-standard
+        ;;
+    files)
+        DESKTOP_FEATURES=desktop-files
+        AGENT_FEATURES=agent-full
+        ;;
+esac
+TARGET_DIR="$REPO_ROOT/target/desktop-$EDITION"
+BINARY_DIR="$TARGET_DIR/$TARGET/release"
 
 if DOCTOR_OUTPUT=$("$SCRIPT_DIR/doctor.sh" 2>&1); then
     printf '%s\n' "$DOCTOR_OUTPUT"
@@ -74,10 +94,10 @@ SHORT_SHA=${BUILD_SHA:0:12}
 
 if [[ -z "$REQUESTED_OUTPUT" ]]; then
     STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-    REQUESTED_OUTPUT="${HOME:?HOME must be set}/p2p-file-builds/linux-x86_64-${STAMP}-${SHORT_SHA}"
+    REQUESTED_OUTPUT="${HOME:?HOME must be set}/p2p-file-builds/linux-x86_64-${EDITION}-${STAMP}-${SHORT_SHA}"
     SUFFIX=1
     while [[ -e "$REQUESTED_OUTPUT" || -L "$REQUESTED_OUTPUT" ]]; do
-        REQUESTED_OUTPUT="${HOME:?HOME must be set}/p2p-file-builds/linux-x86_64-${STAMP}-${SHORT_SHA}-${SUFFIX}"
+        REQUESTED_OUTPUT="${HOME:?HOME must be set}/p2p-file-builds/linux-x86_64-${EDITION}-${STAMP}-${SHORT_SHA}-${SUFFIX}"
         SUFFIX=$((SUFFIX + 1))
     done
 fi
@@ -103,12 +123,13 @@ CARGO_BIN=$(command -v cargo)
 
 cd "$REPO_ROOT"
 "$PYTHON_BIN" scripts/package-desktop-tests.py
-"$CARGO_BIN" build --locked --release --no-default-features --features desktop-client --bin p2p-desktop --target "$TARGET"
-"$CARGO_BIN" build --locked --release --no-default-features --features agent-full --bin p2p-agent --bin p2p-node --target "$TARGET"
+CARGO_TARGET_DIR="$TARGET_DIR" "$CARGO_BIN" build --locked --release --no-default-features --features "$DESKTOP_FEATURES" --bin p2p-desktop --target "$TARGET"
+CARGO_TARGET_DIR="$TARGET_DIR" "$CARGO_BIN" build --locked --release --no-default-features --features "$AGENT_FEATURES" --bin p2p-agent --bin p2p-node --target "$TARGET"
 "$PYTHON_BIN" scripts/package-desktop.py \
-    --binary "target/$TARGET/release/p2p-desktop" \
+    --binary "$BINARY_DIR/p2p-desktop" \
     --target "$TARGET" \
-    --output "$OUTPUT_DIR"
+    --output "$OUTPUT_DIR" \
+    --edition "$EDITION"
 "$PYTHON_BIN" scripts/verify-desktop-package.py "$OUTPUT_DIR/candidate.json"
 
 ARCHIVE=$("$PYTHON_BIN" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["archive"])' "$OUTPUT_DIR/candidate.json")

@@ -5,6 +5,22 @@ title Veytrane Windows Build and Deploy
 
 set "P2P_REPO=F:\git\p2p_file"
 set "P2P_TARGET=x86_64-pc-windows-msvc"
+set "P2P_EDITION=standard"
+set "P2P_DESKTOP_FEATURES=desktop-client"
+set "P2P_AGENT_FEATURES=agent-standard"
+if /i "%~1"=="--with-files" (
+    set "P2P_EDITION=files"
+    set "P2P_DESKTOP_FEATURES=desktop-files"
+    set "P2P_AGENT_FEATURES=agent-full"
+) else if not "%~1"=="" (
+    echo Usage: deploy-windows.bat [--with-files]
+    exit /b 2
+)
+if not "%~2"=="" (
+    echo Usage: deploy-windows.bat [--with-files]
+    exit /b 2
+)
+set "P2P_TARGET_DIR=target\desktop-%P2P_EDITION%"
 
 if not exist "%P2P_REPO%\Cargo.toml" (
     echo ERROR: Source checkout was not found at %P2P_REPO%
@@ -100,9 +116,9 @@ python.exe scripts\package-desktop-tests.py
 if errorlevel 1 goto :failed
 
 echo Building the Windows x64 desktop app...
-cargo build --locked --release --no-default-features --features desktop-client --bin p2p-desktop --target %P2P_TARGET%
+cargo build --locked --release --no-default-features --features %P2P_DESKTOP_FEATURES% --bin p2p-desktop --target %P2P_TARGET% --target-dir "%P2P_TARGET_DIR%"
 if errorlevel 1 goto :failed
-cargo build --locked --release --no-default-features --features agent-full --bin p2p-agent --bin p2p-node --target %P2P_TARGET%
+cargo build --locked --release --no-default-features --features %P2P_AGENT_FEATURES% --bin p2p-agent --bin p2p-node --target %P2P_TARGET% --target-dir "%P2P_TARGET_DIR%"
 if errorlevel 1 goto :failed
 
 for /f "usebackq delims=" %%D in (`powershell.exe -NoLogo -NoProfile -Command "[Environment]::GetFolderPath('Desktop')"`) do set "P2P_DESKTOP=%%D"
@@ -111,6 +127,7 @@ if not defined P2P_DESKTOP (
     goto :failed
 )
 set "P2P_PACKAGE_DIR=%P2P_DESKTOP%\p2p-file-win-x64"
+if "%P2P_EDITION%"=="files" set "P2P_PACKAGE_DIR=%P2P_PACKAGE_DIR%-files"
 if exist "%P2P_PACKAGE_DIR%\candidate.json" (
     echo ERROR: Candidate output already exists: %P2P_PACKAGE_DIR%
     echo Move or rename it so prior evidence is not overwritten, then retry.
@@ -118,7 +135,7 @@ if exist "%P2P_PACKAGE_DIR%\candidate.json" (
 )
 
 echo Creating and verifying the Windows candidate package...
-python.exe scripts\package-desktop.py --binary "target\%P2P_TARGET%\release\p2p-desktop.exe" --target %P2P_TARGET% --output "%P2P_PACKAGE_DIR%"
+python.exe scripts\package-desktop.py --binary "%P2P_TARGET_DIR%\%P2P_TARGET%\release\p2p-desktop.exe" --target %P2P_TARGET% --edition %P2P_EDITION% --output "%P2P_PACKAGE_DIR%"
 if errorlevel 1 goto :failed
 python.exe scripts\verify-desktop-package.py "%P2P_PACKAGE_DIR%\candidate.json"
 if errorlevel 1 goto :failed

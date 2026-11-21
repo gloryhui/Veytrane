@@ -27,6 +27,10 @@ MACOS_ARCHES = {
     'aarch64-apple-darwin': ('arm64', 0x0100000c),
     'x86_64-apple-darwin': ('x86_64', 0x01000007),
 }
+EDITION_FEATURES = {
+    'standard': ('desktop-client', 'agent-standard'),
+    'files': ('desktop-files', 'agent-full'),
+}
 REPO = Path(__file__).resolve().parent.parent
 
 
@@ -76,10 +80,24 @@ def native_host(target):
             raise ValueError('Rosetta cannot supply native Mac packaging/validation evidence')
 
 
-def dependency_bundle(destination, features='desktop-client,agent-full'):
-    # Conservatively retain every resolved package, including build/optional and
-    # other-target packages. Do not mislabel this inventory as a linked SBOM.
-    metadata = json.loads(run(['cargo', 'metadata', '--locked', '--no-default-features', '--features', features, '--format-version', '1']))
+def resolved_packages(edition, target):
+    features = EDITION_FEATURES[edition]
+    required = set()
+    for profile in features:
+        tree = run(['cargo', 'tree', '--locked', '-p', 'p2p_file', '--no-default-features',
+                    '--features', profile, '--target', target, '-e', 'normal,build',
+                    '--prefix', 'none', '--format', '{p}'])
+        for line in tree.splitlines():
+            name, version, *_ = line.split()
+            required.add((name, version.removeprefix('v')))
+    metadata = json.loads(run(['cargo', 'metadata', '--locked', '--no-default-features',
+                               '--features', ','.join(features), '--filter-platform', target,
+                               '--format-version', '1']))
+    packages = {(entry['name'], entry['version']): entry for entry in metadata['packages']}
+    return [packages[key] for key in sorted(required)]
+
+
+def dependency_bundle(destination, packages, features, target):
     lock = tomllib.loads((REPO / 'Cargo.lock').read_text(encoding='utf-8'))
     checksums = {(p['name'], p['version']): p.get('checksum') for p in lock['package']}
     records = []
@@ -87,7 +105,7 @@ def dependency_bundle(destination, features='desktop-client,agent-full'):
     sources.mkdir()
     notices = destination / 'licenses'
     notices.mkdir()
-    for package in sorted(metadata['packages'], key=lambda p: (p['name'], p['version'])):
+    for package in packages:
         if package['source'] is None:
             continue
         if not package['source'].startswith('registry+'):
@@ -119,17 +137,23 @@ def dependency_bundle(destination, features='desktop-client,agent-full'):
         if not record['license'] and not package['license_file']:
             raise ValueError(f'missing dependency license declaration: {root.name}')
         records.append(record)
-    (destination / 'dependencies.json').write_text(json.dumps({'scope': 'All Cargo-resolved packages, overinclusive of build/optional/other targets; not a linked-only SBOM.', 'packages': records}, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    inventory = {
+        'scope': 'Cargo normal and build dependencies for the separate desktop and Agent profiles.',
+        'target': target,
+        'cargo_features': list(features),
+        'workspace_packages': [p['name'] for p in packages if p['source'] is None],
+        'packages': records,
+    }
+    (destination / 'dependencies.json').write_text(json.dumps(inventory, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     return len(records)
 
 
-def dependency_licenses(destination):
+def dependency_licenses(destination, packages):
     """Bundle dependency license/notice text without copying full crate sources."""
-    metadata = json.loads(run(['cargo', 'metadata', '--locked', '--no-default-features', '--features', 'desktop-client,agent-full', '--format-version', '1']))
     count = 0
     notices = destination / 'licenses'
     notices.mkdir()
-    for package in sorted(metadata['packages'], key=lambda p: (p['name'], p['version'])):
+    for package in packages:
         if package['source'] is None:
             continue
         if not package['source'].startswith('registry+'):
@@ -227,10 +251,21 @@ def signature_command(executable, parent_env):
     return command, environment
 
 
+def validate_build_info(info, name, edition, build_sha, target, source_state, version):
+    if info.get('name') != name or info.get('api_version') != 1:
+        raise ValueError(f'{name} has an incompatible binary role or API version')
+    if info.get('edition') != edition or info.get('files') is not (edition == 'files'):
+        raise ValueError(f'{name} does not match the requested {edition} edition')
+    expected = dict(build_sha=build_sha, target=target, source_state=source_state, version=version)
+    if any(info.get(key) != value for key, value in expected.items()):
+        raise ValueError(f'{name} was built from a different source, version or target')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--target', choices=TARGETS, required=True)
+    parser.add_argument('--edition', choices=EDITION_FEATURES, default='standard')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--app-only', action='store_true', help='macOS only: output a runnable .app without full dependency source archives')
     parser.add_argument('--allow-dirty', action='store_true', help='local preflight only, explicitly marks non-candidate metadata')
@@ -256,6 +291,14 @@ def main():
     started = time.monotonic()
     info = json.loads(run([str(binary), '--build-info']))
     probe_seconds = time.monotonic() - started
+    version = info.get('version', '')
+    if not isinstance(version, str) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?', version):
+        parser.error('invalid package version')
+    expected_state = 'dirty' if dirty else 'clean'
+    try:
+        validate_build_info(info, 'p2p-desktop', args.edition, head, args.target, expected_state, version)
+    except ValueError as error:
+        parser.error(str(error))
     version_output = run([str(binary), '--version'])
     help_output = run([str(binary), '--help'])
     invalid = subprocess.run([str(binary), '--package-unknown-option'], capture_output=True)
@@ -263,21 +306,19 @@ def main():
     if (info['version'] not in version_output or info['build_sha'] not in version_output
             or '--build-info' not in help_output or invalid.returncode != 2 or extra.returncode != 2):
         parser.error('actual metadata/help/invalid-argument CLI boundary failed')
-    expected_state = 'dirty' if dirty else 'clean'
-    if info['build_sha'] != head or info['target'] != args.target or info['source_state'] != expected_state:
-        parser.error('binary metadata differs from the actual head/target/source state; rebuild it')
     helper_sources = {}
     for name in ('p2p-agent', 'p2p-node'):
         source = binary.with_name(name + ('.exe' if platform.system() == 'Windows' else ''))
         architecture(source, args.target)
         metadata = json.loads(run([str(source), '--build-info']))
-        if any(metadata[key] != info[key] for key in ('build_sha', 'target', 'source_state', 'version')) or metadata.get('api_version') != 1:
-            parser.error(f'{name} metadata differs from desktop; build all three from the same source')
+        try:
+            validate_build_info(metadata, name, args.edition, head, args.target, expected_state, version)
+        except ValueError as error:
+            parser.error(str(error))
         helper_sources[name] = (source, metadata)
-    version = info['version']
-    if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?', version):
-        parser.error('invalid package version')
     stem = f'veytrane-{version}-{args.target}-{head[:12]}'
+    if args.edition == 'files':
+        stem += '-files'
     package = output if args.app_only else output / stem
     if not args.app_only:
         package.mkdir()
@@ -298,7 +339,7 @@ def main():
                            'CFBundleShortVersionString': version.split('-')[0].split('+')[0], 'CFBundleVersion': '1',
                            'LSMinimumSystemVersion': '13.0', 'NSHighResolutionCapable': True,
                            'NSHumanReadableCopyright': 'See bundled LICENSE and THIRD_PARTY_NOTICES.md',
-                           'P2PBuildSHA': head}, stream, sort_keys=True)
+                           'P2PBuildSHA': head, 'P2PEdition': args.edition}, stream, sort_keys=True)
     shutil.copy2(binary, executable)
     if platform.system() != 'Windows':
         executable.chmod(0o755)
@@ -316,7 +357,7 @@ def main():
         shutil.copyfile(REPO / 'assets/icons/app-icon.png', package / 'p2p-file.png')
         (package / 'p2p-file.desktop').write_text(
             '[Desktop Entry]\nType=Application\nName=Veytrane\nExec=p2p-desktop\n'
-            'Icon=p2p-file\nTerminal=false\nCategories=Network;FileTransfer;\n', encoding='utf-8')
+            'Icon=p2p-file\nTerminal=false\nCategories=Network;\n', encoding='utf-8')
         inspection['dynamic_dependencies'] = run(['ldd', str(executable)])
         if 'not found' in inspection['dynamic_dependencies']:
             raise ValueError('unresolved native library')
@@ -360,11 +401,12 @@ def main():
     if resources != package and not args.app_only:
         shutil.copytree(REPO / 'packaging/node', package / 'node')
         shutil.copyfile(REPO / 'scripts/node-host.py', package / 'node-host.py')
+    packages = resolved_packages(args.edition, args.target)
     if args.app_only:
-        dependencies = dependency_licenses(resources)
+        dependencies = dependency_licenses(resources, packages)
     else:
         shutil.copyfile(REPO / 'packaging/RUNNING.md', package / 'RUNNING.md')
-        dependencies = dependency_bundle(resources)
+        dependencies = dependency_bundle(resources, packages, EDITION_FEATURES[args.edition], args.target)
     if platform.system() == 'Darwin':
         subprocess.run(['codesign', '--force', '--sign', '-', str(app)], check=True)
         subprocess.run(['codesign', '--verify', '--strict', str(app)], check=True)
@@ -375,13 +417,14 @@ def main():
         signing = {'status': 'ad-hoc (no developer certificate)', 'notarization': 'not notarized', 'certificate': None}
     if args.app_only:
         app_bytes = sum(item.stat().st_size for item in app.rglob('*') if item.is_file())
-        print(json.dumps({'result': 'APP_ONLY', 'app': str(app), 'build_sha': head,
+        print(json.dumps({'result': 'APP_ONLY', 'app': str(app), 'build_sha': head, 'edition': args.edition,
                           'target': args.target, 'app_bytes': app_bytes,
                           'dependency_packages_with_license_declarations': dependencies,
                           'signing': signing}, ensure_ascii=False))
         return
     (package / 'native-inspection.json').write_text(json.dumps(inspection, indent=2) + '\n', encoding='utf-8')
-    data = dict(schema='p2p-desktop-package/v2', **info, minimum_os=TARGETS[args.target][1],
+    data = dict(schema='p2p-desktop-package/v3', **info, minimum_os=TARGETS[args.target][1],
+                cargo_features=list(EDITION_FEATURES[args.edition]),
                 candidate=not dirty, signing=signing, helpers=helpers, license_material=resources.relative_to(package).as_posix(), created_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 executable=executable.relative_to(package).as_posix(), executable_bytes=executable.stat().st_size,
                 executable_sha256=digest(executable), dependency_packages=dependencies,

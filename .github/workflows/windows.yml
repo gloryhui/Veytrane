@@ -14,9 +14,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: dtolnay/rust-toolchain@stable
+      - name: Check the standard Agent and management CLI
+        run: cargo check --locked --no-default-features --features agent-standard --bin p2p-agent --bin p2p-node
       - name: Run all Rust tests on Windows
-        run: cargo test --all-targets --no-fail-fast
+        run: cargo test --locked --no-default-features --features node --all-targets --no-fail-fast
       - name: Run native IPv6 regressions with capability diagnostics
-        run: cargo test ipv6 --all-targets -- --nocapture
+        run: cargo test --locked --no-default-features --features node ipv6 --all-targets -- --nocapture
       - name: Run local authenticated Relay regressions
-        run: cargo test relay_ --all-targets -- --nocapture
+        run: cargo test --locked --no-default-features --features node relay_ --all-targets -- --nocapture

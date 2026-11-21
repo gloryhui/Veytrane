@@ -7,14 +7,17 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd -P)
 TARGET=x86_64-apple-darwin
 APP_ONLY=0
+EDITION=standard
 REQUESTED_OUTPUT=
 
 usage() {
     cat <<'USAGE'
-Usage: build.sh [--output PATH] [--app-only]
+Usage: build.sh [--output PATH] [--app-only] [--with-files]
 
   --output PATH  Write outside the repository; paths may contain spaces.
   --app-only     Create a lightweight local .app, not a complete audit candidate.
+  --with-files   Build the files edition (desktop-files + agent-full);
+                 default is standard (desktop-client + agent-standard).
 USAGE
 }
 
@@ -32,6 +35,10 @@ while (($#)); do
             APP_ONLY=1
             shift
             ;;
+        --with-files)
+            EDITION=files
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -43,6 +50,19 @@ while (($#)); do
             ;;
     esac
 done
+
+case "$EDITION" in
+    standard)
+        DESKTOP_FEATURES=desktop-client
+        AGENT_FEATURES=agent-standard
+        ;;
+    files)
+        DESKTOP_FEATURES=desktop-files
+        AGENT_FEATURES=agent-full
+        ;;
+esac
+TARGET_DIR="$REPO_ROOT/target/desktop-$EDITION"
+BINARY_DIR="$TARGET_DIR/$TARGET/release"
 
 "$SCRIPT_DIR/doctor.sh"
 
@@ -69,10 +89,10 @@ SHORT_SHA=${BUILD_SHA:0:12}
 
 if [[ -z "$REQUESTED_OUTPUT" ]]; then
     STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-    REQUESTED_OUTPUT="${HOME:?HOME must be set}/p2p-file-builds/macos-x86_64-${STAMP}-${SHORT_SHA}"
+    REQUESTED_OUTPUT="${HOME:?HOME must be set}/p2p-file-builds/macos-x86_64-${EDITION}-${STAMP}-${SHORT_SHA}"
     SUFFIX=1
     while [[ -e "$REQUESTED_OUTPUT" ]]; do
-        REQUESTED_OUTPUT="${HOME:?HOME must be set}/p2p-file-builds/macos-x86_64-${STAMP}-${SHORT_SHA}-${SUFFIX}"
+        REQUESTED_OUTPUT="${HOME:?HOME must be set}/p2p-file-builds/macos-x86_64-${EDITION}-${STAMP}-${SHORT_SHA}-${SUFFIX}"
         SUFFIX=$((SUFFIX + 1))
     done
 fi
@@ -98,15 +118,16 @@ export MACOSX_DEPLOYMENT_TARGET=13.0
 
 cd "$REPO_ROOT"
 "$PYTHON_BIN" scripts/package-desktop-tests.py
-cargo build --locked --release --no-default-features --features desktop-client --bin p2p-desktop --target "$TARGET"
-cargo build --locked --release --no-default-features --features agent-full --bin p2p-agent --bin p2p-node --target "$TARGET"
+CARGO_TARGET_DIR="$TARGET_DIR" cargo build --locked --release --no-default-features --features "$DESKTOP_FEATURES" --bin p2p-desktop --target "$TARGET"
+CARGO_TARGET_DIR="$TARGET_DIR" cargo build --locked --release --no-default-features --features "$AGENT_FEATURES" --bin p2p-agent --bin p2p-node --target "$TARGET"
 
 if (( APP_ONLY )); then
     echo "APP-ONLY: 本机轻量运行包，不是完整审计候选。"
     "$PYTHON_BIN" scripts/package-desktop.py \
-        --binary "target/$TARGET/release/p2p-desktop" \
+        --binary "$BINARY_DIR/p2p-desktop" \
         --target "$TARGET" \
         --output "$OUTPUT_DIR" \
+        --edition "$EDITION" \
         --app-only
     echo "build SHA: $BUILD_SHA"
     echo "target: $TARGET"
@@ -119,9 +140,10 @@ if (( APP_ONLY )); then
 fi
 
 "$PYTHON_BIN" scripts/package-desktop.py \
-    --binary "target/$TARGET/release/p2p-desktop" \
+    --binary "$BINARY_DIR/p2p-desktop" \
     --target "$TARGET" \
-    --output "$OUTPUT_DIR"
+    --output "$OUTPUT_DIR" \
+    --edition "$EDITION"
 "$PYTHON_BIN" scripts/verify-desktop-package.py "$OUTPUT_DIR/candidate.json"
 
 ARCHIVE=$("$PYTHON_BIN" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["archive"])' "$OUTPUT_DIR/candidate.json")

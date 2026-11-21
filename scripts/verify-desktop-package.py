@@ -8,6 +8,11 @@ import tarfile
 import tempfile
 import zipfile
 
+EDITION_FEATURES = {
+    'standard': ['desktop-client', 'agent-standard'],
+    'files': ['desktop-files', 'agent-full'],
+}
+
 
 def sha(path):
     with path.open('rb') as stream:
@@ -21,11 +26,27 @@ def relative(name):
     return path
 
 
+def verify_edition(info):
+    edition = info.get('edition')
+    if edition not in EDITION_FEATURES or info.get('cargo_features') != EDITION_FEATURES[edition]:
+        raise ValueError('unknown edition or mismatched Cargo features')
+    files = edition == 'files'
+    for name, metadata in [('p2p-desktop', info)] + [
+        (name, helper['metadata']) for name, helper in info.get('helpers', {}).items()
+    ]:
+        if (metadata.get('name') != name or metadata.get('api_version') != 1
+                or metadata.get('edition') != edition or metadata.get('files') is not files):
+            raise ValueError('binary role, API or edition metadata mismatch: ' + name)
+
+
 def verify(candidate, require_candidate=True):
     candidate = Path(candidate).resolve()
     info = json.loads(candidate.read_text(encoding='utf-8'))
     if require_candidate and (not info['candidate'] or info['source_state'] != 'clean'):
         raise ValueError('preflight is not a final candidate')
+    schema = info.get('schema')
+    if schema == 'p2p-desktop-package/v3':
+        verify_edition(info)
     archive = candidate.parent / relative(info['archive'])
     if sha(archive) != info['archive_sha256'] or archive.stat().st_size != info['archive_bytes']:
         raise ValueError('archive checksum/size mismatch')
@@ -61,7 +82,7 @@ def verify(candidate, require_candidate=True):
         binary = package / relative(info['executable'])
         if binary.stat().st_size != info['executable_bytes'] or sha(binary) != info['executable_sha256']:
             raise ValueError('executable checksum/size mismatch')
-        if info.get('schema') == 'p2p-desktop-package/v2':
+        if schema in ('p2p-desktop-package/v2', 'p2p-desktop-package/v3'):
             if set(info.get('helpers', {})) != {'p2p-agent', 'p2p-node'}:
                 raise ValueError('Agent and management CLI are required')
             for name, helper in info['helpers'].items():
@@ -81,13 +102,23 @@ def verify(candidate, require_candidate=True):
         if files != expected | {'SHA256SUMS'}:
             raise ValueError('unlisted/missing package content')
         resources = package / relative(info['license_material']) if info['license_material'] != '.' else package
-        dependencies = json.loads((resources / 'dependencies.json').read_text(encoding='utf-8'))['packages']
+        inventory = json.loads((resources / 'dependencies.json').read_text(encoding='utf-8'))
+        if schema == 'p2p-desktop-package/v3':
+            if (inventory.get('target') != info['target']
+                    or inventory.get('cargo_features') != info['cargo_features']
+                    or ('veytrane-files' in inventory.get('workspace_packages', [])) != info['files']):
+                raise ValueError('dependency inventory does not match the edition')
+        dependencies = inventory['packages']
         if len(dependencies) != info['dependency_packages']:
             raise ValueError('dependency inventory mismatch')
         for item in dependencies:
             if sha(resources / relative(item['source_archive'])) != item['source_sha256']:
                 raise ValueError('original dependency source checksum mismatch')
-    return {'result': 'PASS', 'build_sha': info['build_sha'], 'target': info['target'], 'archive_sha256': info['archive_sha256'], 'dependency_packages': len(dependencies)}
+    result = {'result': 'PASS', 'build_sha': info['build_sha'], 'target': info['target'],
+              'archive_sha256': info['archive_sha256'], 'dependency_packages': len(dependencies)}
+    if schema == 'p2p-desktop-package/v3':
+        result['edition'] = info['edition']
+    return result
 
 
 def main():

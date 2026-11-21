@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param(
     [string]$Output,
+    [switch]$WithFiles,
     [switch]$Help
 )
 
@@ -9,9 +10,17 @@ $ErrorActionPreference = 'Stop'
 $Target = 'x86_64-pc-windows-msvc'
 $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $HelperPath = Join-Path $PSScriptRoot 'desktop-build-env.ps1'
+$Edition = 'standard'
+$DesktopFeatures = 'desktop-client'
+$AgentFeatures = 'agent-standard'
+if ($WithFiles) {
+    $Edition = 'files'
+    $DesktopFeatures = 'desktop-files'
+    $AgentFeatures = 'agent-full'
+}
 
 if ($Help) {
-    Write-Host 'Usage: build.ps1 [-Output PATH]'
+    Write-Host 'Usage: build.ps1 [-Output PATH] [-WithFiles]'
     Write-Host 'Builds a native x64 Windows GUI candidate outside the repository.'
     return
 }
@@ -31,10 +40,10 @@ function Resolve-BuildOutput {
     if ([string]::IsNullOrWhiteSpace($RequestedPath)) {
         $stamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ', [Globalization.CultureInfo]::InvariantCulture)
         $parent = Join-Path $env:USERPROFILE 'p2p-file-builds'
-        $resolved = [IO.Path]::GetFullPath((Join-Path $parent ('windows-x64-' + $stamp + '-' + $CommitPrefix)))
+        $resolved = [IO.Path]::GetFullPath((Join-Path $parent ('windows-x64-' + $Edition + '-' + $stamp + '-' + $CommitPrefix)))
         $suffix = 1
         while (Test-Path -LiteralPath $resolved) {
-            $resolved = [IO.Path]::GetFullPath((Join-Path $parent ('windows-x64-' + $stamp + '-' + $CommitPrefix + '-' + [string]$suffix)))
+            $resolved = [IO.Path]::GetFullPath((Join-Path $parent ('windows-x64-' + $Edition + '-' + $stamp + '-' + $CommitPrefix + '-' + [string]$suffix)))
             $suffix++
         }
     }
@@ -148,14 +157,15 @@ try {
     $packageTests = Join-Path $RepoRoot 'scripts\package-desktop-tests.py'
     $packageScript = Join-Path $RepoRoot 'scripts\package-desktop.py'
     $verifyScript = Join-Path $RepoRoot 'scripts\verify-desktop-package.py'
-    $binaryPath = Join-Path $RepoRoot ('target\' + $Target + '\release\p2p-desktop.exe')
+    $targetDir = Join-Path $RepoRoot ('target\desktop-' + $Edition)
+    $binaryPath = Join-Path $targetDir ($Target + '\release\p2p-desktop.exe')
 
     Push-Location $RepoRoot
     try {
         Invoke-NativeChecked -Executable $python.Path $packageTests
-        Invoke-NativeChecked -Executable $cargo.Source 'build' '--locked' '--release' '--no-default-features' '--features' 'desktop-client' '--bin' 'p2p-desktop' '--target' $Target
-        Invoke-NativeChecked -Executable $cargo.Source 'build' '--locked' '--release' '--no-default-features' '--features' 'agent-full' '--bin' 'p2p-agent' '--bin' 'p2p-node' '--target' $Target
-        Invoke-NativeChecked -Executable $python.Path $packageScript '--binary' $binaryPath '--target' $Target '--output' $outputPath
+        Invoke-NativeChecked -Executable $cargo.Source 'build' '--locked' '--release' '--no-default-features' '--features' $DesktopFeatures '--bin' 'p2p-desktop' '--target' $Target '--target-dir' $targetDir
+        Invoke-NativeChecked -Executable $cargo.Source 'build' '--locked' '--release' '--no-default-features' '--features' $AgentFeatures '--bin' 'p2p-agent' '--bin' 'p2p-node' '--target' $Target '--target-dir' $targetDir
+        Invoke-NativeChecked -Executable $python.Path $packageScript '--binary' $binaryPath '--target' $Target '--edition' $Edition '--output' $outputPath
         $candidatePath = Join-Path $outputPath 'candidate.json'
         Invoke-NativeChecked -Executable $python.Path $verifyScript $candidatePath
     }
@@ -178,6 +188,7 @@ try {
 
     Write-Host ('build SHA: ' + [string]$candidate.build_sha)
     Write-Host ('target: ' + [string]$candidate.target)
+    Write-Host ('edition: ' + [string]$candidate.edition)
     Write-Host ('artifact path: ' + $archivePath)
     Write-Host ('archive SHA256: ' + [string]$candidate.archive_sha256)
     Write-Host ('executable path: ' + $packagedExecutable)

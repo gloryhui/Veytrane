@@ -152,12 +152,27 @@ class Boundaries(unittest.TestCase):
                        'manifest_path': str(crate / 'Cargo.toml'), 'license': 'MIT', 'license_file': None}
             output = root / 'Resources'
             output.mkdir()
-            with patch.object(pack, 'run', return_value=json.dumps({'packages': [package]})):
-                count = pack.dependency_licenses(output)
+            count = pack.dependency_licenses(output, [package])
             self.assertEqual(count, 1)
             self.assertEqual((output / 'licenses' / 'sample-1.0.0' / 'LICENSE-MIT').read_text(encoding='utf-8'), 'MIT terms')
             self.assertFalse((output / 'licenses' / 'sample-1.0.0' / 'README.md').exists())
             self.assertFalse((output / 'third-party-sources').exists())
+
+    def test_edition_and_binary_role_bind_real_metadata_to_package(self):
+        sha = 'a' * 40
+        target = 'aarch64-apple-darwin'
+        info = dict(name='p2p-desktop', api_version=1, build_sha=sha, target=target,
+                    version='0.1.0', source_state='clean', edition='standard', files=False)
+        pack.validate_build_info(info, 'p2p-desktop', 'standard', sha, target, 'clean', '0.1.0')
+        with self.assertRaisesRegex(ValueError, 'requested files edition'):
+            pack.validate_build_info(info, 'p2p-desktop', 'files', sha, target, 'clean', '0.1.0')
+        with self.assertRaisesRegex(ValueError, 'binary role'):
+            pack.validate_build_info(info, 'p2p-agent', 'standard', sha, target, 'clean', '0.1.0')
+        info['cargo_features'] = list(pack.EDITION_FEATURES['standard'])
+        agent = dict(info, name='p2p-agent', edition='files', files=True)
+        info['helpers'] = {'p2p-agent': {'metadata': agent}}
+        with self.assertRaisesRegex(ValueError, 'edition metadata mismatch: p2p-agent'):
+            verify.verify_edition(info)
 
     def test_preflight_cannot_be_accepted_and_archive_corruption_is_detected(self):
         with tempfile.TemporaryDirectory() as root:
