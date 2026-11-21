@@ -1,5 +1,7 @@
 # Mac↔Windows 单设备重连实机验收
 
+报告中的公网 IP 已脱敏，端口保留。
+
 日期：2026-11-16，Asia/Shanghai。接续 `WINDOWS_RECOVERY_UPGRADE_20261116.md`，本次用户明确重新授权 UAC。未启用 Relay、未重启 Agent 或其他服务。
 
 ## 操作与结果
@@ -24,7 +26,7 @@
 | Ubuntu NodeId | `cbd82de8be77d5f813fc3ff92663b2ac` |
 | Agent owner | 唯一 PID 4460；管理员采集前核对实际加载的既有版本路径，没有启动第二个 owner |
 | epoch / revision | `814df6c9f93513f71ed2736e8b46e9df` / 13，前后不变 |
-| 信令 | 原 `47.101.183.194:8900`，TCP |
+| 信令 | 原 `SIGNAL_IPV4:8900`，TCP |
 | Relay | `relay_server=null`，前后均未配置 |
 | 配置摘要 | identity.key、admin.token、node.json、tasks.json、导航 config.json/私有 HTML、installed.json、previous-install.json 共八项全部相同 |
 | 转发 | 收尾原 17 项均 listening、peer_ready；授权和映射配置未修改 |
@@ -41,8 +43,8 @@
 | --- | --- |
 | 19:01:04.014154 | Windows 向原信令服务器发送 Lookup |
 | 19:01:04.040504 | Windows 收到 Mac PeerCandidates；本轮 token SHA256 前 12 位为 `3b235cd32068` |
-| 19:01:04.047970 | `61.52.86.166:60670` → `192.168.100.169:56297`，完整同 token PUNCH |
-| 19:01:04.246703、.247196 | Windows primary `56297` → Mac 公网候选 `61.52.86.166:60670`，两个完整同 token PUNCH |
+| 19:01:04.047970 | `MAC_PUBLIC_IPV4:60670` → `192.168.100.169:56297`，完整同 token PUNCH |
+| 19:01:04.246703、.247196 | Windows primary `56297` → Mac 公网候选 `MAC_PUBLIC_IPV4:60670`，两个完整同 token PUNCH |
 | 19:01:04.250325、.251006 | Mac 公网地址 → Windows primary，再收到两个完整同 token PUNCH |
 
 共保留 **8 个完整 PUNCH**：Mac→Windows 3 个，Windows→Mac 公网候选 2 个，Windows→另外三个 IPv4 Host 候选各 1 个。八个包的 token 摘要与本轮 PeerCandidates 完全一致。PUNCH 的剩余 16 字节是随机填充，不能误当作 NodeId 或 generation。
@@ -50,19 +52,19 @@
 本轮收到的 Mac IPv4 候选为：
 
 ```text
-61.52.86.166:60670
+MAC_PUBLIC_IPV4:60670
 172.30.215.132:60085
 192.168.1.50:60085
 198.18.0.1:60085
 ```
 
-另有多项 IPv6 候选，包括 `2408:8221:321:b8f0:...:57842` 和 `[fdfe:dcba:9876::1]:57842`。本轮包观察限于 IPv4；没有为测试修改候选、固定公网端口或调整 IPv6 路由。
+另有多项 IPv6 候选，包括 `[MAC_PUBLIC_IPV6]:57842` 和 `[fdfe:dcba:9876::1]:57842`。本轮包观察限于 IPv4；没有为测试修改候选、固定公网端口或调整 IPv6 路由。
 
-Windows 原 primary 绑定为 `0.0.0.0:56297`，此时公布的公网候选仍为 `222.137.31.236:12370`。实际 IP 层出站源为 `192.168.100.169:56297`，不能用它推断到 Mac 的 NAT 后源端口。181 次端点采样均保留 primary；此次没有观察到新 recovery socket，捕获学习到的本地 PUNCH 端口也只有 56297。
+Windows 原 primary 绑定为 `0.0.0.0:56297`，此时公布的公网候选仍为 `WINDOWS_PUBLIC_IPV4:12370`。实际 IP 层出站源为 `192.168.100.169:56297`，不能用它推断到 Mac 的 NAT 后源端口。181 次端点采样均保留 primary；此次没有观察到新 recovery socket，捕获学习到的本地 PUNCH 端口也只有 56297。
 
 ## QUIC 与认证事件
 
-同轮公网 PUNCH 使用的双向地址对 `192.168.100.169:56297` ↔ `61.52.86.166:60670` 上，原始包保留了 **3 个 UDP datagram、5 个完整 QUIC v1 长报头包**：
+同轮公网 PUNCH 使用的双向地址对 `192.168.100.169:56297` ↔ `MAC_PUBLIC_IPV4:60670` 上，原始包保留了 **3 个 UDP datagram、5 个完整 QUIC v1 长报头包**：
 
 | IP 层包时间 | 方向 | UDP 内的 QUIC 包 |
 | --- | --- | --- |

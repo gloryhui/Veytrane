@@ -1,5 +1,7 @@
 # Windows Agent 升级与 Mac 路径取证结果
 
+报告中的公网 IP 已脱敏，端口保留。
+
 核验日期：2026-11-16，Asia/Shanghai。本文接续 `WINDOWS_RECOVERY_VALIDATION_20261116.md` 的 17:10 阶段记录；不包含身份私钥、密码、原始打洞 token 或完整私有配置。
 
 后续 19:01 的受控单设备重连已完成，详见 `WINDOWS_MAC_CONTROLLED_RECONNECT_20261116.md`：同轮 PUNCH token、QUIC Initial/Handshake 和 Windows 侧 generation 100 已对齐，原 Ubuntu TCP 流 210 个心跳连续、正常退出。本报告的 UAC 取消和证据缺口属于前序窗口，按各节时间理解。
@@ -45,18 +47,18 @@ p2p-node.exe   d394760b3d30eb290df3dda381bfa134aafd559938bc7a78274eb2793186a2d6
 
 Agent 观察窗口为 17:25:23.133–17:26:24.559，共 1116 条实际事件；最后一条事件早于默认 90 秒截止，不表示观察期限被延长或日志达到上限。日志中共有 17 次成功 watch 注册及其 17 次 drop，7 个不同的 token/generation 组。
 
-Windows 此轮公布的 IPv4 primary 候选端口为 `56297`，公网候选 `222.137.31.236:12370`，Host 候选包括 `172.30.253.231:56297`、`172.31.192.1:56297`、`192.168.100.169:56297`。primary IPv6 socket 为 `[::]:56296`，公布的 IPv6 listen 仅 `[::1]:56296`。这些是采样值，未写入配置。
+Windows 此轮公布的 IPv4 primary 候选端口为 `56297`，公网候选 `WINDOWS_PUBLIC_IPV4:12370`，Host 候选包括 `172.30.253.231:56297`、`172.31.192.1:56297`、`192.168.100.169:56297`。primary IPv6 socket 为 `[::]:56296`，公布的 IPv6 listen 仅 `[::1]:56296`。这些是采样值，未写入配置。
 
 Windows 本轮收到并用于 Mac attempt 的 IPv4 候选：
 
 ```text
-61.52.86.166:53542
+MAC_PUBLIC_IPV4:53542
 172.30.215.132:53817
 192.168.1.50:53817
 198.18.0.1:53817
 ```
 
-Mac IPv6 候选为多项 `2408:8221:321:b8f0:...:61972` 及 `[fdfe:dcba:9876::1]:61972`。这是 Windows attempt 实际使用的候选集合，不等于已核实 Mac 此轮收到了哪些 Windows 候选；没有 Mac 侧或信令服务端的同轮接收证据。
+Mac IPv6 候选为多项 `[MAC_PUBLIC_IPV6]:61972` 及 `[fdfe:dcba:9876::1]:61972`。这是 Windows attempt 实际使用的候选集合，不等于已核实 Mac 此轮收到了哪些 Windows 候选；没有 Mac 侧或信令服务端的同轮接收证据。
 
 代表性同轮记录如下。表中摘要为完整 16 字节 token 的 SHA256 前 12 个 hex，只用于证据对齐：
 
@@ -66,7 +68,7 @@ Mac generation 6 的四路 attempt 始于 17:25:55.264，generation 7 始于 17:
 | --- | --- | --- | --- | --- |
 | Mac / 6 | `9b4ec4e89952` | `56297` 与 `60784` 各 120 次成功，共 240 次；同一 token、primary route 1 / recovery route 2 | `[::]:56296` 与 `[::]:60785` 各 12 次失败，均 NetworkUnreachable / 10051 | Mac PUNCH 入站 0；12 次 IPv6 QUIC dial 开始后均失败；无 winner |
 | Mac / 7 | `b7e60f536003` | 两个 IPv4 socket 各 120 次成功，共 240 次，仍为同一轮 token 的两条路径 | 两个 IPv6 socket 各 12 次失败，均 NetworkUnreachable / 10051 | Mac PUNCH 入站 0；12 次 IPv6 QUIC dial 均失败；无 winner |
-| Ubuntu / 2 | `8f0e57f9372a` | primary `56297` 共 7 次成功调用 | 本次获胜为 IPv4 | 来自 `39.151.73.27:17948` 的两次 matched PUNCH（17:25:24.233 / .241），随后 QUIC ready、primary route 1 direct winner |
+| Ubuntu / 2 | `8f0e57f9372a` | primary `56297` 共 7 次成功调用 | 本次获胜为 IPv4 | 来自 `UBUNTU_PUBLIC_IPV4:17948` 的两次 matched PUNCH（17:25:24.233 / .241），随后 QUIC ready、primary route 1 direct winner |
 
 `send_to ok` 只证明 Windows socket 接受发送调用，不证明包离开网卡或到达 Mac。Mac IPv4 路径没有取得正确 token 的 PUNCH 回应，未进入 IPv4 QUIC dial；IPv6 路径的本机发送已明确返回 10051，不能把它归类为远端身份认证拒绝。
 
@@ -94,12 +96,12 @@ Windows 17:45 样本的 Mac generation 53 仍 failed；17:54:44 样本已到 gen
 
 | IP 层流向 | 包数 | 当前能够确认的范围 |
 | --- | --- | --- |
-| `192.168.100.169:56297` → `61.52.86.166:65243` | 6 | 与 Mac 恢复状态一致的远端流；对端端口已不同于历史候选 53542 |
-| `61.52.86.166:65243` → `192.168.100.169:56297` | 7 | 反向 UDP 已到达 Windows IP 观察点；未获得本轮 token 或连接 ID 到 peer 的直接关联 |
-| `192.168.100.169:56297` → `39.151.73.27:17948` | 52 | 既有 Ubuntu 路径的同窗双向流量 |
-| `39.151.73.27:17948` → `192.168.100.169:56297` | 53 | Ubuntu 心跳期间保持活动 |
-| `192.168.100.169:56297` → `111.206.174.2:3478` | 3 | STUN 类流量 |
-| `192.168.100.169:54692` ↔ `47.101.183.194:8900` | 各 3 | 生产 SignalMessage 解码得到 18:05:23.610 Ping / 18:05:23.637 Pong |
+| `192.168.100.169:56297` → `MAC_PUBLIC_IPV4:65243` | 6 | 与 Mac 恢复状态一致的远端流；对端端口已不同于历史候选 53542 |
+| `MAC_PUBLIC_IPV4:65243` → `192.168.100.169:56297` | 7 | 反向 UDP 已到达 Windows IP 观察点；未获得本轮 token 或连接 ID 到 peer 的直接关联 |
+| `192.168.100.169:56297` → `UBUNTU_PUBLIC_IPV4:17948` | 52 | 既有 Ubuntu 路径的同窗双向流量 |
+| `UBUNTU_PUBLIC_IPV4:17948` → `192.168.100.169:56297` | 53 | Ubuntu 心跳期间保持活动 |
+| `192.168.100.169:56297` → `STUN_IPV4:3478` | 3 | STUN 类流量 |
+| `192.168.100.169:54692` ↔ `SIGNAL_IPV4:8900` | 各 3 | 生产 SignalMessage 解码得到 18:05:23.610 Ping / 18:05:23.637 Pong |
 
 捕获内 32 次 runtime 样本的 Mac 均为 generation 96、connected、inbound/outbound trusted，Ubuntu 均为 generation 2 双向 trusted/connected；epoch 始终 `814df6c9f93513f71ed2736e8b46e9df`。同窗 Agent 只有 primary IPv4 `0.0.0.0:56297`、primary IPv6 `[::]:56296` 及回环 UDP 53314，未见 recovery socket 残留。包证据支持当前 primary IPv4 路径活动，但没有记录 generation 96 的 QUIC winner 事件，不能据此重建当时的握手竞争顺序。
 
