@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="docs/assets/readme/veytrane-cover.svg" alt="Veytrane — Trusted devices. Connected. 通过信令发现，将可信设备连接为加密通信网络。" width="100%">
+  <img src="docs/assets/readme/veytrane-cover.svg" alt="Veytrane — 可信设备间的加密 TCP 端口转发。" width="100%">
 </p>
 
 <p align="center">
-  <strong>可信设备，跨网络互联。</strong><br>
-  通过经过认证的端到端连接访问远端授权 TCP 服务，可选原生文件收发。
+  <strong>远程直连，把授权的 TCP 服务映射到本机。</strong><br>
+  两端只需运行 Agent，一端有可达的 UDP 地址即可无信令直连。
 </p>
 
 <p align="center">
-  <a href="#使用前提">使用前提</a> ·
   <a href="#快速开始">快速开始</a> ·
+  <a href="#使用前提">网络条件</a> ·
   <a href="#系统架构">系统架构</a> ·
   <a href="architecture/layer-review.html">交互架构图</a> ·
   <a href="#部署与平台">部署与平台</a> ·
@@ -18,11 +18,65 @@
 
 # Veytrane
 
-Veytrane 是用 Rust 构建的可信设备互联软件。设备可以位于不同家庭、办公室或云网络，通过局域网发现、已知 IP 或可选信令取得连接信息，建立经过认证的 QUIC 通道，再按资源授权访问彼此。
-
-标准版通过端口转发访问远端授权的 Web 面板、SSH、文件共享等 TCP 服务。原生文件和目录传输随文件增强版提供，需要两端分别启用。桌面、命令行和 Web 管理同一个后台 Agent，共享身份、连接和配置。
+Veytrane 是用 Rust 构建的跨网 TCP 端口转发工具。把家里、办公室或云主机上的 SSH、Web 面板和文件共享服务映射到本机回环端口，通过经过认证的 QUIC 通道访问。标准版即可使用。原生桌面、文件收发和自建信令按需部署。
 
 **Rust · QUIC / TLS 1.3 · Ed25519 · P2PN v2 · MIT**
+
+## 快速开始
+
+以下以个人电脑通过公网直连远端 Linux、访问 SSH 为例。可以把 SSH 换成远端任意明确授权的 TCP 服务。
+
+### 1. 两端构建并启动 Agent
+
+macOS / Linux 需要 Rust / Cargo **1.90.0 或更高版本**及系统编译工具链。两端使用同一源码版本，各执行一次：
+
+```sh
+git clone https://github.com/gloryhui/Veytrane.git
+cd Veytrane
+cargo build --locked --release --bin p2p-agent --bin p2p-node
+
+# 仅首次初始化；已有节点沿用原数据目录
+target/release/p2p-node init
+target/release/p2p-agent --no-navigation
+```
+
+这条命令构建标准版 Agent 和管理 CLI。日常只运行 `p2p-agent`。`p2p-node` 用于配置和排查，桌面和文件增强版可按需安装。
+
+### 2. 远程 IP 直连
+
+**主动连接的一端须能访问对端 Agent 的 UDP 端口。** 公网 IPv4 位于路由器时，将一个公网 UDP 端口映射到 Agent。使用公网 IPv6 时，确认路由可达并允许对应 UDP 入站。
+
+在远端另开终端，通过 `p2p-node status` 获取完整 NodeId，通过 `p2p-node nearby` 查看实际 UDP 监听地址。默认监听端口由系统分配。长期使用公网入口时，建议先按[直连配置说明](docs/SIGNAL_FREE_CONNECTIVITY.md#持久配置与端口)固定 `direct.listen_port`，再配置防火墙或路由器映射。对外只需开放这一条 Agent UDP 入口，SSH 和本机管理页继续使用各自的回环地址。
+
+首次认证前，在远端读取 `p2p-node config` 返回的当前 revision，再通过标准输入设置远程访问密码。下面的 `0` 适用于刚初始化、尚未改过配置的节点，命令需要 Python 3 隐藏输入：
+
+```sh
+python3 -c 'import getpass,sys;sys.stdout.write(getpass.getpass("远端节点密码："))' \
+  | target/release/p2p-node password --revision 0
+```
+
+在客户端用远端完整 NodeId、可达 IP 和 **Agent UDP 端口**连接。替换示例里的 ID 和地址，IPv6 使用 `[地址]:端口`：
+
+```sh
+python3 -c 'import getpass,sys;sys.stdout.write(getpass.getpass("远端节点密码："))' \
+  | target/release/p2p-node connect-address '远端完整NodeId' '203.0.113.10:9000' --password-stdin
+```
+
+有可达地址时，`signal_server` 留空即可。双方都在 NAT / CGNAT 后且缺少可达 UDP 入口时，按[网络条件](#使用前提)选择信令打洞或 Relay。
+
+### 3. 发布服务并验证一条转发
+
+首次配置可在两个节点分别临时运行以下命令。打开该节点的回环管理地址 `http://127.0.0.1:8787/`，使用命令输出所指文件内的管理 token。远端无桌面时，可通过既有 SSH 隧道访问远端回环管理页。
+
+```sh
+target/release/p2p-node web --listen 127.0.0.1:8787
+```
+
+1. **远端新增服务**。服务 ID 填 `ssh`，目标填远端可达的 `127.0.0.1:22`，允许设备填客户端完整 NodeId，启用并保存。
+2. **客户端新增转发**。输入远端完整 NodeId，查询授权服务。转发规则的服务 ID 填 `ssh`，本地监听填 `127.0.0.1:2222`，勾选「启用」和「自动启动」并保存。需要重启后继续直连时，在「保存直连地址到草稿」后提交配置，并按需保存可信设备授权。
+3. **客户端实测**。运行 `ssh -p 2222 用户名@127.0.0.1` 验证远端 SSH。保存配置后可退出临时 Web 管理，Agent 继续提供转发。
+
+全程用 CLI 时，使用 `p2p-node config` 读取 `result.settings` 和 revision，修改设置草稿后执行 `p2p-node apply <草稿.json> --revision <当前值>`。服务和转发字段见[服务契约](docs/specs/NODE_SERVICES.md)。验证通过后，先结束前台 Agent，再按[节点宿主安装说明](packaging/node/README.md)用 `node-host.py` 设置 systemd、LaunchAgent 或 Windows 计划任务常驻。
 
 ## 使用前提
 
@@ -106,11 +160,9 @@ Direct 连接成功时，业务数据在设备间传输，信令服务器负责�
 
 产品与仓库名为 **Veytrane**。当前 Cargo 包名、可执行命令和数据路径仍沿用现有内部标识；源码目录更名不会迁移身份或配置。
 
-## 快速开始
+## 可选安装
 
-### 1. 获取源码与构建
-
-需要 Rust stable、Rust / Cargo **1.90.0 或更高版本**，以及目标平台的编译工具链。桌面构建还需要图形系统依赖，见下方各平台打包文档。
+### 文件增强版
 
 | 版型 | Agent、CLI 与 Web | GPUI | 文件能力 |
 | --- | --- | --- | --- |
@@ -119,72 +171,9 @@ Direct 连接成功时，业务数据在设备间传输，信令服务器负责�
 
 默认 Cargo 构建和发行脚本使用标准版。增强版 Agent、CLI 可用 `--no-default-features --features agent-full` 构建。发行脚本通过 `--with-files`（PowerShell 为 `-WithFiles`）生成文件增强包。两种版型共用数据目录、IPC v1 和节点协议，初始配置均关闭文件能力。已有节点切回标准版前，按[宿主升级说明](packaging/node/README.md)先关闭文件能力。
 
-```sh
-git clone https://github.com/gloryhui/Veytrane.git
-cd Veytrane
+### 原生桌面
 
-# 无 GUI 节点：构建后台 Agent 与管理入口
-cargo build --locked --release --bin p2p-agent --bin p2p-node
-```
-
-### 2. 初始化并运行新节点
-
-以下命令用于**首次安装**。已有安装直接使用原数据目录与宿主服务，更新步骤见[节点安装与恢复](packaging/node/README.md)。
-
-```sh
-# 首次初始化身份和配置；已有配置会拒绝覆盖
-target/release/p2p-node init
-
-# 终端一：运行后台节点，前台保持进程
-target/release/p2p-agent
-```
-
-另开终端查看状态，或启动本地 Web 管理页：
-
-```sh
-target/release/p2p-node status
-
-# 终端二：运行本地管理网关
-target/release/p2p-node web --listen 127.0.0.1:8787
-```
-
-浏览器打开 `http://127.0.0.1:8787/`。Web 启动日志会显示管理 token 的文件位置，将该文件内容填入页面。**管理 token 用于本机管理，远程访问密码用于设备认证，两者用途不同。**
-
-初始节点不填写信令也可使用局域网发现或 IP 直连，见下一步。若需要信令，首次信令设置需要重启节点：有桌面时在设置中保存并停止节点，再启动；无桌面时按[节点宿主说明](packaging/node/README.md#构建和首次配置)导出配置草稿，在 Agent 停止后使用 `offline-apply`。新安装的初始 revision 为 `0`，后续修改以当前响应为准。
-
-### 3. 配置两端并建立连接
-
-1. 两端初始化远程访问密码；有桌面时从设置完成，CLI 可使用 `p2p-node password --revision <当前revision>` 从标准输入读取密码。
-2. 在节点管理中选择“附近设备”，或填写对端完整 NodeId、直连 IP:端口和密码；也可通过同一信令使用设备 ID 连接。核对身份后按需要保存为可信设备。
-3. 远端发布服务，并填写允许访问的设备 ID；本地从授权服务目录配置监听端口。填写后点击保存，确认响应成功。
-4. 测速需要单独授权。文件增强版启用原生文件传输后，按需授予对端文件访问权限。
-
-配置使用 revision 检查防止覆盖其他入口的修改。保存失败时先检查页面反馈；不要把尚未提交的草稿当成已经生效的配置。
-
-无信令连接的 CLI 入口（将示例值替换为真实设备信息）：
-
-```sh
-# 查看自动发现的附近设备，以及本节点实际监听地址
-target/release/p2p-node nearby
-
-# 固定验证预期的远端身份；不带 --password-stdin 时使用现有可信设备认证
-target/release/p2p-node connect-address <REMOTE_NODE_ID> 192.168.1.10:9000 --password-stdin
-# IPv6 地址写法：'[2001:db8::10]:9000'；实际地址须可达
-```
-
-密码通过标准输入读取，不作为命令参数；交互输入时以 EOF 结束，或按[直连指南](docs/SIGNAL_FREE_CONNECTIVITY.md)使用隐藏输入辅助。
-
-已完成连接和授权后，可以用 CLI 查询远端服务。
-
-```sh
-# 将占位值替换为对端完整 NodeId；与桌面短设备 ID 的输入方式区分
-export PEER_NODE_ID="<REMOTE_NODE_ID>"
-
-target/release/p2p-node services "$PEER_NODE_ID"
-```
-
-### 4. 使用原生桌面
-
+桌面构建需要对应平台的图形依赖，见[桌面构建与运行](packaging/RUNNING.md)。
 ```sh
 cargo build --locked --release --no-default-features --features desktop-client --bin p2p-desktop
 cargo build --locked --release --no-default-features --features agent-standard --bin p2p-agent --bin p2p-node
@@ -196,7 +185,7 @@ target/release/p2p-desktop
 
 主窗口关闭按钮会收起到托盘，托盘不可用时保留任务栏入口。托盘菜单“退出 Veytrane”退出桌面，后台 Agent 继续提供转发。需要停用后台时使用节点管理的停止入口。发行组合及平台依赖见[桌面构建与运行](packaging/RUNNING.md)。
 
-### 5. 自建信令服务器
+### 自建信令服务器
 
 在可被双方访问的服务器上运行：
 
@@ -207,7 +196,7 @@ cargo build --locked --release --no-default-features --features standalone --bin
 target/release/p2p_file signal-server   --listen 0.0.0.0:8900   --short-id-db ./signal-device-ids.sqlite3
 ```
 
-将可访问的信令 `HOST:PORT` 填入两端配置。默认信令使用 TCP；需要放行所选 TCP 端口。启用可选 UDP Relay 时，另行配置并放行相应 UDP 端口。信令 TLS 的证书与主机名校验、设备端配置见[信令 TLS](docs/SIGNALING_TLS.md)。
+将可访问的信令 `HOST:PORT` 填入两端配置，保存后重启 Agent。无桌面时按[节点宿主说明](packaging/node/README.md#构建和首次配置)停机执行 `offline-apply`。默认信令使用 TCP，启用可选 UDP Relay 时另行配置相应 UDP 端口。证书、主机名校验及设备端配置见[信令 TLS](docs/SIGNALING_TLS.md)。
 
 ## 部署与平台
 
