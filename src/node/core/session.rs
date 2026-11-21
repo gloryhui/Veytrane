@@ -91,10 +91,8 @@ struct AttemptProgress {
 impl AttemptProgress {
     fn begin_transport(&self) -> bool {
         self.state
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
-                (state != ATTEMPT_SUPERSEDED).then_some(ATTEMPT_TRANSPORT_STARTED)
-            })
-            .is_ok()
+            .fetch_max(ATTEMPT_TRANSPORT_STARTED, Ordering::AcqRel)
+            != ATTEMPT_SUPERSEDED
     }
 
     fn receive_punch(&self) -> bool {
@@ -110,12 +108,24 @@ impl AttemptProgress {
     }
 
     fn try_supersede(&self) -> bool {
-        self.state
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
-                matches!(state, ATTEMPT_PROBING | ATTEMPT_PUNCH_RECEIVED)
-                    .then_some(ATTEMPT_SUPERSEDED)
-            })
-            .is_ok()
+        match self.state.compare_exchange(
+            ATTEMPT_PROBING,
+            ATTEMPT_SUPERSEDED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => true,
+            Err(ATTEMPT_PUNCH_RECEIVED) => self
+                .state
+                .compare_exchange(
+                    ATTEMPT_PUNCH_RECEIVED,
+                    ATTEMPT_SUPERSEDED,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok(),
+            Err(_) => false,
+        }
     }
 
     fn try_retire_stalled_path(&self) -> bool {
