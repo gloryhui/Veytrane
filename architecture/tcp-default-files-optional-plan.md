@@ -92,19 +92,21 @@
 - `3c389e7` 将 Web 文件面板移入文件包。`bf99ba8` 和 `80eccc0` 提取共享 GPUI 控件和文件任务投影。`5000926` 将授权服务和转发操作提到首页。`9cf4ddc` 将 GPUI 文件工作台、设置、快捷键、拖放、任务窗口及管理 CLI 装入 `veytrane-files`。`ce3a8c2` 将新节点文件能力改为显式启用。`b5b6305` 用当前连接代际的协商结果限制增强桌面的发送入口。`c6ee03c` 收口文件任务 CLI 和 Web 权限列。
 - 标准桌面、增强桌面、标准 Agent/CLI、增强 Agent/CLI 分别编译。生产依赖检查确认标准组合排除文件包，增强桌面排除文件安全存储和业务执行依赖。文件桌面 5 项、两套桌面各 3 项、两套 Web 各 26 项测试通过。标准 CLI 帮助不显示文件及任务命令，增强版保留 `tasks --offset`。历史 v1 请求仍可读取空任务页或收到能力错误。
 - 9 项隔离 Agent 进程验收通过，覆盖混合版型、文件校验和目录确认、任务保留、TCP 并发、恢复与撤销。[进程日志](/private/tmp/veytrane-p3-agents.lmvVbT/agent-process-final.log)。
-- 两种 Web 与两种 Agent 的四个组合通过实际回环 HTTP 和原生 IPC。标准页面没有文件面板资源，增强页面按 Agent 能力判断是否挂载，历史任务页仍有响应。[HTTP 证据](/private/tmp/veytrane-p3-entry.pdkpCo/web-ipc-proof.json)。GPUI 拖放和文件窗口的原生手动交互、浏览器视觉及点击验收仍待补。
+- 两种 Web 与两种 Agent 的四个组合通过实际回环 HTTP 和原生 IPC。标准页面没有文件面板资源，增强页面按 Agent 能力判断是否挂载，历史任务页仍有响应。[HTTP 证据](/private/tmp/veytrane-p3-entry.pdkpCo/web-ipc-proof.json)。
+- Ubuntu 24.04 x86_64 使用原生 GPUI、隔离 X11 会话和模拟 Agent IPC 实际投递拖放。标准桌面连接文件增强 Agent、文件增强桌面连接标准 Agent 时均未请求 `tasks` 或 `send`。两端均为文件增强且对端能力已协商时，收到一次包含正确对端与文件路径的 `send`。文件执行由上述真实 Agent 进程验证。文件次级窗口与 Web 文件面板的独立视觉验收待补。[拖放结果](../tmp/p4-linux-evidence.5K8JYj/xdnd.json)。
 
 ### P4 双候选与安装切换（2026-11-21）
 
 - `57f3d05`、`37da50b`、`e6676aa` 分别实现发行版型标识、双候选和只读升级预检。macOS arm64 的同 SHA 双候选从干净源码打包，校验架构、最低部署版本、三二进制元数据、实际依赖清单、原始源码材料、归档 SHA256 和 ad-hoc 签名。Windows、Linux 及 Intel Mac 配置了独立候选及 CI 校验流程。
 - 使用 `18d114b` 的 SHA 目录旧安装与 `37da50b` 的两个原生候选，实测旧版 → 标准 → 增强 → 原 SHA 目录回退。混包和开启文件时切到标准版均在停止旧 Agent 前被拒绝。验证同一身份、信任、转发、配置与任务库保留。系统启动项由隔离测试适配，实际 Agent 进程通过真实 IPC 停启和检查所有权锁。[换版证据](/private/tmp/veytrane-native-p4.8v44vH/install-proof-hkpaqdkn/result.json)。
-- 16 项宿主测试及 9 项包验证测试通过。Windows 计划任务及 Linux systemd 的原生换版、非 arm64 macOS 的原生发行验收仍待执行。
+- 16 项宿主测试及 9 项包验证测试通过。Linux 使用原生 systemd 用户临时单元实测标准 → 文件增强 → 标准，三个进程均经真实 IPC 就绪、退出并释放所有权，保留相同的身份、配置及 revision。隔离适配器从生成的宿主定义读取启动参数，使用临时单元替代登录注册。两阶段比较了现有 Agent 服务的 PID、启动调用 ID 和定义路径。Windows 计划任务、Linux 登录注册和 Intel Mac 原生发行仍待运行。[systemd 换版结果](../tmp/p4-linux-evidence.5K8JYj/systemd-switch.json)。
 
 ### P5 默认切换与物理移除（2026-11-21）
 
 - `3ae273f` 将默认构建切到 `agent-standard`，保留单独的 `standalone`、`standalone-files` 和专用产品 feature。`fc9e582` 更新[八主题架构图](layer-review.html)及可点击源码地图。
 - 本机 `8093` 站点返回的架构图与仓库文件 SHA-256 一致。使用 agent-browser 驱动隔离的本机 Chrome 窗口，逐一验证八种主题的亮色、暗色，共 16 种状态，每种均包含全部 14 个节点。实际点击导出并重新打开三张 PNG，终端暗色与蓝图亮色为 2544×2374，等距暗色为 3812×2528，三张均完整显示图例、节点和边缘连线。[浏览器记录](/private/tmp/veytrane-diagram-qa.Ark9pn/browser-results.json)。
-- 最终代码提交 `c6ee03c` 的 macOS arm64 [标准候选](/private/tmp/veytrane-native-p4.8v44vH/verified-standard/candidate.json)与[文件增强候选](/private/tmp/veytrane-native-p4.8v44vH/verified-files/candidate.json)均通过完整归档校验。标准版依赖清单有 536 个第三方包，增强版有 545 个。Windows、Linux 和 Intel Mac 的原生矩阵待运行。
+- 以 `c6ee03c` 的干净源码构建 macOS arm64 [标准候选](/private/tmp/veytrane-native-p4.8v44vH/verified-standard/candidate.json)与[文件增强候选](/private/tmp/veytrane-native-p4.8v44vH/verified-files/candidate.json)，均通过完整归档校验，第三方依赖数分别为 536 和 545。后续 `a94b8a0` 调整了公共工作台及诊断文案，另行检查了标准桌面编译。
+- 同一源码在 Ubuntu 24.04 x86_64 通过标准和增强两个 `-D warnings` Clippy 配置，打包脚本及归档验证均通过。Linux 标准版和增强版分别列出 591 和 601 个第三方包。标准版另通过真实回环导航 API、核心重建保留 HTTP，以及 X11 窗口、托盘和退出验收。Windows 与 Intel Mac 的原生候选待验证。[Linux 标准候选](../tmp/p4-linux-evidence.5K8JYj/standard-candidate.json)、[增强候选](../tmp/p4-linux-evidence.5K8JYj/files-candidate.json)、[导航](../tmp/p4-linux-evidence.5K8JYj/navigation-standard.json)与[桌面](../tmp/p4-linux-evidence.5K8JYj/background-standard.json)记录保存在外置盘工作区。
 - 在从提交 `c6ee03c` 导出的隔离源码中，将 `crates/veytrane-files` 移到源码目录外。只改两份 manifest，去掉根 workspace 注册、增强版组合与依赖、文件专属测试注册，并去掉 Web 的 `files` feature 及依赖。Cargo 重新解析锁文件，生产依赖树与锁文件均无该包。同一份标准 Rust 源码构建出 Agent、CLI 和 GPUI。保留的可选装配 `cfg` 名称在剪掉注册的临时源码中触发检查提示。
 - `0195687` 的真实进程用例使用隔离复制品构建的两个 Agent，覆盖可信授权目录、四路实际 TCP、测速时并发 TCP、重连、撤销信任后旧流和授权失效、停止转发释放监听端口，并验证两端未创建文件任务库。[移除演练日志](/private/tmp/veytrane-p5-verified.ehCYB7/tcp-proof.log)。
 
