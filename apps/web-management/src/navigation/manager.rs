@@ -122,13 +122,12 @@ impl Manager {
                 .config
                 .get("remote")
                 .is_some_and(|value| !value.is_null())
+            && let Err(error) = self.remote_config().await
         {
-            if let Err(error) = self.remote_config().await {
-                errors.push(format!(
-                    "{} 独立管理通道：{}",
-                    self.remote_name, error.message
-                ));
-            }
+            errors.push(format!(
+                "{} 独立管理通道：{}",
+                self.remote_name, error.message
+            ));
         }
         let settings = required_object(&config, "settings", "config.settings")?.clone();
         let managed = match self.managed_peer(&Value::Object(settings.clone()), false) {
@@ -227,7 +226,7 @@ impl Manager {
                     .get("allowed_peers")
                     .and_then(Value::as_array)
                     .is_some_and(|peers| {
-                        peers.iter().any(|item| item.as_str() == Some(&local_node))
+                        peers.iter().any(|item| item.as_str() == Some(local_node))
                     });
                 service.insert("authorized".into(), Value::Bool(authorized));
                 result.push(Value::Object(service));
@@ -1385,14 +1384,10 @@ impl Manager {
             .remote_before
             .as_ref()
             .is_some_and(|before| before.get("settings") != plan.remote_after.as_ref());
-        if plan.remote_before.is_some() {
+        if let Some(remote_before) = &plan.remote_before {
             let now = self.remote_config().await?;
             if required_u64(&now, "revision", "remote.revision")?
-                != required_u64(
-                    plan.remote_before.as_ref().expect("remote checked"),
-                    "revision",
-                    "plan.remote.revision",
-                )?
+                != required_u64(remote_before, "revision", "plan.remote.revision")?
             {
                 return Err(Problem::code(
                     format!("{} 配置已变更，请重新预览；草稿仍保留。", self.remote_name),
@@ -1444,9 +1439,9 @@ impl Manager {
                                 ),
                                 code: "partial_unknown".into(),
                                 uncertain: true,
-                                details: Some(json!({
+                                details: Some(Box::new(json!({
                                     "remoteRevision": remote_result.get("revision").cloned().unwrap_or(Value::Null)
-                                })),
+                                }))),
                             });
                         }
                         let before = plan.remote_before.as_ref().expect("remote checked");
@@ -1662,11 +1657,7 @@ impl Manager {
     }
 
     fn history(&self) -> Vec<Value> {
-        let mut entries = self
-            .receipts
-            .iter()
-            .map(|(id, receipt)| (id, receipt))
-            .collect::<Vec<_>>();
+        let mut entries = self.receipts.iter().collect::<Vec<_>>();
         entries.sort_by(|(left_id, left), (right_id, right)| {
             let left_at = left.get("at").and_then(Value::as_str).unwrap_or("");
             let right_at = right.get("at").and_then(Value::as_str).unwrap_or("");

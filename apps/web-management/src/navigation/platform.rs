@@ -182,10 +182,7 @@ pub fn host_info(config: &Value) -> Result<Value> {
     if platform == "macos"
         && let Some(token_path) = installed_token_path(config)
     {
-        host["tokenCommand"] = json!(format!(
-            "pbcopy < {}",
-            shell_quote(&path_text(&token_path)?)
-        ));
+        host["tokenCommand"] = json!(format!("pbcopy < {}", shell_quote(path_text(&token_path)?)));
     }
     Ok(host)
 }
@@ -954,22 +951,18 @@ fn expand_path(value: &str) -> Result<PathBuf> {
 fn expand_environment(value: &str) -> String {
     let mut output = String::new();
     let mut rest = value;
-    while let Some(index) = rest.find(|character| character == '$' || character == '%') {
+    while let Some(index) = rest.find(['$', '%']) {
         output.push_str(&rest[..index]);
         let candidate = &rest[index..];
-        let parsed = if candidate.starts_with("${") {
-            candidate[2..]
-                .find('}')
-                .map(|end| (&candidate[2..2 + end], 3 + end))
-        } else if candidate.starts_with('$') {
-            let end = candidate[1..]
+        let parsed = if let Some(stripped) = candidate.strip_prefix("${") {
+            stripped.find('}').map(|end| (&stripped[..end], 3 + end))
+        } else if let Some(stripped) = candidate.strip_prefix('$') {
+            let end = stripped
                 .find(|character: char| !character.is_ascii_alphanumeric() && character != '_')
-                .map_or(candidate.len(), |end| end + 1);
-            (end > 1).then_some((&candidate[1..end], end))
-        } else if candidate.starts_with('%') {
-            candidate[1..]
-                .find('%')
-                .map(|end| (&candidate[1..1 + end], end + 2))
+                .unwrap_or(stripped.len());
+            (end > 0).then_some((&stripped[..end], end + 1))
+        } else if let Some(stripped) = candidate.strip_prefix('%') {
+            stripped.find('%').map(|end| (&stripped[..end], end + 2))
         } else {
             None
         };

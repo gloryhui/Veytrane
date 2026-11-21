@@ -195,7 +195,7 @@ fn error(problem: Problem) -> Response {
         status,
         Json(json!({"error":{
             "message":problem.message,"code":problem.code,
-            "uncertain":problem.uncertain,"details":problem.details
+            "uncertain":problem.uncertain,"details":problem.details.as_deref()
         }})),
     )
         .into_response()
@@ -503,6 +503,41 @@ mod tests {
         assert_eq!(data["result"]["host"]["name"], "Fixture");
         assert_eq!(data["result"]["agent"]["running"], true);
     }
+
+    #[tokio::test]
+    async fn navigation_error_preserves_status_and_optional_details() {
+        let details = json!({"remoteRevision": 8});
+        for (code, status, uncertain, details) in [
+            (
+                "partial_unknown",
+                StatusCode::INTERNAL_SERVER_ERROR,
+                true,
+                details,
+            ),
+            (
+                "revision_conflict",
+                StatusCode::CONFLICT,
+                false,
+                Value::Null,
+            ),
+        ] {
+            let response = error(Problem {
+                message: "fixture".into(),
+                code: code.into(),
+                uncertain,
+                details: (!details.is_null()).then(|| Box::new(details.clone())),
+            });
+            assert_eq!(response.status(), status);
+            let body = to_bytes(response.into_body(), 4096).await.unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&body).unwrap(),
+                json!({"error":{
+                    "message":"fixture","code":code,"uncertain":uncertain,"details":details
+                }})
+            );
+        }
+    }
+
     #[tokio::test]
     async fn navigation_api_rejects_missing_token_and_never_serves_private_files() {
         let (_fixture, app) = fixture();

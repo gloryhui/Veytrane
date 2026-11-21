@@ -14,7 +14,7 @@ pub struct Problem {
     pub message: String,
     pub code: String,
     pub uncertain: bool,
-    pub details: Option<Value>,
+    pub details: Option<Box<Value>>,
 }
 pub type Result<T> = std::result::Result<T, Problem>;
 pub type Call<'a> = Pin<Box<dyn Future<Output = Result<Value>> + Send + 'a>>;
