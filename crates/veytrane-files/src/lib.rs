@@ -17,6 +17,8 @@ pub mod files;
 pub mod frame_budget;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod incremental;
+#[cfg(feature = "node-runtime")]
+pub mod management;
 pub mod manifest;
 pub mod path_batch;
 #[cfg(feature = "node-tasks")]

@@ -20,6 +20,7 @@ use veytrane_management::{
 #[cfg(feature = "agent-files")]
 mod files;
 
+#[cfg(not(feature = "agent-files"))]
 #[derive(Default)]
 struct FilePage {
     tasks: Vec<Value>,
@@ -62,7 +63,7 @@ pub struct Agent {
     workers: Mutex<JoinSet<()>>,
     mutation_slots: Arc<Semaphore>,
     #[cfg(feature = "agent-files")]
-    previews: Mutex<VecDeque<(Instant, crate::node::core::incremental::Preview)>>,
+    file_management: veytrane_files::management::FileManagementState,
     diagnostics: Mutex<VecDeque<String>>,
     pub(crate) restart_pending: std::sync::atomic::AtomicBool,
     pub(crate) last_error: Mutex<Option<String>>,
@@ -124,7 +125,10 @@ impl Agent {
             }
             Command::Tasks { offset } => {
                 #[cfg(feature = "agent-files")]
-                let file_page = self.file_page(offset).await?;
+                let file_page = self
+                    .file_management
+                    .page(self.file_service.as_ref(), offset)
+                    .await?;
                 #[cfg(not(feature = "agent-files"))]
                 let file_page = FilePage::default();
                 let total = file_page.total;
@@ -578,7 +582,7 @@ async fn run_with_recovery(
         workers: Mutex::new(JoinSet::new()),
         mutation_slots: Arc::new(Semaphore::new(32)),
         #[cfg(feature = "agent-files")]
-        previews: Mutex::new(VecDeque::new()),
+        file_management: Default::default(),
         diagnostics: Mutex::new(VecDeque::new()),
         restart_pending: std::sync::atomic::AtomicBool::new(false),
         last_error: Mutex::new(None),
@@ -600,9 +604,9 @@ async fn run_with_recovery(
             tokio::select! {
                 raw=raw.recv()=>{match raw {
                     #[cfg(feature = "agent-files")]
-                    Some(control::SessionEvent::DirectoryPreview(preview))=>{let mut previews=collector.previews.lock().await;previews.retain(|(_,p)|p.id!=preview.id);if previews.len()==32{previews.pop_front();}previews.push_back((Instant::now(),preview));},
+                    Some(control::SessionEvent::DirectoryPreview(preview))=>collector.file_management.capture_preview(preview).await,
                     #[cfg(feature = "agent-files")]
-                    Some(control::SessionEvent::DirectoryPreviewFailed(id))=>collector.previews.lock().await.retain(|(_,p)|p.id!=id),
+                    Some(control::SessionEvent::DirectoryPreviewFailed(id))=>collector.file_management.forget_preview(&id).await,
                     Some(control::SessionEvent::Diagnostic(message))=>{let mut lines=collector.diagnostics.lock().await;if lines.len()==32{lines.pop_front();}lines.push_back(message.chars().take(512).collect());},
                     Some(control::SessionEvent::PeerState { peer, state: crate::node::core::network_state::PeerLifecycle::Failed(message), .. })=>{let mut lines=collector.diagnostics.lock().await;if lines.len()==32{lines.pop_front();}lines.push_back(format!("设备 {}：{}",peer.short(),message).chars().take(512).collect());},
                     Some(_)=>{},None=>break,

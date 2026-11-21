@@ -1,10 +1,8 @@
 //! IPC operations backed by the optional file capability.
 
-use super::{Agent, Command, FilePage, NodeId};
+use super::{Agent, Command, NodeId};
 use crate::node::core::control::FileCommands;
 use serde_json::{Value, json};
-use std::time::Duration;
-use veytrane_files::task_model::TaskDiagnostic;
 use veytrane_files::transfer::TransferService;
 
 impl Agent {
@@ -70,82 +68,15 @@ impl Agent {
                     NodeId::from_hex(&peer).map_err(|e| e.to_string())?,
                     request.clone(),
                 )?;
-                self.previews.lock().await.retain(|(_, p)| p.id != request);
+                self.file_management.forget_preview(&request).await;
                 Ok(json!({"accepted":true}))
             }
             Command::CancelDirectory { request } => {
                 commands.cancel_directory_preview(request.clone())?;
-                self.previews.lock().await.retain(|(_, p)| p.id != request);
+                self.file_management.forget_preview(&request).await;
                 Ok(json!({"accepted":true}))
             }
             _ => Err("无法执行非文件命令".into()),
         }
-    }
-
-    pub(super) async fn file_page(&self, offset: usize) -> Result<FilePage, String> {
-        let snapshot = self
-            .file_service
-            .as_ref()
-            .map(|service| service.file_snapshot())
-            .transpose()
-            .map_err(|error| error.to_string())?;
-        let mut page = FilePage::default();
-        if let Some(snapshot) = snapshot {
-            page.total = snapshot.tasks.len();
-            page.queue = Some(json!({
-                "pending": snapshot.queue.pending,
-                "active_files": snapshot.queue.active_files,
-                "limit": snapshot.queue.limit,
-                "converging": snapshot.queue.converging,
-            }));
-            page.tasks = snapshot
-                .tasks
-                .iter()
-                .skip(offset)
-                .take(128)
-                .map(|task| {
-                    let diagnostic = task.diagnostic.map(TaskDiagnostic::safe_message);
-                    json!({
-                        "id": task.id,
-                        "group": task.group,
-                        "peer": task.peer.to_hex(),
-                        "name": task.name.chars().take(256).collect::<String>(),
-                        "name_truncated": task.name.chars().count() > 256,
-                        "state": task.state,
-                        "direction": task.direction,
-                        "total": task.total,
-                        "confirmed": task.confirmed,
-                        "rate": task.rate,
-                        "diagnostic": diagnostic,
-                        "retryable": task.retryable(),
-                        "can_pause": task.can_pause(),
-                        "can_continue": task.can_continue(),
-                        "can_delete_file": task.can_delete_file,
-                    })
-                })
-                .collect();
-        }
-        let mut previews = self.previews.lock().await;
-        previews.retain(|(created, _)| created.elapsed() < Duration::from_secs(300));
-        page.previews = previews
-            .iter()
-            .map(|(_, preview)| {
-                let mut value = serde_json::to_value(preview).expect("preview DTO");
-                value["peer"] = json!(preview.peer.to_hex());
-                value.as_object_mut().unwrap().remove("source");
-                value["name"] = json!(
-                    preview
-                        .source
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .chars()
-                        .take(128)
-                        .collect::<String>()
-                );
-                value
-            })
-            .collect();
-        Ok(page)
     }
 }
