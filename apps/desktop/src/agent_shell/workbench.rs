@@ -317,11 +317,16 @@ impl AgentShell {
             })
     }
 
-    fn speed_running(&self) -> bool {
-        self.ui.task_page["speeds"]
+    fn speed_rows(&self) -> &[Value] {
+        self.state["speeds"]
             .as_array()
-            .into_iter()
-            .flatten()
+            .or_else(|| self.ui.task_page["speeds"].as_array())
+            .map_or(&[], Vec::as_slice)
+    }
+
+    fn speed_running(&self) -> bool {
+        self.speed_rows()
+            .iter()
             .any(|speed| speed["state"].as_str() == Some("Running"))
     }
 
@@ -1302,10 +1307,9 @@ impl AgentShell {
         let connected = self.peer_connected(cx);
         let any_speed_running = self.speed_running();
         let selected = self.selected_agent_peer(cx);
-        let speed = self.ui.task_page["speeds"]
-            .as_array()
-            .into_iter()
-            .flatten()
+        let speed = self
+            .speed_rows()
+            .iter()
             .find(|s| s["peer"].as_str() == selected.as_deref());
         let running = speed.is_some_and(|s| s["state"] == "Running");
         let active = speed.filter(|_| running).cloned();

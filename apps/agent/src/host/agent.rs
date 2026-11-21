@@ -67,6 +67,27 @@ pub struct Agent {
     pub(crate) forwards: Mutex<ForwardManager>,
 }
 impl Agent {
+    fn speed_status(&self) -> Vec<Value> {
+        self.speed_service
+            .as_ref()
+            .map(|service| service.snapshots())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(peer, snapshot)| {
+                json!({
+                    "peer": peer.to_hex(),
+                    "id": snapshot.test_id,
+                    "direction": snapshot.direction,
+                    "state": format!("{:?}", snapshot.status),
+                    "bytes": snapshot.bytes,
+                    "bytes_per_second": snapshot.bytes_per_second,
+                    "elapsed_ms": snapshot.elapsed.as_millis(),
+                    "rtt_ms": snapshot.rtt.as_millis(),
+                })
+            })
+            .collect()
+    }
+
     async fn execute(&self, command: Command, id: &str, digest: &str) -> Result<Value, String> {
         if self
             .restart_pending
@@ -85,9 +106,29 @@ impl Agent {
                 let forwards = self.forwards.lock().await.snapshot();
                 let last_error = self.last_error.lock().await.clone();
                 let diagnostics = self.diagnostics.lock().await.clone();
-                Ok(
-                    json!({"core_running":self.control.is_running(),"build":crate::node::api::build_info::value("p2p-agent"),"diagnostics":diagnostics,"restart_pending":self.restart_pending.load(std::sync::atomic::Ordering::Acquire),"capabilities":self.capabilities,"budgets":{"peers":self.control.peer_capacity(),"pending_peers":8,"tcp_streams":veytrane_tcp::DEFAULT_MAX_NODE_TCP_STREAMS,"tcp_per_rule":veytrane_tcp::DEFAULT_MAX_TUNNEL_STREAMS,"management_connections":32,"service_controls_per_peer":veytrane_tcp::services::MAX_PENDING_CONTROLS},"data_dir":self.paths.root,"epoch":self.epoch,"revision":configuration.revision,"node":node,"last_error":last_error,"forwards":forwards}),
-                )
+                Ok(json!({
+                    "core_running": self.control.is_running(),
+                    "build": crate::node::api::build_info::value("p2p-agent"),
+                    "diagnostics": diagnostics,
+                    "restart_pending": self.restart_pending.load(std::sync::atomic::Ordering::Acquire),
+                    "capabilities": self.capabilities,
+                    "files_compiled": cfg!(feature = "agent-files"),
+                    "speeds": self.speed_status(),
+                    "budgets": {
+                        "peers": self.control.peer_capacity(),
+                        "pending_peers": 8,
+                        "tcp_streams": veytrane_tcp::DEFAULT_MAX_NODE_TCP_STREAMS,
+                        "tcp_per_rule": veytrane_tcp::DEFAULT_MAX_TUNNEL_STREAMS,
+                        "management_connections": 32,
+                        "service_controls_per_peer": veytrane_tcp::services::MAX_PENDING_CONTROLS,
+                    },
+                    "data_dir": self.paths.root,
+                    "epoch": self.epoch,
+                    "revision": configuration.revision,
+                    "node": node,
+                    "last_error": last_error,
+                    "forwards": forwards,
+                }))
             }
             Command::Nearby => Ok(serde_json::to_value(
                 self.control
@@ -129,25 +170,6 @@ impl Agent {
                 #[cfg(not(feature = "agent-files"))]
                 let file_page = FilePage::default();
                 let total = file_page.total;
-                let speeds = self
-                    .speed_service
-                    .as_ref()
-                    .map(|service| service.snapshots())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|(peer, snapshot)| {
-                        json!({
-                            "peer": peer.to_hex(),
-                            "id": snapshot.test_id,
-                            "direction": snapshot.direction,
-                            "state": format!("{:?}", snapshot.status),
-                            "bytes": snapshot.bytes,
-                            "bytes_per_second": snapshot.bytes_per_second,
-                            "elapsed_ms": snapshot.elapsed.as_millis(),
-                            "rtt_ms": snapshot.rtt.as_millis(),
-                        })
-                    })
-                    .collect::<Vec<_>>();
                 Ok(json!({
                     "tasks": file_page.tasks,
                     "queue": file_page.queue,
@@ -156,7 +178,7 @@ impl Agent {
                     "total": total,
                     "truncated": offset.saturating_add(128) < total,
                     "directory_previews": file_page.previews,
-                    "speeds": speeds,
+                    "speeds": self.speed_status(),
                 }))
             }
             Command::Events { epoch, after } => {

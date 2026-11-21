@@ -195,10 +195,13 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
 
     start_agent(&mut server, server_binary).await;
     start_agent(&mut client, client_binary).await;
+    let client_status = client.ok(Api::Status).await;
     assert_eq!(
-        client.ok(Api::Status).await["capabilities"],
+        client_status["capabilities"],
         json!({"files": false, "speed": client_speed, "tcp": client_tcp})
     );
+    assert_eq!(client_status["files_compiled"], client_binary.is_none());
+    assert_eq!(client_status["speeds"], json!([]));
     assert_eq!(
         server.ok(Api::Status).await["capabilities"],
         json!({"files": server_files, "speed": true, "tcp": true})
@@ -297,11 +300,17 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
                 echo_request(listen, b"TCP during speed").await;
                 tcp_during_speed = true;
             }
-            if speeds.iter().any(|row| {
+            if let Some(result) = speeds.iter().find(|row| {
                 row["peer"] == server_id
                     && row["state"] == "Completed"
                     && row["bytes"].as_u64().is_some_and(|bytes| bytes > 0)
             }) {
+                assert!(
+                    client.ok(Api::Status).await["speeds"]
+                        .as_array()
+                        .unwrap()
+                        .contains(result)
+                );
                 break;
             }
             assert!(Instant::now() < until, "speed did not complete: {tasks}");
