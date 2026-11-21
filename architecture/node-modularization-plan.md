@@ -231,7 +231,7 @@ Veytrane 的核心是可信节点之间建立、维持和恢复连接的机制�
 - `b4df252` 将文件实例由运行时装配经 `SessionServices` 注入会话，生产 `NodeSessionConfig` 只持有参数。`30cd2db` 让 Agent 经 `FileCommands` 使用原有 actor 队列提交对端文件操作。文件执行、任务库和恢复归文件包，Agent 负责本地管理与快照聚合。根运行时的会话仍持有按 feature 注入的具体能力句柄，以协调连接代际、授权、命令及撤销。`veytrane-node` 自身可单独构建。
 - Apple Silicon 候选由干净的 `30cd2db` 生成。包内桌面、Agent 和管理 CLI 的构建提交一致，两管理二进制报告 IPC v1，候选核验器通过。ZIP SHA-256 为 `c84617a1b479b6fc06e5f128aa39984db635299276a6809330c77c2e4890b6f5`，包含 820 个依赖的记录。签名为 ad hoc，未公证。包内 Agent 的隔离导航在核心重建期间连续成功读取 11 次，无已安装 Agent 请求。
 - 本次全 feature 编译通过。Cargo 元数据确认 `live-gateway`、`live-viewer`、`p2p-agent`、`p2p-desktop`、`p2p-node`、`p2p-sub2api-gateway`、`p2p_file` 和 `sub2api-client` 八个既有二进制。
-- 信任撤销回归需要关注并发稳定性。在 `30cd2db` 的两次四线程矩阵中，`restart_auto_start_uses_fresh_identity_bound_trust_and_revoke_closes_running_tunnel` 均报告 UDP 打洞超时。回溯复跑在撤销后显式密码重连的 `Running` 等待点超时。单跑、六项相邻用例并行和加入诊断的全组均通过。前一提交 `9373f10` 的四线程核心组也通过。根因尚未确定，测试断言和生产连接逻辑保持原样。
+- 在 `30cd2db` 的两次四线程矩阵中，`restart_auto_start_uses_fresh_identity_bound_trust_and_revoke_closes_running_tunnel` 均报告 UDP 打洞超时。回溯复跑在撤销后显式密码重连的 `Running` 等待点超时。单跑、六项相邻用例并行和加入诊断的全组均通过。前一提交 `9373f10` 的四线程核心组也通过。后续定位和修复见留项复验。
 - 平台证据按构建提交使用。`126a5f7` 的原生工作流 `44772210443` 通过两种 macOS 及 Windows x64 候选，Windows 命名管道、ACL 和接收存储步骤通过。Linux 通过回环导航、跨 UID IPC、X11 和候选校验，随后 Web 导航的严格 Clippy 检查失败，候选未上传。Windows 原生托盘用例需要交互式桌面，尚未执行。Apple Silicon 的工作台、测速取消、断开与 `⌘Q` 隔离操作有 `18d114b` 实机记录。
 - [交互架构图](layer-review.html) 的八种主题、独立亮暗按钮与 PNG 下载处理再次通过静态核验。自动审批拒绝了浏览器打开操作，实际切换、布局与 PNG 下载没有浏览器验收结果。
 
@@ -246,6 +246,12 @@ Veytrane 的核心是可信节点之间建立、维持和恢复连接的机制�
 | Web / GPUI / CLI | `30cd2db` 本机候选的隔离导航通过。`18d114b` 有 Apple Silicon 原生桌面交互。独立 CLI 的 IPv4、IPv6 与强制 Relay 有 `3cc368b` 证据，强制 Relay 在 `b17fe43` 复验。 |
 | 边界和测试有效性 | `30cd2db` 通过源码、Cargo 生产依赖和源码索引检查。最终干净工作树复跑通过全部 15 个场景，四套测试分别通过 136、44、229、3 项，并采集 21 条进程证据。前两轮超时及回溯见上文。 |
 | 发行与跨平台 | `30cd2db` 通过八入口编译与 Apple Silicon 候选核验。`126a5f7` 的其他平台证据及 Windows 托盘、Linux 上传门槛见上文。 |
+
+### S6 留项复验（2026-11-21）
+
+- **信任撤销后的重连**。发起端收到旧代际的认证拒绝后提交新密码。接收端此时仍在收尾，会将新信令配对暂存。旧代际的失败回调原先丢弃了这份候选，导致新代际只有一端使用匹配的打洞令牌。`1c29107` 清理旧代际的自主恢复，并一次性使用不同令牌的已收配对开始完整认证。固定事件顺序的回归在修复前超时，修复后通过。干净提交通过 15 个核心场景、采集 21 条进程证据，并完成 64 轮真实回环撤销与密码重连。错误密码拒绝用例通过。
+- **Linux 严格 Clippy**。`7934063` 缩小导航错误值并保持 HTTP 错误格式，导航包 25 项测试通过。`db9f72d` 收拢测速入口参数，8 项测速与文件并发相关用例通过。`485288a` 缩小会话输入中的信令登记结果并处理其余会话和诊断报告，7 项定向回归通过。`8208279` 处理 Rust 1.100.0 的原子 API 弃用，并通过 4 项候选竞争与授权重连用例。Ubuntu x86_64 使用与工作流相同的 Rust 1.100.0，`cargo clippy --locked --features gui --all-targets --target x86_64-unknown-linux-gnu -- -D warnings` 通过。从同一源码构建的原生 Agent 在隔离导航验收中，核心重建期间连续读取页面 11 次成功，无已安装 Agent 请求。本轮验证范围是 Ubuntu 原生检查。
+- **架构图的浏览器验收**。本轮明确尝试打开[本地交互图](layer-review.html)。自动审批仍拒绝 `file://`，浏览器入口只接受 HTTP 和 HTTPS。主题选择、亮暗切换与本地 PNG 下载尚无实际操作结果。
 
 ## 7. 新增或移除业务时的操作示例
 
