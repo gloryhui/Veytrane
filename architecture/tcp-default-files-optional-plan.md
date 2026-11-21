@@ -190,3 +190,14 @@ Windows 实际注销并重新登录触发计划任务、文件增强版双向收
 两次对端停启后，均在等待约 5 秒后发起显式重连。两次单侧撤销均结束原有授权流，随后观测到的代际 `3` 在被撤销方向的信任和密码授权均为 `false`。撤销后单独观察约 3 秒，升级后的 Agent 仍持有本地监听，端口回收由单条 `stop-forward` 完成。两次重连及撤销验证期间，受测 Agent 的 PID 均保持不变。
 
 本次仅补验已有版本升级组，回退沿用 P4 的原有证据。测试结束后，临时 LaunchAgent 和测试对端均已停止，临时启动项已注销，现有 Agent 的 PID 和启动定义 SHA-256 前后一致。复用既有二进制，无新增 Cargo 输出。[独立结果 JSON](../tmp/upgrade-tcp.HJER1q/result.json)的 SHA-256 为 `7ded2f25b0f07d523750bfde8fc288e7ec2bbcc7d19909a325f4f04779f226ac`。[运行日志](../tmp/upgrade-tcp.HJER1q/runner.log)
+
+#### 对端重启后的自动重连补验
+
+2026-11-21 在 macOS 15.8.1 Apple Silicon 上复用 `18d114b` 旧版和 `ab4c34a` 双版候选，重新在独立 LaunchAgent 中换版。每次换版后先确认受测 Agent 已连接，再仅停止并重启隔离对端。两端沿用固定回环地址与已有信任，信令和 mDNS 关闭。对端 IPC 和 UDP 监听就绪后，最多观察 90 秒，期间只查询状态，未执行 `connect` 或 `connect-address`，也未发起新的 TCP 流量。
+
+| 换版 | 从对端就绪到观测到授权恢复 | 结果 |
+| --- | ---: | --- |
+| 旧版 → 标准版 | 5.382 秒 | `PASS`。代际从 `1` 的 `disconnected` 升至 `2` 的 `connected`，对端信任恢复。 |
+| 标准版 → 文件增强版 | 5.265 秒 | `PASS`。代际从 `1` 的 `disconnected` 升至 `2` 的 `connected`，对端信任恢复。 |
+
+确认已自动重连后，两次均读取到授权服务目录，并通过已保存的转发规则完成一次 TCP 回显。这次测得的两个恢复时间均超过先前的 5 秒观察窗口。受测 Agent 在对端重启期间 PID 不变。验收结束后隔离进程已退出、临时启动项已注销，现有 Agent 的 PID 和启动定义 SHA-256 前后一致。未重跑并发、撤销或监听回收用例。[自动重连结果 JSON](../tmp/upgrade-auto-reconnect.U3cWru/result.json)的 SHA-256 为 `174086ed72f4d1bb82e0933b57f3faaf66eb7c4756d63994ff5d9ab0ce25a59d`。[运行日志](../tmp/upgrade-auto-reconnect.U3cWru/runner.log)
