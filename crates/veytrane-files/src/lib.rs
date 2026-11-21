@@ -22,6 +22,8 @@ pub mod protocol;
 pub mod publish;
 #[cfg(feature = "node-tasks")]
 pub mod queue;
+#[cfg(any(feature = "node-runtime", feature = "test-support"))]
+pub mod receive_directory;
 #[cfg(feature = "node-tasks")]
 pub mod receive_policy;
 pub mod relative_path;

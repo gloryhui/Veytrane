@@ -2,13 +2,13 @@
 use std::collections::HashSet;
 #[cfg(all(unix, test))]
 use std::fs::File;
-use std::{io, net::IpAddr};
-#[cfg(any(feature = "agent-files", test))]
+#[cfg(test)]
 use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
 };
+use std::{io, net::IpAddr};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -24,10 +24,9 @@ pub enum ConfigError {
     Corrupt(String),
     #[error("设置无效：{0}")]
     Invalid(String),
-    #[error("接收目录不可用：{0}")]
-    ReceiveDirectoryUnavailable(String),
-    #[error("接收目录没有写权限：{0}")]
-    ReceiveDirectoryPermission(String),
+    #[cfg(test)]
+    #[error(transparent)]
+    ReceiveDirectory(#[from] veytrane_files::receive_directory::ReceiveDirectoryError),
     #[error("所选路径不是 UTF-8，当前设置格式不能安全保存该路径")]
     UnsupportedPathEncoding,
     #[error("文件系统操作失败：{0}")]
@@ -653,124 +652,9 @@ fn validate_forward_configuration(
     Ok(())
 }
 
-#[cfg(any(feature = "agent-files", test))]
-pub(crate) fn validate_receive_directory(path: &Path) -> Result<(), ConfigError> {
-    validate_receive_directory_with(path, probe_receive_directory_write)
-}
-
-#[cfg(any(feature = "agent-files", test))]
-fn validate_receive_directory_with(
-    path: &Path,
-    probe_write: impl FnOnce(&Path) -> io::Result<()>,
-) -> Result<(), ConfigError> {
-    let metadata = fs::metadata(path).map_err(|error| receive_directory_io_error(path, error))?;
-    if !metadata.is_dir() {
-        return Err(ConfigError::ReceiveDirectoryUnavailable(format!(
-            "{} 不是目录",
-            path.display()
-        )));
-    }
-    probe_write(path).map_err(|error| receive_directory_io_error(path, error))?;
-    Ok(())
-}
-
-#[cfg(any(feature = "agent-files", test))]
-fn receive_directory_io_error(path: &Path, error: io::Error) -> ConfigError {
-    match error.kind() {
-        io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem => {
-            ConfigError::ReceiveDirectoryPermission(format!("{}：{error}", path.display()))
-        }
-        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory => {
-            ConfigError::ReceiveDirectoryUnavailable(format!("{}：{error}", path.display()))
-        }
-        _ => ConfigError::Io(error),
-    }
-}
-
-#[cfg(any(feature = "agent-files", test))]
-fn probe_receive_directory_write(directory: &Path) -> io::Result<()> {
-    for _ in 0..32 {
-        let probe_path = directory.join(format!(
-            ".p2p-file-write-probe-{:032x}.tmp",
-            rand::random::<u128>()
-        ));
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-
-        // Construct the cleanup guard before opening the file so unwinding
-        // drops the file handle first (important on Windows), then removes it.
-        let mut cleanup = ProbeFileCleanup::new(probe_path.clone());
-        let mut file = match options.open(&probe_path) {
-            Ok(file) => {
-                cleanup.arm();
-                file
-            }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error),
-        };
-
-        let write_result = file.write_all(b"p2p-file receive-directory probe\n");
-        drop(file);
-        let cleanup_result = cleanup.remove();
-        return match (write_result, cleanup_result) {
-            (Err(error), _) => Err(error),
-            (Ok(()), Err(error)) => Err(error),
-            (Ok(()), Ok(())) => Ok(()),
-        };
-    }
-
-    Err(io::Error::new(
-        io::ErrorKind::AlreadyExists,
-        "无法创建唯一的接收目录写能力探针",
-    ))
-}
-
-#[cfg(any(feature = "agent-files", test))]
-struct ProbeFileCleanup {
-    path: PathBuf,
-    armed: bool,
-}
-
-#[cfg(any(feature = "agent-files", test))]
-impl ProbeFileCleanup {
-    fn new(path: PathBuf) -> Self {
-        Self { path, armed: false }
-    }
-
-    fn arm(&mut self) {
-        self.armed = true;
-    }
-
-    fn remove(&mut self) -> io::Result<()> {
-        if !self.armed {
-            return Ok(());
-        }
-        match fs::remove_file(&self.path) {
-            Ok(()) => {
-                self.armed = false;
-                Ok(())
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                self.armed = false;
-                Ok(())
-            }
-            Err(error) => Err(error),
-        }
-    }
-}
-
-#[cfg(any(feature = "agent-files", test))]
-impl Drop for ProbeFileCleanup {
-    fn drop(&mut self) {
-        if self.armed {
-            let _ = fs::remove_file(&self.path);
-        }
-    }
+#[cfg(test)]
+fn validate_receive_directory(path: &Path) -> Result<(), ConfigError> {
+    veytrane_files::receive_directory::validate(path).map_err(Into::into)
 }
 
 pub use crate::storage::permissions::ensure_private_app_dir;
@@ -1276,12 +1160,13 @@ mod tests {
             .expect("a runtime write failure must not make valid JSON corrupt")
             .unwrap();
         let (settings, note, can_save) = restore_saved_settings_with_validator(config, |path| {
-            validate_receive_directory_with(path, |_| {
-                Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "injected write probe failure",
+            Err(
+                veytrane_files::receive_directory::ReceiveDirectoryError::Permission(format!(
+                    "{}：injected write probe failure",
+                    path.display()
                 ))
-            })
+                .into(),
+            )
         });
 
         assert!(note.contains("接收目录没有写权限"), "{note}");
@@ -1305,7 +1190,9 @@ mod tests {
 
         assert!(matches!(
             validate_receive_directory(&file),
-            Err(ConfigError::ReceiveDirectoryUnavailable(_))
+            Err(ConfigError::ReceiveDirectory(
+                veytrane_files::receive_directory::ReceiveDirectoryError::Unavailable(_)
+            ))
         ));
         assert_eq!(fs::read(&file).unwrap(), b"existing data");
         fs::remove_dir_all(root).unwrap();

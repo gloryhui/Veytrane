@@ -248,7 +248,7 @@ impl Agent {
                 if let Some(service) = &file_service
                     && service.receive_root_path() != commit_record.settings.receive_root
                 {
-                    crate::node::core::config::validate_receive_directory(
+                    veytrane_files::receive_directory::validate(
                         &commit_record.settings.receive_root,
                     )
                     .map_err(|e| e.to_string())?;
