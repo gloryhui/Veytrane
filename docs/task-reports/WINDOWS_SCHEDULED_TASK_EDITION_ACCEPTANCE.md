@@ -1,6 +1,6 @@
 # Windows x64 计划任务双版切换验收
 
-**状态** `PASS`（2026-11-21，Windows x64 实机）
+**状态** `PASS`（2026-11-21，Windows x64 双版换版、重新登录触发和双向文件收发）
 
 Veytrane 默认保留 TCP 转发，原生文件传输由文件增强版提供。Windows Server 2022 CI 已通过两个版型的原生构建和归档验证。Windows 桌面实测已通过计划任务启动 Agent，并在同一份合成节点配置上完成标准版 → 文件增强版 → 标准版。
 
@@ -36,7 +36,7 @@ python -X utf8 .\node-host-tests.py --windows-upgrade "<标准版二进制目录
 - [x] 两个不可变安装目录和回退元数据符合预期。测试卸载后再次查询，确认本次任务已注销。脚本在退出临时目录前核对节点数据和两份版本仍存在。
 - [x] 现有 Agent 进程持续运行。测试操作限于本次任务、合成节点数据和临时安装，退出后无测试 Agent 进程或临时节点目录残留。
 
-这次通过脚本主动触发任务启动。实际退出并重新登录 Windows 与文件收发各有独立验收范围。
+上述换版用例通过脚本触发任务启动。实际登录触发和双向文件收发另有实机证据，见[独立验收](#独立验收)。
 
 ## 回传证据
 
@@ -53,3 +53,35 @@ python -X utf8 .\node-host-tests.py --windows-upgrade "<标准版二进制目录
 三个阶段均通过原生 IPC 核对运行版型和 TCP 就绪，节点身份、revision 和 `node.json` 字节一致。两个换版方向的回退元数据均通过核对。卸载保留节点数据和两个不可变安装目录，随后测试夹具清理完毕，原有 Agent 进程仍在运行。
 
 回传包 `veytrane-windows-x64-44880833831-PASS.zip` 的 SHA-256 为 `0418eeeb3f68d1c693b34c1e70beabe4dfc6f62b5d1fd83b532ea5909b04856c`。包内 `command.txt` 记录实际命令，`exit-code.json` 记录用例退出码，`task-before.json`、`task-observations.json` 和 `task-after.json` 记录任务查验。归档验证、用例原始输出和清理证据一并回传。[施工验收记录](../../architecture/tcp-default-files-optional-plan.md)
+
+## 独立验收
+
+2026-11-21 在同一 Windows 10 专业版 22H2 x64（构建 `19045.7846`）上，经用户授权使用当前普通交互账户和合成节点，复用上表中 CI #44880833831 的同 SHA 双候选。
+
+### 实际重新登录触发计划任务
+
+**结果** `PASS`。注册前当前 SID 对应任务匹配数为 `0`。测试任务的触发器为当前 SID 的 `AtLogOn`，Principal 为 `Interactive`、`Limited`。Action 指向隔离安装的标准版 `p2p-agent.exe` 和测试数据目录。采证前未手动启动任务或测试 Agent。
+
+| 时间（UTC+08:00） | 观测 |
+| --- | --- |
+| 16:37:28 | 原 Windows 会话登录，事件 `21` |
+| 18:09:58 | 任务已注册且为 `Ready`，尚无运行记录，测试 Agent 进程数为 `0` |
+| 18:12:14 | 原会话注销，事件 `23` |
+| 18:40:39 | 同一账户登录新会话，事件 `21` |
+| 18:40:40 | 任务 `LastRunTime` 晚于本次登录，采证时任务为 `Running` |
+| 18:45:39 | `node-host.py uninstall` 完成后复查，同名任务和测试 Agent 进程数均为 `0` |
+
+卸载前确认 Agent 可执行文件和数据目录与 Action 一致，进程属于新会话。`p2p-node status` 经原生 IPC 确认标准版核心运行、TCP 就绪。卸载复查确认原有 Agent 和其他计划任务仍在。
+
+### 文件增强版双向收发
+
+**结果** `PASS`。两个文件增强版 Agent 使用独立身份、节点和接收目录，信令关闭，两端经回环直连。每个方向均用 `p2p-node send` 发起，并用 `p2p-node tasks` 核对发送端和接收端任务。`Get-FileHash -Algorithm SHA256` 确认源文件和实际落盘文件一致。
+
+| 方向 | 文件 | 字节 | 发送任务 | 接收任务 | 源文件与落盘文件的 SHA-256 |
+| --- | --- | ---: | --- | --- | --- |
+| A → B | `a-to-b.bin` | 256,123 | `completed` | `completed` | `11db6950efde4f30330c8fad1bdc5a146b919d13f91588ffade70cbf1b11ad26` |
+| B → A | `b-to-a.bin` | 413,981 | `completed` | `completed` | `04fd644576ba1b33608db605d02830234781baa89cfd2b28ea9d8374122e9dac` |
+
+接收文件均落在各自的专用接收目录。两台测试 Agent 经 IPC 停止后均以退出码 `0` 退出，所有权锁释放。
+
+独立验收回传包 `veytrane-windows-independent-acceptance-PASS.zip` 的 SHA-256 为 `04e38ad869ef2ba4463eff54b08edf45d17a496c952dd43a7b1f519d34081eda`。包内 `login-before.json`、`login-task-definition.xml` 和 `login-result.json` 记录任务定义、登录时间线、IPC 与注销复查。`bidirectional-files.json` 记录两边的任务状态和各自的源文件与落盘文件哈希。[施工验收记录](../../architecture/tcp-default-files-optional-plan.md#独立验收)
