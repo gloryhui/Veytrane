@@ -111,7 +111,7 @@ cli:{tag:'LOCAL / MANAGEMENT',title:'管理命令行',text:'p2p-node 管理同�
 web:{tag:'LOCAL / OPTIONAL',title:'可选 Web 网关',text:'apps/web-management 提供本机 Web 网关与导航管理，HTTP 请求通过 AgentClient 桥接 IPC。',items:['仅绑定 loopback，管理 API 需私有 token。','不拥有身份、任务库或 peer 连接。','浏览器关闭不等于停止 Agent。'],sources:[['../apps/web-management/src/web.rs','Web 网关'],['../apps/web-management/src/web.html','管理页面']]},
 agent:{tag:'LOCAL / SINGLE OWNER',title:'唯一后台宿主',text:'p2p-agent 是当前正式后台形态，独占一个数据目录及身份，装配无 GUI 的节点核心。',items:['启动、IPC、配置 revision、幂等请求与事件日志。','协调资源策略、文件任务与转发监听。','管理端可附着或重开，业务状态由后台负责。'],sources:[['../apps/agent/src/host/agent.rs','Agent 宿主'],['../apps/agent/src/host/configuration.rs','配置协调'],['../src/node/core/control.rs','NodeControl']]},
 session:{tag:'CORE / CONNECTION',title:'会话与流分发',text:'Session 管理多 peer、认证、代际、候选和重连。统一连接只有一个入站双向流接纳者。',items:['NodeId 身份认证与密码 / 信任证明。','统一能力协商，再进行资源权限检查。','File / Service / Speed 分流，接纳队列有界。'],sources:[['../src/node/core/session.rs','会话循环'],['../src/node/core/wire.rs','统一协议'],['../src/node/core/dispatch.rs','流分发']]},
-business:{tag:'CAPABILITIES',title:'三类业务能力',text:'文件 / 目录、TCP 转发与测速共享认证连接；执行分别位于 veytrane-files、veytrane-tcp 与 veytrane-speed。',items:['文件：清单、分片、续传、队列、限速、安全发布。','TCP：按服务 ID 开流，本地 loopback 监听。','测速：独立流统计传输率与 RTT。'],sources:[['../crates/veytrane-files/src/transfer.rs','文件服务'],['../crates/veytrane-tcp/src/services.rs','TCP 服务'],['../crates/veytrane-speed/src/runtime.rs','测速']]},
+business:{tag:'CAPABILITIES',title:'默认转发与可选文件应用',text:'标准版提供 TCP 转发和测速。增强版可装配 veytrane-files，包含文件任务、GPUI、Web 与 CLI，复用现有认证连接。',items:['文件：清单、分片、续传、队列、限速、安全发布。','TCP：按服务 ID 开流，本地 loopback 监听。','测速：独立流统计传输率与 RTT。'],sources:[['../crates/veytrane-files/src/transfer.rs','文件服务'],['../crates/veytrane-tcp/src/services.rs','TCP 服务'],['../crates/veytrane-speed/src/runtime.rs','测速']]},
 state:{tag:'LOCAL / PERSISTENCE',title:'配置与任务状态',text:'node.json、identity.key、tasks.json 由后台及离线生命周期工具按锁保护；配置在 composition，任务事实在 veytrane-files。',items:['revision 比较防止多个入口覆盖。','原子写、检查点和持久完成回执。','目录锁 + 身份租约 + 任务库锁约束单一所有权。'],sources:[['../crates/veytrane-management/src/paths.rs','路径'],['../src/node/composition/settings.rs','配置'],['../crates/veytrane-files/src/task_store.rs','任务库']]},
 peer:{tag:'REMOTE / SYMMETRIC',title:'远端节点',text:'远端运行同一套 Agent 核心。可以无界面常驻，也可以通过自己的桌面 / CLI 管理。',items:['一个节点可主动连接，也可接受授权连接。','远端声明服务，访问方按服务 ID 使用。','本机权限与远端权限分别生效。'],sources:[['../src/node/core/authorization.rs','资源策略'],['../crates/veytrane-tcp/src/services.rs','服务目录']]},
 signal:{tag:'INFRASTRUCTURE / DISCOVERY',title:'信令与地址探测',text:'veytrane-transport 提供客户端和共用报文。apps/signaling 提供服务端监听、Registry 与短 ID SQLite。局域网发现和已知 IP 直连可独立使用。',items:['设备仍需自行完成身份认证。','双栈候选、同端口探测与打洞服务于直连。','信令地址可以配置 TLS。短 ID 仅用于定位设备。'],sources:[['../crates/veytrane-transport/src/signal_client.rs','信令客户端'],['../crates/veytrane-transport/src/signal_wire.rs','共用线格式'],['../apps/signaling/src/server.rs','信令服务端'],['../src/discovery/short_id.rs','短 ID']]},
@@ -121,8 +121,8 @@ const flows={
 "restricted":{"name": "专用接入", "steps": [["BAT 启动", "Windows → 专用进程", "首次生成当前用户的设备身份并持锁。读取编译期嵌入 profile，只监听 127.0.0.1:18081，不提供配置入口。", "../src/bin/sub2api-client.rs"], ["信令与直连", "客户端 ↔ 信令 / STUN ↔ 专用网关", "登记设备并交换候选，完成同端口打洞与 QUIC 身份绑定。当前分发配置未启用 Relay。", "../src/node/core/session.rs"], ["专用凭证授权", "网关 → 当前连接的内存 ACL", "完成专用密码认证后，才将该设备加入 sub2api 的授权名单；认证断开后回收。", "../apps/sub2api/src/runtime.rs"], ["应用请求", "浏览器 → 18081 → Service 流 → 8080", "网关按 sub2api 服务 ID 再次检查权限并连接固定目标；Sub2API 自身继续检查应用账号。", "../crates/veytrane-tcp/src/services.rs"]]},"recover":{"name": "自动恢复", "steps": [["观察故障", "宿主监测 + 业务就绪探测", "区分信令、设备通道、服务目录、HTTP 后端；健康用户与健康通道优先保留。", "../apps/sub2api/src/runtime.rs"], ["有界决策", "ClientRecovery / GatewayRecovery", "客户端通道持续缺失或目录探测连续失败；网关无人在线时闲置刷新或连接失败刷新。认证失败不计入传输失败。", "../src/node/products/recovery.rs"], ["停止旧核心", "停止监听 / 会话 → 等待回收", "专用进程保留目录锁和设备身份，平台恢复在休眠唤醒、接口变化或核心退出后优雅收尾；外层重启后重新登记。通用 Agent 的会话恢复留在 core/session/recovery.rs。", "../src/node/products/platform_recovery.rs"], ["重新登记与服务恢复", "新候选 → 信令 → 授权 → 本地入口", "复用身份与凭证重新连接，恢复新业务请求；不透明续接已断开的 TCP 字节流，不改写持久配置。", "../apps/sub2api/src/runtime.rs"]]},
 direct:{name:'无信令直连',steps:[['取得地址','附近设备 / IP → 管理IPC','mDNS公告或用户输入完整NodeId与IP:端口。发现仅作地址提示，不自动连接、信任或授予权限。','../src/node/core/connectivity.rs'],['身份接纳','原生IPv4 / IPv6 QUIC → 预期NodeId','未知来源先通过QUIC Retry；有界身份握手校验Ed25519及TLS绑定，外连固定预期身份并选择成功地址。','../src/node/core/session/direct.rs'],['统一授权','P2PN v2 → 密码 / 可信设备 → 资源策略','复用相同协商、方向权限和持续授权，成功后才发布业务连接。无信令时不查询公共STUN或Relay。','../src/node/core/session.rs'],['现有业务','NodeSnapshot → 文件 / TCP / 测速','状态标识无信令模式，文件及服务流仍走原处理器；禁用设备和撤销授权继续生效。','../src/node/core/control.rs']]},
 connect:{name:'信令连接',steps:[['输入设备 ID','桌面 / CLI → 本地 IPC','输入完整 NodeId 或九位短 ID，可附带访问密码。前端只提交 Connect 命令，不直接拨号。','../crates/veytrane-management/src/protocol.rs'],['查找与打洞','Agent → 信令 / STUN → 对端','短 ID 解析到节点身份，交换候选。每个地址族路径复用探测、打洞和 QUIC 所需的本地 socket；优先建立可认证直连，已配置时允许 Relay 兜底。','../src/net/mod.rs'],['身份与权限','双方 Agent → 认证 / 能力 / 策略','校验目标身份与连接绑定，协商统一能力；执行密码或可信设备认证，并按资源策略授予方向与服务权限。','../src/node/core/session.rs'],['呈现状态','NodeSnapshot → IPC → 所有窗口','Agent 更新 peer 快照；前端读取状态并刷新共享模型。短 ID、信令在线、链路连通和业务授权是不同状态。','../src/node/core/control.rs']]},
-send:{name:'发送文件',steps:[['选择与提交','主工作台 → Send(peer, paths)','选择文件或目录，前端向 Agent 提交本机绝对路径。accepted 仅代表任务被接纳。','../apps/desktop/src/agent_shell/workbench.rs'],['调度与校验','TransferService → 队列 → 认证连接','后台扫描并形成任务，按 FIFO 和发送并发额度调度；校验 peer 身份、连接代际、能力及文件方向权限。','../crates/veytrane-files/src/transfer.rs'],['分片与落盘','发送端 → QUIC 文件流 → 接收端','交换清单和分片状态，BLAKE3 校验，写入接收临时位置并维护检查点；限速与可用空间预算持续约束传输。','../crates/veytrane-files/src/transfer_files.rs'],['发布与回执','接收端安全发布 → 持久收据 → 状态','接收端验证完整数据并安全发布；任务完成由持久回执推动，窗口根据任务快照显示结果。暂停续传保留已确认进度。','../crates/veytrane-files/src/publish.rs']]},
-directory:{name:'增量目录',steps:[['请求预览','工作台 → PreviewDirectory','Agent 扫描指定目录，并与授权对端生成差异预览；目录源路径留在本机。','../crates/veytrane-files/src/incremental.rs'],['展示差异','Agent Tasks → 独立目录预览窗口','列出新增、变更和不变项。预览有存活期限，是需要确认的候选计划。','../apps/desktop/src/agent_shell/workbench.rs'],['确认并复核','ConfirmDirectory → Agent','用户确认后，后台复核源内容与当前权限，再接纳实际发送任务，避免预览后变化直接绕过校验。','../crates/veytrane-files/src/incremental.rs'],['差量传输','文件任务 → 对端接收根','复用文件服务，只发送需要的内容，跳过不变项；不会因此删除接收端额外文件。','../crates/veytrane-files/src/transfer.rs']]},
+send:{name:'发送文件',steps:[['选择与提交','主工作台 → Send(peer, paths)','选择文件或目录，前端向 Agent 提交本机绝对路径。accepted 仅代表任务被接纳。','../crates/veytrane-files/src/desktop/views.rs'],['调度与校验','TransferService → 队列 → 认证连接','后台扫描并形成任务，按 FIFO 和发送并发额度调度；校验 peer 身份、连接代际、能力及文件方向权限。','../crates/veytrane-files/src/transfer.rs'],['分片与落盘','发送端 → QUIC 文件流 → 接收端','交换清单和分片状态，BLAKE3 校验，写入接收临时位置并维护检查点；限速与可用空间预算持续约束传输。','../crates/veytrane-files/src/transfer_files.rs'],['发布与回执','接收端安全发布 → 持久收据 → 状态','接收端验证完整数据并安全发布；任务完成由持久回执推动，窗口根据任务快照显示结果。暂停续传保留已确认进度。','../crates/veytrane-files/src/publish.rs']]},
+directory:{name:'增量目录',steps:[['请求预览','工作台 → PreviewDirectory','Agent 扫描指定目录，并与授权对端生成差异预览；目录源路径留在本机。','../crates/veytrane-files/src/incremental.rs'],['展示差异','Agent Tasks → 独立目录预览窗口','列出新增、变更和不变项。预览有存活期限，是需要确认的候选计划。','../crates/veytrane-files/src/desktop/windows.rs'],['确认并复核','ConfirmDirectory → Agent','用户确认后，后台复核源内容与当前权限，再接纳实际发送任务，避免预览后变化直接绕过校验。','../crates/veytrane-files/src/incremental.rs'],['差量传输','文件任务 → 对端接收根','复用文件服务，只发送需要的内容，跳过不变项；不会因此删除接收端额外文件。','../crates/veytrane-files/src/transfer.rs']]},
 tcp:{name:'TCP 转发',steps:[['远端发布服务','远端配置 → services / resources','服务端明确配置服务 ID、目标地址和允许设备；连接通过认证并不自动获得所有 TCP 目标权限。','../src/node/core/authorization.rs'],['本机创建规则','管理入口 → 配置协调 → ForwardManager','本机规则将 loopback 监听地址映射到 peer + service ID；监听准备成功后随配置提交启用。','../src/node/composition/forwarding.rs'],['请求业务流','本地 TCP 连接 → QUIC Service 流','应用连接本机监听，节点发起 OpenTcp(service_id)。远端校验服务和权限后建立目标 TCP 连接。','../crates/veytrane-tcp/src/services.rs'],['双向转发','本地应用 ↔ QUIC ↔ 远端服务','ForwardStreamOwner 与 bridge_tcp 在 veytrane-tcp 中复用同一流预算；规则删除只停止新接纳，存量流由节点所有者收尾。','../crates/veytrane-tcp/src/lib.rs']]},
 config:{name:'提交配置',steps:[['读取基线','Config → revision + settings','各管理入口读取同一 Agent 配置并保留草稿基线。通用读取移除远端密码验证器，密码由专用命令设置。','../src/node/composition/settings.rs'],['提交与校验','ApplyConfig(expected_revision)','Agent 串行协调变更，比对 revision，校验 schema、授权来源、资源和规则。冲突不覆盖；网络运行时变化转入显式重启流程。','../apps/agent/src/host/configuration.rs'],['准备和持久化','准备监听 → 原子写配置 → 发布策略','先准备监听和接收根等资源；核心在同一协调轮次写入提交记录，再发布权限。磁盘失败时不发布新授权。','../apps/agent/src/host/configuration.rs'],['同步生效状态','新 revision / 错误 → 管理入口','在线字段生效后返回 revision。需要重启的变更通过 ConfigureRestart 提交并停止，随后显式启动；结果未知时用相同请求 ID 恢复确认。','../apps/agent/src/host/agent.rs']]}
 };
@@ -145,7 +145,7 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
       "title": "桌面工作台",
       "tag": "PRESENTATION",
       "path": "apps/desktop/src/agent_shell.rs",
-      "summary": "默认 GPUI 桌面通过 IPC 管理已有 Agent，多个窗口共享一个模型。",
+      "summary": "标准 GPUI 桌面通过 IPC 管理设备、远端服务、转发和测速。",
       "rules": [
         "不持有私钥、任务库或 P2P 连接。",
         "关闭窗口与停止后台是独立操作。"
@@ -154,7 +154,7 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
         {
           "name": "工作台",
           "path": "apps/desktop/src/agent_shell/workbench.rs",
-          "detail": "文件任务、配置、诊断与服务入口。"
+          "detail": "标准首页提供设备、服务目录和实时转发状态。"
         },
         {
           "name": "窗口注册",
@@ -652,16 +652,31 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
     },
     {
       "id": "files",
-      "title": "文件与目录任务",
-      "tag": "CORE / FILES",
-      "path": "crates/veytrane-files/src/transfer.rs",
-      "summary": "veytrane-files 持有文件命令执行、持久任务、并发调度、增量预览、暂停续传与安全发布。",
+      "title": "可选文件应用",
+      "tag": "OPTIONAL / FILES",
+      "path": "crates/veytrane-files/src/lib.rs",
+      "summary": "文件增强版装配 veytrane-files。它复用现有节点身份、会话和授权，管理文件命令、任务与界面。",
       "rules": [
         "完成以接收端持久回执为准。",
         "预览结果和 accepted 均不是完成证明。",
         "P2PF 文件/测速载荷不包含握手和裸目标隧道消息。"
       ],
       "parts": [
+        {
+          "name": "GPUI 工作台",
+          "path": "crates/veytrane-files/src/desktop/mod.rs",
+          "detail": "文件设置、IPC 事件、任务投影和界面挂载。"
+        },
+        {
+          "name": "Web 面板",
+          "path": "crates/veytrane-files/src/web/mod.rs",
+          "detail": "按 Agent 的生效能力显示文件操作。"
+        },
+        {
+          "name": "文件 CLI",
+          "path": "crates/veytrane-files/src/cli.rs",
+          "detail": "文件子命令及输入解析。"
+        },
         {
           "name": "传输执行",
           "path": "crates/veytrane-files/src/transfer.rs",
@@ -801,12 +816,12 @@ if('IntersectionObserver' in window){const observer=new IntersectionObserver(ent
       "parts": [
         {
           "name": "输入与 IME",
-          "path": "apps/desktop/src/ui/text_field.rs",
+          "path": "crates/veytrane-desktop-ui/src/text_field.rs",
           "detail": "光标、UTF-16、密码与粘贴。"
         },
         {
           "name": "组件与主题",
-          "path": "apps/desktop/src/ui/components.rs",
+          "path": "crates/veytrane-desktop-ui/src/components.rs",
           "detail": "统一视觉组件。"
         },
         {

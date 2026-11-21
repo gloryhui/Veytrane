@@ -4,7 +4,7 @@
   "width": 1240,
   "pageTitle": "Veytrane · 节点框架与业务装配",
   "title": "{b:Veytrane}　节点框架与业务装配",
-  "subtitle": "沿箭头读调用方向，虚线标出本机管理请求和进程边界",
+  "subtitle": "标准版以 TCP 转发为默认功能，增强版可装配原生文件传输",
   "layers": [
     {"id":"app","label":"入口与客户端","color":"blue"},
     {"id":"management","label":"管理面与宿主","color":"cyan"},
@@ -16,24 +16,25 @@
     {"id":"ipc","label":"本机 IPC","color":"cyan","dash":true},
     {"id":"http","label":"回环 HTTP","color":"blue"},
     {"id":"call","label":"调用或装配","color":"green"},
-    {"id":"server","label":"独立命令入口","color":"amber"}
+    {"id":"server","label":"独立命令入口","color":"amber"},
+    {"id":"optional","label":"文件增强版装配","color":"purple","dash":true}
   ],
   "groups": [
     {"id":"agent","x":24,"y":298,"w":780,"h":309,"color":"cyan","label":"p2p-agent 管理面 · 导航按需同进程运行"}
   ],
   "nodes": [
-    {"id":"clients","layer":"app","x":45,"y":158,"w":344,"h":100,"title":"GPUI 桌面与管理 CLI","sub":"apps/desktop · apps/node-cli","lines":["p2p-desktop 与 p2p-node 通过 IPC","桌面按 Agent 的能力状态显示入口"]},
+    {"id":"clients","layer":"app","x":45,"y":158,"w":344,"h":100,"title":"GPUI 桌面与管理 CLI","sub":"desktop-client · node-cli","lines":["首页管理设备、服务与端口转发","增强版按 Agent 生效能力加载文件界面"]},
     {"id":"browser","layer":"app","x":455,"y":158,"w":330,"h":100,"title":"浏览器","sub":"服务导航 · 节点管理","lines":["内置导航默认走回环 3001","p2p-node web 可单独启动管理页"]},
     {"id":"products","layer":"app","x":878,"y":158,"w":318,"h":100,"title":"Live / Sub2API","sub":"node-runtime · TCP","lines":["专用客户端与网关各自装配","各自选择准入、容量和恢复策略"]},
     {"id":"ipc","layer":"management","x":45,"y":326,"w":344,"h":100,"title":"本机管理 IPC","sub":"crates/veytrane-management","lines":["IPC v1 DTO · AgentClient","Unix socket / Windows pipe"]},
     {"id":"nav","layer":"management","x":455,"y":326,"w":330,"h":100,"title":"内置服务导航","sub":"apps/web-management","lines":["导航和管理页经 IPC 使用节点","入口负责启动、重建通知与退出"]},
-    {"id":"host","layer":"management","x":45,"y":488,"w":740,"h":100,"title":"Agent 宿主与能力装配","sub":"apps/agent/src/host · src/node/composition","lines":["进程所有权、配置 revision、请求去重与能力构造","同一会话提交点先持久化，再发布策略"]},
-    {"id":"standalone","layer":"standalone","x":878,"y":326,"w":318,"h":100,"title":"独立命令行","sub":"p2p_file · apps/standalone-cli","lines":["独立收发、服务、隧道与测速","沿用独立协议和身份锁"]},
+    {"id":"host","layer":"management","x":45,"y":488,"w":740,"h":100,"title":"Agent 宿主与能力装配","sub":"agent-standard · agent-full","lines":["两种版型共用进程所有权、配置 revision 与请求去重","标准版装配 TCP、测速和 Web 管理，增强版加文件"]},
+    {"id":"standalone","layer":"standalone","x":878,"y":326,"w":318,"h":100,"title":"独立命令行","sub":"p2p_file · standalone","lines":["独立信令、隧道与测速","standalone-files 增加旧文件命令"]},
     {"id":"signal","layer":"standalone","x":878,"y":488,"w":318,"h":100,"title":"信令与可选 Relay 服务端","sub":"apps/signaling · signaling-server","lines":["维护登记、短 ID SQLite 和中继租约","由 p2p_file signal-server 启动"]},
     {"id":"core","layer":"core","x":45,"y":665,"w":1151,"h":100,"title":"节点会话编排","sub":"src/node/core","lines":["建立已认证会话、维护连接代际与重连、协调强撤销","按协商结果注册有界流，由装配层启动各能力处理"]},
-    {"id":"files","layer":"capability","x":45,"y":840,"w":344,"h":100,"title":"文件传输","sub":"crates/veytrane-files","lines":["文件队列、任务库、落盘回执与续传","Agent 可按构建选装"]},
+    {"id":"files","layer":"capability","x":45,"y":840,"w":344,"h":100,"title":"原生文件传输 · 可选","sub":"crates/veytrane-files","lines":["收发、任务库、恢复与文件配置","GPUI / Web 界面与文件 CLI 命令"]},
     {"id":"speed","layer":"capability","x":455,"y":840,"w":330,"h":100,"title":"测速","sub":"crates/veytrane-speed","lines":["控制协议、数据流、租约与统计","与文件服务共用每 peer 活动许可"]},
-    {"id":"tcp","layer":"capability","x":878,"y":840,"w":318,"h":100,"title":"TCP 服务与转发","sub":"crates/veytrane-tcp","lines":["服务 ID、目录、ACL、监听与桥接","Agent、Live、Sub2API 复用"]},
+    {"id":"tcp","layer":"capability","x":878,"y":840,"w":318,"h":100,"title":"TCP 服务与转发 · 默认","sub":"crates/veytrane-tcp","lines":["服务 ID、目录、ACL、监听与桥接","Agent、Live、Sub2API 复用"]},
     {"id":"node","layer":"core","x":45,"y":1015,"w":520,"h":100,"title":"节点基础机制","sub":"crates/veytrane-node","lines":["P2PN 协商、双向流分发、peer 容量与活动许可","按认证状态和当前代际撤销资源"]},
     {"id":"transport","layer":"core","x":675,"y":1015,"w":521,"h":100,"title":"传输基础与网络客户端","sub":"veytrane-transport · src/{net,discovery,nat,relay}","lines":["身份、QUIC、打洞、信令客户端与 Relay 接入","根网络模块协调发现、候选竞速和回退"]}
   ],
@@ -46,7 +47,7 @@
     {"from":"products.l","to":"core.t@0.697","flow":"call","via":[[847,208],[847,637]],"label":"产品装配","labelPos":[910,630]},
     {"from":"standalone.b","to":"signal.t","flow":"server","label":"signal-server","labelPos":[1110,458]},
     {"from":"standalone.r","to":"transport.r","flow":"call","rail":"x:1221","label":"独立协议复用传输","labelPos":[1114,621]},
-    {"from":"core.b@0.149","to":"files.t","flow":"call","label":"文件流"},
+    {"from":"core.b@0.149","to":"files.t","flow":"optional","label":"按协商分发文件流"},
     {"from":"core.b","to":"speed.t","flow":"call","label":"测速流"},
     {"from":"core.b@0.862","to":"tcp.t","flow":"call","label":"服务流"},
     {"from":"files.b","to":"node.t@0.33","flow":"call","label":"共享许可"},

@@ -7,7 +7,7 @@
       "title": "桌面工作台",
       "tag": "PRESENTATION",
       "path": "apps/desktop/src/agent_shell.rs",
-      "summary": "默认 GPUI 桌面通过 IPC 管理已有 Agent，多个窗口共享一个模型。",
+      "summary": "标准 GPUI 桌面通过 IPC 管理设备、远端服务、转发和测速。",
       "rules": [
         "不持有私钥、任务库或 P2P 连接。",
         "关闭窗口与停止后台是独立操作。"
@@ -16,7 +16,7 @@
         {
           "name": "工作台",
           "path": "apps/desktop/src/agent_shell/workbench.rs",
-          "detail": "文件任务、配置、诊断与服务入口。"
+          "detail": "标准首页提供设备、服务目录和实时转发状态。"
         },
         {
           "name": "窗口注册",
@@ -514,16 +514,31 @@
     },
     {
       "id": "files",
-      "title": "文件与目录任务",
-      "tag": "CORE / FILES",
-      "path": "crates/veytrane-files/src/transfer.rs",
-      "summary": "veytrane-files 持有文件命令执行、持久任务、并发调度、增量预览、暂停续传与安全发布。",
+      "title": "可选文件应用",
+      "tag": "OPTIONAL / FILES",
+      "path": "crates/veytrane-files/src/lib.rs",
+      "summary": "文件增强版装配 veytrane-files。它复用现有节点身份、会话和授权，管理文件命令、任务与界面。",
       "rules": [
         "完成以接收端持久回执为准。",
         "预览结果和 accepted 均不是完成证明。",
         "P2PF 文件/测速载荷不包含握手和裸目标隧道消息。"
       ],
       "parts": [
+        {
+          "name": "GPUI 工作台",
+          "path": "crates/veytrane-files/src/desktop/mod.rs",
+          "detail": "文件设置、IPC 事件、任务投影和界面挂载。"
+        },
+        {
+          "name": "Web 面板",
+          "path": "crates/veytrane-files/src/web/mod.rs",
+          "detail": "按 Agent 的生效能力显示文件操作。"
+        },
+        {
+          "name": "文件 CLI",
+          "path": "crates/veytrane-files/src/cli.rs",
+          "detail": "文件子命令及输入解析。"
+        },
         {
           "name": "传输执行",
           "path": "crates/veytrane-files/src/transfer.rs",
@@ -663,12 +678,12 @@
       "parts": [
         {
           "name": "输入与 IME",
-          "path": "apps/desktop/src/ui/text_field.rs",
+          "path": "crates/veytrane-desktop-ui/src/text_field.rs",
           "detail": "光标、UTF-16、密码与粘贴。"
         },
         {
           "name": "组件与主题",
-          "path": "apps/desktop/src/ui/components.rs",
+          "path": "crates/veytrane-desktop-ui/src/components.rs",
           "detail": "统一视觉组件。"
         },
         {
