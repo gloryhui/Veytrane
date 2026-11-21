@@ -56,7 +56,7 @@ impl NodeSettings {
             auto_resume: true,
             receive_safety_mib: 64,
             file_limits: serde_json::json!({"upload_kib":0,"download_kib":0}),
-            enable_files: cfg!(feature = "agent-files"),
+            enable_files: false,
             enable_speed: cfg!(feature = "node-speed"),
             enable_tcp: true,
         }

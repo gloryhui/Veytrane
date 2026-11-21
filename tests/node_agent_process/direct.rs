@@ -80,12 +80,13 @@ async fn start_agent(node: &mut Node, binary: Option<&str>) {
 }
 
 async fn configured_pair(sandbox: &Sandbox, discovery: bool) -> (Node, Node) {
-    configured_pair_with_agent(sandbox, discovery, None).await
+    configured_pair_with_agent(sandbox, discovery, false, None).await
 }
 
 async fn configured_pair_with_agent(
     sandbox: &Sandbox,
     discovery: bool,
+    files: bool,
     binary: Option<&str>,
 ) -> (Node, Node) {
     let mut a = Node::init(sandbox.0.join("direct-a"));
@@ -97,6 +98,7 @@ async fn configured_pair_with_agent(
             .redacted();
         assert_eq!(settings["signal_server"], "");
         settings["direct"]["lan_discovery"] = json!(discovery);
+        settings["enable_files"] = json!(files);
         grant(&mut settings, &[peer]);
         offline(node, settings);
     }
@@ -357,7 +359,7 @@ async fn completed_file_task_survives_files_disabled_then_full_reenable() {
     let sandbox = Sandbox::new();
     let baseline = std::env::var("VEYTRANE_TEST_BASELINE_AGENT").ok();
     let (mut sender, mut receiver) =
-        configured_pair_with_agent(&sandbox, false, baseline.as_deref()).await;
+        configured_pair_with_agent(&sandbox, false, true, baseline.as_deref()).await;
     let sender_id = sender.id();
     let receiver_id = receiver.id();
     let bytes = vec![0x6bu8; 192 * 1024];
@@ -435,7 +437,7 @@ async fn completed_file_task_survives_files_disabled_then_full_reenable() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn no_signal_agent_transfers_files_and_tcp_then_enforces_revocation() {
     let sandbox = Sandbox::new();
-    let (mut a, mut b) = configured_pair(&sandbox, false).await;
+    let (mut a, mut b) = configured_pair_with_agent(&sandbox, false, true, None).await;
     let a_id = a.id();
     let b_id = b.id();
     let key_a = fs::read(a.root.join("identity.key")).unwrap();
@@ -574,7 +576,7 @@ async fn no_signal_agents_discover_via_mdns_but_only_connect_after_explicit_requ
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn wake_refreshes_candidates_and_restores_mapping_in_the_same_agent_process() {
     let sandbox = Sandbox::new();
-    let (mut a, mut b) = configured_pair(&sandbox, false).await;
+    let (mut a, mut b) = configured_pair_with_agent(&sandbox, false, true, None).await;
     let target = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let target_addr = target.local_addr().unwrap();
     let echo = tokio::spawn(async move {

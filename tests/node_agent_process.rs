@@ -58,7 +58,9 @@ fn initialization_preserves_existing_identity_and_refuses_to_replace_configurati
         identity.node_id().to_hex()
     );
     let config_before = fs::read(root.join("node.json")).unwrap();
-    ConfigRecord::load(&root.join("node.json")).unwrap();
+    let record = ConfigRecord::load(&root.join("node.json")).unwrap();
+    assert!(record.settings.enable_tcp);
+    assert!(!record.settings.enable_files);
     cli_ok(&root, &["ownership-status"]);
     for name in ["receive", "tasks.json", "tasks.lock"] {
         assert!(!root.join(name).exists(), "init created {name}");
@@ -389,6 +391,7 @@ async fn three_agent_processes_unified_files_directory_four_forwards_and_revocat
         .settings
         .redacted();
     h["signal_server"] = json!(signal_addr.to_string());
+    h["enable_files"] = json!(true);
     grant(&mut h, &[mac_id.clone(), win_id.clone()]);
     h["services"] = json!([{"id":"echo","name":"Echo fixture","target":target,"enabled":true,"allowed_peers":[mac_id,win_id]}]);
     offline(&home, h);
@@ -399,8 +402,8 @@ async fn three_agent_processes_unified_files_directory_four_forwards_and_revocat
             .settings
             .redacted();
         settings["signal_server"] = json!(signal_addr.to_string());
+        settings["enable_files"] = json!(index == 0);
         if index == 2 {
-            settings["enable_files"] = json!(false);
             settings["enable_speed"] = json!(false);
         }
         grant(&mut settings, std::slice::from_ref(&home_id));
