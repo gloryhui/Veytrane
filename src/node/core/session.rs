@@ -26,10 +26,10 @@ use crate::net::{
 };
 #[cfg(feature = "node-runtime")]
 use crate::transport::diagnostic as udp_diag;
-#[cfg(test)]
+#[cfg(all(test, feature = "node"))]
 use crate::transport::handshake::handshake_initiator;
 use crate::transport::handshake::handshake_responder;
-#[cfg(test)]
+#[cfg(all(test, feature = "node"))]
 use crate::transport::quic::connect as quic_connect;
 use crate::transport::quic::{
     ACCEPT_FIRST_BI_STREAM_TIMEOUT, APPLICATION_HANDSHAKE_TIMEOUT, ChannelBinding,
@@ -295,6 +295,7 @@ impl std::fmt::Debug for TestPreparedNetworks {
 
 #[cfg(test)]
 impl TestPreparedNetworks {
+    #[cfg(feature = "node")]
     fn new(networks: impl IntoIterator<Item = DesktopNetwork>) -> Self {
         Self(Arc::new(std::sync::Mutex::new(
             networks.into_iter().collect(),
@@ -1052,9 +1053,9 @@ enum SessionCommand {
     },
     #[cfg(all(test, feature = "node"))]
     TestNetworkLoss(NodeId, oneshot::Sender<()>),
-    #[cfg(test)]
+    #[cfg(all(test, feature = "node"))]
     InspectDeferred(NodeId, oneshot::Sender<Option<PunchToken>>),
-    #[cfg(test)]
+    #[cfg(all(test, feature = "node"))]
     Inspect(oneshot::Sender<HashMap<NodeId, (u64, quinn::Connection)>>),
 }
 
@@ -1948,11 +1949,11 @@ async fn run_session<B>(
                 }
                 let _ = done.send(());
             }
-            #[cfg(test)]
+            #[cfg(all(test, feature = "node"))]
             Wake::Command(Some(SessionCommand::InspectDeferred(peer, reply))) => {
                 let _ = reply.send(deferred_candidates.get(&peer).map(|(_, token)| *token));
             }
-            #[cfg(test)]
+            #[cfg(all(test, feature = "node"))]
             Wake::Command(Some(SessionCommand::Inspect(reply))) => {
                 let _ = reply.send(connections.clone());
             }
@@ -6115,7 +6116,7 @@ fn transport_can_publish(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[cfg(test)]
+#[cfg(all(test, feature = "node"))]
 async fn race_peer_paths(
     route: NetworkRoute,
     paths: Vec<AttemptPath>,
@@ -6489,7 +6490,7 @@ async fn punch_candidates(
     )))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "node"))]
 async fn authenticate_outgoing(
     endpoint: &quinn::Endpoint,
     remote: SocketAddr,

@@ -22,7 +22,7 @@
 使用 rustup stable，rustc/Cargo 最低 1.90.0（现代 macOS 通知后端要求）。
 
 ```bash
-cargo build --release
+cargo build --locked --release --no-default-features --features standalone-files --bin p2p_file
 export BIN=$PWD/target/release/p2p_file
 ```
 

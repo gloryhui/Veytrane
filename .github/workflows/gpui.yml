@@ -106,7 +106,9 @@ jobs:
       - name: Run IPv6 CLI send regression
         run: "cargo test --locked --no-default-features --features standalone-files --test ipv6_cli_send --target ${{ matrix.target }} -- --nocapture"
       - name: Run verified-TLS signaling CLI transfer and hostname rejection
-        run: "cargo test --locked --no-default-features --features standalone-files --test signaling_tls_cli --target ${{ matrix.target }} -- --nocapture"
+        run: |
+          cargo test --locked --no-default-features --features standalone --test signaling_tls_cli --target ${{ matrix.target }} -- --nocapture
+          cargo test --locked --no-default-features --features standalone-files --test signaling_tls_cli --target ${{ matrix.target }} -- --nocapture
       - name: Build optimized native candidates
         if: matrix.target != 'x86_64-apple-darwin'
         env:

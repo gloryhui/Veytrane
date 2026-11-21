@@ -20,7 +20,7 @@
 
 Veytrane 是用 Rust 构建的可信设备互联软件。设备可以位于不同家庭、办公室或云网络，通过局域网发现、已知 IP 或可选信令取得连接信息，建立经过认证的 QUIC 通道，再按资源授权访问彼此。
 
-你可以在 Mac 上访问远端 Ubuntu 授权的 Web 面板、SSH、文件共享等 TCP 服务，也可以在设备间发送文件和目录。桌面、命令行和 Web 管理同一个后台 Agent，共享身份、连接、配置和任务。
+标准版通过端口转发访问远端授权的 Web 面板、SSH、文件共享等 TCP 服务。原生文件和目录传输随文件增强版提供，需要两端分别启用。桌面、命令行和 Web 管理同一个后台 Agent，共享身份、连接和配置。
 
 **Rust · QUIC / TLS 1.3 · Ed25519 · P2PN v2 · MIT**
 
@@ -147,7 +147,7 @@ target/release/p2p-node web --listen 127.0.0.1:8787
 1. 两端初始化远程访问密码；有桌面时从设置完成，CLI 可使用 `p2p-node password --revision <当前revision>` 从标准输入读取密码。
 2. 在节点管理中选择“附近设备”，或填写对端完整 NodeId、直连 IP:端口和密码；也可通过同一信令使用设备 ID 连接。核对身份后按需要保存为可信设备。
 3. 远端发布服务，并填写允许访问的设备 ID；本地从授权服务目录配置监听端口。填写后点击保存，确认响应成功。
-4. 文件与测速能力单独授权；发送文件前确认接收目录、磁盘空间和对端权限。
+4. 测速需要单独授权。文件增强版启用原生文件传输后，按需授予对端文件访问权限。
 
 配置使用 revision 检查防止覆盖其他入口的修改。保存失败时先检查页面反馈；不要把尚未提交的草稿当成已经生效的配置。
 
@@ -164,35 +164,34 @@ target/release/p2p-node connect-address <REMOTE_NODE_ID> 192.168.1.10:9000 --pas
 
 密码通过标准输入读取，不作为命令参数；交互输入时以 EOF 结束，或按[直连指南](docs/SIGNAL_FREE_CONNECTIVITY.md)使用隐藏输入辅助。
 
-已完成连接和授权后，可通过 CLI 查询服务和发送文件：
+已完成连接和授权后，可以用 CLI 查询远端服务。
 
 ```sh
 # 将占位值替换为对端完整 NodeId；与桌面短设备 ID 的输入方式区分
 export PEER_NODE_ID="<REMOTE_NODE_ID>"
 
 target/release/p2p-node services "$PEER_NODE_ID"
-target/release/p2p-node send "$PEER_NODE_ID" /absolute/path/to/file.zip
-target/release/p2p-node tasks
 ```
 
 ### 4. 使用原生桌面
 
 ```sh
-cargo build --locked --release --features gui   --bin p2p-desktop --bin p2p-agent --bin p2p-node
+cargo build --locked --release --no-default-features --features desktop-client --bin p2p-desktop
+cargo build --locked --release --no-default-features --features agent-standard --bin p2p-agent --bin p2p-node
 
 target/release/p2p-desktop
 ```
 
-桌面、Agent 和管理 CLI 应使用同一源码提交构建。文件任务在工作台管理；设置、节点管理、连接诊断、目录预览和任务详情使用独立窗口，并共享同一个后台。
+桌面、Agent 和管理 CLI 使用同一提交和版型。标准桌面首页提供设备、授权服务目录和转发。通过打包脚本的 `--with-files`（PowerShell 为 `-WithFiles`）获得文件增强版；首次使用在桌面设置中启用文件传输，并启动后台应用配置。增强版 CLI 提供 `send`、`preview-directory`、`pause` 和 `resume` 等命令。
 
-主窗口关闭按钮会收起到托盘，业务继续运行；托盘不可用时保留任务栏入口。托盘菜单“退出 Veytrane”会停止 Agent 并等待状态保存。正式应用包及平台依赖见[桌面构建与运行](packaging/RUNNING.md)。
+主窗口关闭按钮会收起到托盘，托盘不可用时保留任务栏入口。托盘菜单“退出 Veytrane”退出桌面，后台 Agent 继续提供转发。需要停用后台时使用节点管理的停止入口。发行组合及平台依赖见[桌面构建与运行](packaging/RUNNING.md)。
 
 ### 5. 自建信令服务器
 
 在可被双方访问的服务器上运行：
 
 ```sh
-cargo build --locked --release --bin p2p_file
+cargo build --locked --release --no-default-features --features standalone --bin p2p_file
 
 # 在可写的专用工作目录运行；数据库保存短设备 ID 的长期映射
 target/release/p2p_file signal-server   --listen 0.0.0.0:8900   --short-id-db ./signal-device-ids.sqlite3

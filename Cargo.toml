@@ -26,7 +26,7 @@ default-members = ["."]
 resolver = "3"
 
 [features]
-default = ["node"]
+default = ["agent-standard"]
 node-speed = ["dep:veytrane-speed", "veytrane-speed/node-runtime"]
 node-runtime = [
     "dep:veytrane-node",

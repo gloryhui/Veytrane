@@ -16,7 +16,7 @@ src/main.rs → apps/standalone-cli
            └─ signal-server → apps/signaling → 信令、短 ID 注册库和可选 Relay
 ```
 
-默认构建保留现有二进制入口、`node.json`、IPC JSON 和线上协议。Agent 可选装文件和导航。根包的部分重导出仍供现有调用方使用。
+默认构建 `p2p-agent` 和 `p2p-node`，内置 TCP 转发、测速和回环导航。原生文件传输随显式增强组合编译。标准与增强组合共用 `node.json`、IPC v1 和线上协议。
 
 ## 兼容入口
 
@@ -39,8 +39,9 @@ src/main.rs → apps/standalone-cli
 | `apps/web-management` | `p2p-node web` 管理页和 Agent 默认 `3001` 导航。两个入口经同一 IPC 使用 Agent。内置导航与 Agent 同进程，核心重建时导航继续运行。 |
 | `crates/veytrane-http-auth` | 旧独立管理页与节点管理页共用的回环 Host、Origin、Bearer 和令牌文件逻辑。 |
 | `apps/live`、`apps/sub2api` | 专用产品各自的装配、授权、容量和界面。共用恢复退避及节点事件辅助仍在 `src/node/products/`。 |
-| `apps/desktop/src/agent_shell/` | 唯一 IPC 桌面及其工作台、窗口、托盘宿主。 |
-| `apps/desktop/src/ui/` | 工作台与二级窗口共用控件、文本输入、视觉主题、品牌。 |
+| `apps/desktop/src/agent_shell/` | IPC 桌面、设备与转发首页、通用二级窗口及托盘宿主。 |
+| `crates/veytrane-desktop-ui` | 标准桌面与文件工作台共用的控件、文本输入、主题及文字编辑动作。 |
+| `apps/desktop/src/ui/` | 桌面品牌入口与共享控件引用。 |
 | `apps/desktop/src/platform/` | 托盘、窗口显隐和平台状态。 |
 | `src/storage/` | 基础存储和独立 CLI 文件存储的兼容入口。 |
 | `src/discovery/`、`nat/`、`net/`、`transport/`、`relay/` | mDNS、STUN、连接竞速和 Relay 回退策略。旧信令、打洞、QUIC 和 Relay 接入导入指向传输包。服务端模块只在 `signaling-server` 及测试构建启用。 |
@@ -49,7 +50,7 @@ src/main.rs → apps/standalone-cli
 | `src/protocol/`、`transfer/`、`tunnel/`、`admin/` | 原独立 CLI 仍在使用的协议与执行路径；不能因与 node 同名就删除。 |
 | `crates/veytrane-transport` | 身份、QUIC 握手和端点、连接提交及端点租约、有界原始帧、信令客户端和报文、UDP 探测、Relay 接入及 OS 存储原语。 |
 | `crates/veytrane-node` | P2PN 协商、双向流分发、会话授权、设备容量、连接代际及活动许可。 |
-| `crates/veytrane-files` | P2PF 文件协议、收发、调度、限速、落盘、回执、任务库、断点恢复与文件配置校验。 |
+| `crates/veytrane-files` | 可选的文件应用，集中文件协议、执行、任务与恢复、配置校验、管理 DTO、GPUI、Web 面板和 CLI 命令。GPUI 使用公共控件和 IPC，运行时复用节点会话与授权。 |
 | `crates/veytrane-speed` | 测速控制、数据流、租约及结果。 |
 | `crates/veytrane-tcp` | TCP 规则校验、流配额、监听和 QUIC 字节桥接。 |
 
@@ -62,22 +63,24 @@ src/main.rs → apps/standalone-cli
 ## 构建组合
 
 ```sh
-cargo build --locked --no-default-features --features node --bin p2p-agent --bin p2p-node
+cargo build --locked --bin p2p-agent --bin p2p-node
+cargo build --locked --no-default-features --features agent-standard --bin p2p-agent --bin p2p-node
 cargo build --locked --no-default-features --features agent-full --bin p2p-agent --bin p2p-node
 cargo build --locked --no-default-features --features desktop-client --bin p2p-desktop
+cargo build --locked --no-default-features --features desktop-files --bin p2p-desktop
 cargo build --locked --no-default-features --features agent-base --bin p2p-agent
 cargo tree --locked --no-default-features --features agent-base -e normal,features
 cargo build --locked --no-default-features --features standalone --bin p2p_file
 cargo build --locked --no-default-features --features standalone-files --bin p2p_file
 ```
 
-`node` 保留完整发行组合和独立命令。`agent-full` 构建完整 Agent 和管理 CLI，排除旧 CLI、信令服务端及其 SQLite。`agent-base` 内置测速与 TCP，排除文件执行、GPUI 和 HTTP 管理。`agent-files` 增加文件能力，`agent-web` 增加同进程导航。`desktop-client` 可单独构建桌面。`standalone` 构建旧 CLI 的信令、TCP 和测速入口。独立 CLI 的 `send`、`recv`、`push` 和 `serve --recv-dir` 使用 `standalone-files` 构建。Live 和 Sub2API 可用各自 feature 构建。
+`agent-standard` 内置测速、TCP、回环 Web 与 CLI。`agent-full` 增加文件运行、Web 面板及管理子命令。`agent-base` 提供测速、TCP 和本机 IPC，可裁剪 HTTP。桌面标准版 `desktop-client` 与增强版 `desktop-files` 独立构建。`node` 留给完整回归。`standalone` 构建独立 CLI 的信令、TCP 和测速入口，`standalone-files` 增加 `send`、`recv`、`push` 和 `serve --recv-dir`。Live 和 Sub2API 使用各自的 feature。
 
 `node-runtime` 提供可复用的节点会话及能力装配所需的配置。Live 和 Sub2API 的发行入口使用独立产品特性，生产构建排除管理 IPC 包、Agent 宿主、文件和测速执行。`agent-base` 通过 `node-speed` 装配测速。
 
-裁剪 Agent 初始化时把 `enable_files` 设为 `false`。加载明确启用文件的配置、提交启用文件或修改文件设置的草稿时返回能力错误。原有文件配置随其他设置保存。文件命令返回 `capability_disabled`，`Tasks` 仍返回空文件列表、空预览、可空队列与测速结果。
+两种版型初始化时都把 `enable_files` 设为 `false`。标准 Agent 加载明确启用文件的配置、提交启用文件或修改文件设置的草稿时返回能力错误。原有文件配置随其他设置保存。历史文件命令返回 `capability_disabled`，`Tasks` 仍返回空文件列表、空预览、可空队列与测速结果。
 
-`Status.capabilities` 表示当前 Agent 本机已装配的业务。GPUI 根据它控制文件与测速入口，设备连接状态独立读取 peer 快照。IPC 宿主持有可选文件和测速句柄，`Tasks` 从各自服务读取事实并维持现有分页、脱敏和诊断投影。会话 actor 串行处理依赖实时对端授权和连接代际的文件与测速操作。
+`Status.capabilities` 表示本机已生效的业务。增强桌面读取 `files_compiled` 及 `capabilities.files` 决定是否显示启用和工作台入口。标准桌面从 `Status.speeds` 读取测速结果。`Tasks` 保留历史分页和脱敏契约，会话 actor 仍按对端授权和连接代际处理文件与测速操作。
 
 ## 本次审阅后的处置
 

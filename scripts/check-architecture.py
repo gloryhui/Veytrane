@@ -39,6 +39,7 @@ WORKSPACE_DEPENDENCIES = {
     },
 }
 PROFILE_EXCLUSIONS = {
+    "": {"veytrane-files", "gpui", "rusqlite"},
     "node-runtime": {
         "veytrane-management", "veytrane-files", "veytrane-web-management",
         "veytrane-speed", "axum", "dirs", "gpui", "rusqlite",
@@ -166,13 +167,15 @@ def cargo_violations(root):
     for features, excluded in PROFILE_EXCLUSIONS.items():
         command = [
             "cargo", "tree", "--locked", "-p", "p2p_file",
-            "--no-default-features", "--features", features, "-e", "normal",
+            "-e", "normal",
             "--prefix", "none", "--format", "{p}",
         ]
+        if features:
+            command.extend(["--no-default-features", "--features", features])
         output = subprocess.check_output(command, cwd=root, encoding="utf-8")
         dependencies = {line.split()[0] for line in output.splitlines() if line.strip()}
         for dependency in sorted(dependencies & excluded):
-            errors.append(f"{features} links forbidden production dependency {dependency}")
+            errors.append(f"{features or 'default'} links forbidden production dependency {dependency}")
     return errors
 
 

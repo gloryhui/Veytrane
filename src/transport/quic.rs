@@ -93,11 +93,10 @@ impl PunchSocketHandle {
     }
 
     pub fn register_probe(&self, token: &PunchToken) -> Result<PunchProbeReceiver> {
-        let local_addr = self.router.local_addr;
         let result = self.router.register(token, None, 0);
         #[cfg(feature = "node-runtime")]
         crate::transport::diagnostic::punch_watch_register(
-            local_addr,
+            self.router.local_addr,
             token,
             result.as_ref().ok().map(|receiver| receiver.id),
             None,
@@ -113,11 +112,10 @@ impl PunchSocketHandle {
         peer: crate::identity::NodeId,
         generation: u64,
     ) -> Result<PunchProbeReceiver> {
-        let local_addr = self.router.local_addr;
         let result = self.router.register(token, Some(peer), generation);
         #[cfg(feature = "node-runtime")]
         crate::transport::diagnostic::punch_watch_register(
-            local_addr,
+            self.router.local_addr,
             token,
             result.as_ref().ok().map(|receiver| receiver.id),
             Some(peer),
@@ -216,6 +214,7 @@ struct PunchRoutes {
 struct PunchRouter {
     routes: Arc<Mutex<PunchRoutes>>,
     next_id: Arc<AtomicU64>,
+    #[cfg(feature = "node-runtime")]
     local_addr: Option<SocketAddr>,
 }
 
@@ -258,8 +257,11 @@ impl PunchRouter {
             id,
             router: self.clone(),
             receiver,
+            #[cfg(feature = "node-runtime")]
             local_addr: self.local_addr,
+            #[cfg(feature = "node-runtime")]
             expected_peer,
+            #[cfg(feature = "node-runtime")]
             generation,
         })
     }
@@ -446,8 +448,11 @@ pub struct PunchProbeReceiver {
     id: u64,
     router: PunchRouter,
     receiver: mpsc::Receiver<SocketAddr>,
+    #[cfg(feature = "node-runtime")]
     local_addr: Option<SocketAddr>,
+    #[cfg(feature = "node-runtime")]
     expected_peer: Option<crate::identity::NodeId>,
+    #[cfg(feature = "node-runtime")]
     generation: u64,
 }
 
@@ -494,6 +499,7 @@ pub fn endpoint_from_socket_with_punch_dispatcher(
             .map_err(|err| Error::Transport(format!("接管 UDP socket 失败: {err}")))?,
     );
     let router = PunchRouter {
+        #[cfg(feature = "node-runtime")]
         local_addr: io.local_addr().ok(),
         ..PunchRouter::default()
     };

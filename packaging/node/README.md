@@ -4,7 +4,7 @@
 
 ## 构建和首次配置
 
-Ubuntu Server无需GUI：`cargo build --locked --release --bin p2p-agent --bin p2p-node`。桌面包的三平台构建入口现同时构建桌面、Agent和管理CLI；Mac三者在同一`Contents/MacOS`目录。不要只复制桌面二进制。
+无界面服务器使用 `cargo build --locked --release --bin p2p-agent --bin p2p-node` 构建标准版。要构建文件增强版，显式使用 `--no-default-features --features agent-full`。桌面发行同时包含桌面、Agent 与管理 CLI，macOS 的三者位于同一个 `Contents/MacOS` 目录。新节点启用 TCP，文件能力在增强版中由用户显式开启。
 
 新安装先运行 `p2p-node init`。旧桌面迁移命令已删除。当前节点采用 P2PN v2，两端须同步升级；旧节点配置中的 `peer_modes` 字段需在停机备份后移除，每条转发必须具有 `service_ids` 映射。保留既有身份、密码验证器、资源授权和任务库；不要用重新初始化来处理升级错误。
 
@@ -50,8 +50,8 @@ Agent 的网络核心在所有平台和前台/托管模式下，每 5 秒观察�
 
 macOS 登录宿主使用 `p2p-agent --managed`，保留 `RunAtLoad`、异常退出自动重启及 30 秒优雅退出等待。`--managed` 仅为网络核心实际退出保留宿主兜底，不再因唤醒或接口变化退出 Agent。用户显式 Stop 或停止节点以保存需重启的配置仍正常退出。Mac 日志位于 `~/Library/Logs/p2p-file-node/agent.stderr.log`；恢复原因也进入管理状态的 diagnostics。
 
-`python node-host.py upgrade --bin-dir <新版本目录>`先验证两个二进制SHA/版本/target/API一致，再请求旧Agent停机并证明目录、身份、任务锁释放；不强杀、不强行接管。保留旧版本目录与`previous-install.json`，新启动核对NodeId、revision不倒退和build SHA。失败保持数据，禁止自动回退旧授权或覆盖新任务。
+`python node-host.py upgrade --bin-dir <新版本目录>` 先核对两个二进制的版型、SHA、版本、目标和 IPC，再由候选只读预检现有配置。仍启用文件的节点可升级到增强版，也可先通过现有 Agent 的配置 revision 事务停用文件，再切换到标准版。切换前处理正在运行的任务。两个版型安装在 `<SHA>-standard` 与 `<SHA>-files`，旧 SHA 目录继续从安装元数据中的真实路径定位。新进程就绪后校验节点身份、revision、SHA 和版型。
 
-失败恢复先停新Agent并确认锁释放，检查当前schema/revision和授权变更；仅在旧版本能读取当前根且不会丢失撤销/任务字段时，人工按`previous-install.json`恢复旧启动路径。否则保持停机，用同schema修复版本恢复。备份恢复不是自动数据回滚。uninstall只卸载启动项，保留全部身份、配置、任务、业务文件和版本目录。
+失败恢复先停新 Agent 并确认所有权锁释放，再检查当前 schema、revision 和授权变更。通过 `previous-install.json` 的 `installation.bin_dir` 找到原版，仅在它兼容当前配置并能保留授权和任务时恢复。标准版运行期间保留增强版的任务库与接收数据。`uninstall` 卸载启动项，保留身份、配置、任务、业务文件和版本目录。
 
 当前 Mac / Ubuntu 的安装、服务重启及主节点互通已有上述实机证据，Mac 桌面包通过 ad hoc 签名验证。物理重启 / 重新登录、睡眠唤醒、升级中断注入、Mac 公证发布与 Windows 计划任务行为不在这次验收范围；模板/打包脚本语法检查不能替代对应实机证据。

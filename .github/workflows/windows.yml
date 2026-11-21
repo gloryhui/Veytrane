@@ -15,7 +15,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: dtolnay/rust-toolchain@stable
       - name: Check the standard Agent and management CLI
-        run: cargo check --locked --no-default-features --features agent-standard --bin p2p-agent --bin p2p-node
+        run: cargo check --locked --all-targets
       - name: Run all Rust tests on Windows
         run: cargo test --locked --no-default-features --features node --all-targets --no-fail-fast
       - name: Run native IPv6 regressions with capability diagnostics

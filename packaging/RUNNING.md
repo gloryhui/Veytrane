@@ -1,8 +1,8 @@
-> 默认桌面保留原文件传输工作台，通过 IPC 附着独立 Agent，安装包须同时包含 p2p-agent 与 p2p-node。设置、节点管理、连接诊断、测速、任务详情和目录预览均使用独立窗口；节点管理从“设置 → 打开节点管理”进入。打开、关闭或重新打开二级窗口不改变主界面、后台身份或会话。9 位设备 ID、连接、文件/目录发送、增量预览、暂停继续、测速和接收目录变更均由 Agent 执行。主窗口“×”隐藏至托盘，点击托盘图标恢复；托盘菜单“退出 Veytrane”只退出桌面客户端，后台 Agent 继续运行。已有配置时桌面会附着或启动后台；首次使用可显式初始化，升级保留现有身份与任务；旧桌面导入入口已删除。初始化、后台启动及升级细节见 [node 宿主说明](node/README.md)。下文保留原版功能说明；新工作台的网络设置通过“保存网络并停止节点”提交，之后点击启动后台节点重新上线。
-
 # Veytrane 桌面候选包
 
-当前本机与 Ubuntu 安装已更新到 `ec72ed4`，Mac 应用为 `/Applications/Veytrane.app`，Windows 专用新版 ZIP 已交付到发行者桌面；实机范围、状态保留和校验值见[最新部署验收](../docs/task-reports/VEYTRANE_DEPLOYMENT.md)。通用 Windows 桌面候选与 Sub2API 专用包分别构建，不能互相替代。
+标准版包含设备连接、TCP 转发、测速和本机管理。文件增强版增加原生文件工作台和 Web 文件面板。两个版型都需要同一提交的桌面、Agent 和 CLI。桌面通过 IPC 附着已运行 Agent，退出桌面后 Agent 继续工作。
+
+三平台构建脚本默认产出标准候选。Shell 和 BAT 使用 `--with-files`，PowerShell 使用 `-WithFiles` 产出文件增强候选。增强归档带 `-files` 后缀，CI 资产名以 `veytrane-files-` 开头。对于已有节点，按[宿主升级说明](node/README.md)保留身份、配置及任务数据。
 
 这是 GPUI MVP 的候选产物。版本、完整源码 commit、目标、实际二进制/归档大小、SHA256、签名状态在 `build-info.json` / `candidate.json`。`SHA256SUMS` 校验解包后的文件；旁置 `.sha256` 校验归档。不要把 PR 的 CI 成功当作最低系统、物理设备或双 NAT 验收。最终状态以 [Issue #24](https://github.com/gloryhui/Veytrane/issues/24) 为准；未完成 mandatory 外部验证之前不创建正式 Release。
 
@@ -46,11 +46,7 @@ codesign -dv --verbose=4 "Veytrane.app"
 只需本机可运行的轻量 `.app` 时，打包命令加 `--app-only`。该模式只输出 `Veytrane.app`，保留依赖许可证/声明文本，不复制完整 `.crate` 源码归档，也不生成候选 ZIP、`candidate.json` 或 SHA256 旁置文件；因此它不是完整审计候选包：
 
 ```sh
-python3.12 scripts/package-desktop.py \
-  --binary target/aarch64-apple-darwin/release/p2p-desktop \
-  --target aarch64-apple-darwin \
-  --output "$P2P_PACKAGE_DIR" \
-  --app-only
+./packaging/macos-arm64/build.sh --app-only --output "$P2P_PACKAGE_DIR"
 open "$P2P_PACKAGE_DIR/Veytrane.app"
 ```
 
@@ -82,15 +78,15 @@ install -Dm644 p2p-file.desktop "$HOME/.local/share/applications/p2p-file.deskto
 
 ## 配置、自建信令与可信设备边界
 
-第一次启动信令主机与端口为空；没有内置开发服务器。先在设置中填写你自己的信令地址/端口，选择本机接收目录，再保存。信令只交换地址/令牌，文件和测速经过认证的 QUIC 直连。既有 CLI 可自建服务：
+首次启动保留空信令配置，附近设备或已知地址可直接连接。需要跨网络发现时，在设置中加入自己的信令地址，通过“保存网络并停止节点”提交，再启动后台。使用独立 CLI 启动信令服务。
 
 ```sh
-cargo build --locked --release --bin p2p_file
+cargo build --locked --release --no-default-features --features standalone --bin p2p_file
 ./target/release/p2p_file signal-server --help
 ./target/release/p2p_file signal-server --listen 0.0.0.0:8900
 ```
 
-服务需可达的 TCP 端口；两端客户端需允许实际 UDP 打洞/QUIC 流量。公网地址和防火墙由你的部署决定，文档不承诺任意 NAT 都能直连。桌面只提供文件/目录、暂停/继续和测速，不提供远程路径、shell 或隧道控件。知道 ID 的节点可发送文件，属于可信设备 MVP；没有用户审批/恶意发送者隔离的产品承诺。只给新任务选定接收根；修改对端输入不改变旧任务绑定。
+信令服务使用可达的 TCP 端口，设备间允许实际 UDP 打洞和 QUIC 流量。标准首页按设备、服务 ID 和本机监听管理端口转发。需要传输原生文件时，在两端增强版的设置中启用文件传输并重新启动 Agent，确认对端授权和本机接收目录。
 
 复制完整本机 ID；对端输入该 ID 并连接。接收方无需预设发送方，收到任务会自动显示。发送并发仅支持 1/2/3；修改后保存才应用。测速使用同一已认证连接、30秒或1–10分钟，与该 peer 的文件活动互斥，接收结果的 elapsed 决定平均速率。取消后速率归零，允许随后文件或新的测速。
 
@@ -104,6 +100,6 @@ cargo build --locked --release --bin p2p_file
 
 ## 来源、许可证和证据
 
-`LICENSE` 是本仓库 MIT；GPUI 适配代码及 Apache 条款在 `THIRD_PARTY_NOTICES.md`。完整审计候选的 `dependencies.json` 原样保存 Cargo 依赖声明、作者、上游地址和已锁定源码 SHA256。macOS 材料存放于 .app 的 `Contents/Resources`，随应用一起安装。完整审计候选的 `licenses/` 保留上游提供的 LICENSE/NOTICE/COPYING/README；`third-party-sources/` 提供每个原始 `.crate` 完整源码归档（SHA256 对照 Cargo.lock），含嵌套版权/许可材料。轻量 `--app-only` 模式仅保留许可证/声明文本，不含这些源码归档，也不作为完整审计候选。清单保守包含构建、可选和其它目标依赖，不声称每个包都链接进当前二进制，也不重写上游 SPDX 选择表达式。系统动态库没有复制进包，由系统包管理器提供其许可材料。
+`LICENSE` 是本仓库 MIT，GPUI 适配代码及 Apache 条款在 `THIRD_PARTY_NOTICES.md`。完整候选的 `dependencies.json` 记录目标平台、桌面与 Agent 的实际构建组合、普通及构建依赖、上游许可证和已锁定源码 SHA256。macOS 将资料置于 `.app` 的 `Contents/Resources`。随包提供 `licenses/` 和原始 `.crate` 归档，轻量 `--app-only` 输出许可证文本。系统动态库由系统包管理器提供其许可材料。
 
 包体积包含这些来源材料，启动耗时需由实际 GUI 窗口测量；metadata 子进程耗时只称 metadata probe。真实 600 秒、进程强杀/恢复、目录重名、中文/DPI 的证据和未执行项见仓库 T010/T011/T012 文档与 Issue #24。缺少物理 Win10/Win11、macOS13 Apple Silicon、真实中文 IME/Wayland、Windows↔Linux 双 NAT 两方向文件/测速及 Apple Silicon 互传时，最终状态保持 `FINAL_BLOCKED_EXTERNAL_VALIDATION`。
