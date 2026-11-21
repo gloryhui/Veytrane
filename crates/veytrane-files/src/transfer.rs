@@ -466,6 +466,28 @@ impl TransferService {
             .unwrap()
             .due(Instant::now(), ready, busy)
     }
+    pub async fn recover_with_authorization(
+        &self,
+        connection: &Connection,
+        ticket: crate::auto_resume::Ticket,
+        authorization: veytrane_node::live_authorization::LiveAuthorization,
+    ) -> Result<()> {
+        // Generation-owned rights abort the entire old continuation.
+        // A receive RPC also needs inbound rights for its new Offer.
+        if ticket.direction == TaskDirection::Receive {
+            let incoming = authorization.clone();
+            authorization
+                .guard(
+                    false,
+                    incoming.guard(true, self.auto_recover(connection, ticket)),
+                )
+                .await
+        } else {
+            authorization
+                .guard(false, self.auto_recover(connection, ticket))
+                .await
+        }
+    }
     /// Recheck the original binding and current-run intention in the same store
     /// writer as queue admission. Old workers must release their slots first.
     pub async fn auto_recover(

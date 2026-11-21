@@ -5024,24 +5024,9 @@ async fn run_session<B>(
                         let connection = connection.clone();
                         let service = service.clone();
                         peer_tasks.spawn(async move {
-                            // Generation-owned rights abort the entire old continuation.
-                            // A receive RPC also needs inbound rights for its new Offer.
-                            if ticket.direction
-                                == crate::node::core::task_model::TaskDirection::Receive
-                            {
-                                let incoming = live.clone();
-                                let _ = live
-                                    .guard(
-                                        false,
-                                        incoming
-                                            .guard(true, service.auto_recover(&connection, ticket)),
-                                    )
-                                    .await;
-                            } else {
-                                let _ = live
-                                    .guard(false, service.auto_recover(&connection, ticket))
-                                    .await;
-                            }
+                            let _ = service
+                                .recover_with_authorization(&connection, ticket, live)
+                                .await;
                         });
                     }
                 }
