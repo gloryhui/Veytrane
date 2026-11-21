@@ -12,6 +12,22 @@ const SPEC = join(HERE, 'layer-review.spec.json');
 const OUT = join(HERE, 'layer-review.html');
 const CLIENT = readFileSync(join(HERE, 'layer-review-client.js'), 'utf8');
 const SHELL = readFileSync(join(HERE, 'layer-review-shell.css'), 'utf8');
+const BLUEPRINT_LIGHT_CSS = `<style>
+:root[data-theme="blueprint"][data-appearance="light"] {
+  --bg: #d4e5fa;
+  --panel: #e5effc;
+  --dim: #3d587e;
+  --faint: #7899c1;
+  --cyan: #086577;
+  --blue: #214f91;
+  --green: #23633c;
+  --purple: #593887;
+  --amber: #784c0b;
+  --orange: #8c4818;
+  --red: #972d25;
+  --flash: #bfd9fa;
+}
+</style>`;
 const SKILL = [
   join(homedir(), '.config/magpie/library/skills/arch-diagram'),
   join(homedir(), '.codex/skills/arch-diagram'),
@@ -70,8 +86,9 @@ const BRIDGE = `<script>
 })();
 </script>`;
 
-function prepareDoc(html) {
-  const withStyle = html.replace('</head>', '<style>#diagram-controls{display:none!important}</style></head>');
+function prepareDoc(html, theme) {
+  const themeStyle = theme === 'blueprint' ? BLUEPRINT_LIGHT_CSS : '';
+  const withStyle = html.replace('</head>', `${themeStyle}<style>#diagram-controls{display:none!important}</style></head>`);
   if (withStyle === html) throw new Error('could not hide the iframe toolbar');
   const withBridge = withStyle.replace(/<\/body>\s*<\/html>\s*$/i, BRIDGE + '\n</body></html>');
   if (withBridge === withStyle) throw new Error('could not attach the iframe bridge');
@@ -128,7 +145,7 @@ function main() {
       files.push(base);
       run(join(SKILL, 'scripts/build.mjs'), [SPEC, base, '--theme', theme.id]);
 
-      docs[theme.id] = prepareDoc(readFileSync(base, 'utf8'));
+      docs[theme.id] = prepareDoc(readFileSync(base, 'utf8'), theme.id);
     }
 
     const html = finalPage(spec, title, docs);
