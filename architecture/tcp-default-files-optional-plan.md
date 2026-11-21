@@ -107,10 +107,20 @@
 - 上一项验证的是文件路径和权限元数据。后续在独立 LaunchAgent 中直接读取同一外置盘上的合成文件内容，两次均得到 `Operation not permitted`，终端可读同一文件。该探针在启动 Agent 前退出，因此未采集到子进程堆栈，也不能据此确定此前超时的具体调用。已证实当前测试任务的外置盘文件读取受限。保持原权限，清理测试注册和日志，现有 Agent PID 与启动定义未变。[探针输出](../tmp/p4-child.xOZCRS/joint-job.log)、[对照结果](../tmp/p4-child.xOZCRS/results.json)。
 - 将 `18d114b` 旧版和同 SHA 的 `ab4c34a` 标准版、文件增强版的 Agent 与 CLI 复制到系统盘隔离运行目录，原生 LaunchAgent 实际完成旧版 → 标准 → 增强 → 旧版。每次换版后通过 IPC 确认 TCP 能力、节点身份、revision 和配置字节。混包与文件仍启用时切到标准版均在停止进程前被拒绝。测试使用合成节点配置和独立标签，结束后卸载临时任务，现有 Agent 的 PID 与启动定义 SHA-256 一致。文件能力在测试中开启和关闭，未执行系统重新登录。源码、编译缓存、发行归档和验收记录保留在外置盘，此次复用已有候选。[换版结果](../tmp/p4-mac-system.6EQbja/verified-results.json)、[运行二进制 SHA-256](../tmp/p4-mac-system.6EQbja/verified-runtime-sha256.txt)。
 - 16 项宿主测试及 9 项包验证测试通过。Linux 使用原生 systemd 用户临时单元实测标准 → 文件增强 → 标准，三个进程均经真实 IPC 就绪、退出并释放所有权，保留相同的身份、配置及 revision。两阶段比较了现有 Agent 服务的 PID、启动调用 ID 和定义路径。[systemd 换版结果](../tmp/p4-linux-evidence.5K8JYj/systemd-switch.json)。
-- Linux 在隔离 HOME 与 XDG 配置中，使用 `node-host.py` 生成用户服务，再通过真实 `systemctl --user` 的客户端注册逻辑分别验证两版型的启用、`default.target.wants` 指向及禁用。标准 → 增强 → 标准均从各自注册后的 `ExecStart` 启动原生临时单元，并核对原有 Agent 的 PID、启动调用 ID 和定义路径。验证未执行物理重新登录，也未重载现有用户管理器。Windows 计划任务及 Intel Mac 原生发行待验收。[注册与启动证据](../tmp/p4-login.Nz3ASU/results.json)。
+- Linux 在隔离 HOME 与 XDG 配置中，使用 `node-host.py` 生成用户服务，再通过真实 `systemctl --user` 的客户端注册逻辑分别验证两版型的启用、`default.target.wants` 指向及禁用。标准 → 增强 → 标准均从各自注册后的 `ExecStart` 启动原生临时单元，并核对原有 Agent 的 PID、启动调用 ID 和定义路径。验证未执行物理重新登录，也未重载现有用户管理器。[注册与启动证据](../tmp/p4-login.Nz3ASU/results.json)。
 - 从干净 `4f3be51` 源码在 macOS arm64 分别用 `--no-default-features` 构建 `live` 的 gateway/viewer、`sub2api-gateway` 和 `sub2api-client`，均生成原生可执行文件。客户端使用无私有配置的编译组合。三套构建均报告四条未使用的节点策略 API 告警；验证涵盖构建和目标架构。[Live](../tmp/p4-products.1GBs3O/live.log)、[Sub2API Gateway](../tmp/p4-products.1GBs3O/sub2api-gateway.log)、[Sub2API Client](../tmp/p4-products.1GBs3O/sub2api-client.log)。
-- [GPUI CI](../.github/workflows/gpui.yml) 提供 Windows x64 与 Intel Mac 双版型的原生构建和归档验证，入口为 PR 或对远端 ref 的手动触发。Windows 使用正式 `build.ps1` 分别生成标准和 `-WithFiles` 候选，包含各自的 doctor、打包与归档验证。Windows runner 执行这些步骤的证据待补。
-- `d639375` 更新 Windows [计划任务换版验收入口](../packaging/node/README.md#windows-双版型隔离验收)，允许同 SHA 的标准与增强候选往返切换，并核对任务指向、TCP 能力、身份与配置。18 项本机 Python 宿主测试通过，Windows 计划任务实测待执行。
+- [首次原生 CI](https://github.com/gloryhui/Veytrane/actions/runs/44878747014) 在 `fdac2e6` 通过 Linux、Apple Silicon 和 Intel Mac。Windows 回归通过后，正式打包被干净工作树检查拦截。MSVC 探针默认把 `sdk_probe.obj` 写到仓库目录，`de9af87` 将它显式输出到探针临时目录。
+- [修复后原生 CI](https://github.com/gloryhui/Veytrane/actions/runs/44880833831) 在 `de9af87d516efea8f0cf2dab0c235ea59815e1b2` 的 Windows x64、Intel Mac、Apple Silicon 和 Linux 全部通过。Windows 和 Intel Mac 分别使用正式宿主脚本构建两版型，归档校验通过。Linux 的标准版与增强版均通过严格 Clippy。
+- `d639375` 更新 Windows [计划任务换版验收入口](../packaging/node/README.md#windows-双版型隔离验收)，允许同 SHA 的标准与增强候选往返切换，并核对任务指向、TCP 能力、身份与配置。18 项本机 Python 宿主测试通过。Windows Server 2022 CI 提供了可用于实测的双版候选，仍需具有已登录测试用户和 PowerShell 7 的隔离 Win10 22H2 或 Win11 x64 环境执行任务注册、切换和注销。
+
+| `de9af87` 候选 | GitHub Actions 产物 ID | 归档 SHA-256 |
+| --- | --- | --- |
+| Windows x64 标准 | `14699490790` | `bfed8d06901ced7caf124451f3dcbd782bf4049d8adfa3dca9f60b41bf663170` |
+| Windows x64 增强 | `14699490793` | `85314ff88adfc42026fee1e6626b98c3161cf027e46f9bdcce29dd94a1f8d7bf` |
+| Intel Mac 标准 | `14699890428` | `abb166e59e6260c8b4d098767fe052c6abeb3545902f671c297b4bca3755e5e4` |
+| Intel Mac 增强 | `14699661002` | `1781257b7e2331151fccc37f9cd8377c01a3049711bf92a1dc2e6aa495d0e3ec` |
+
+四份归档已下载至外置盘，重新核对归档、内含三种可执行文件及依赖材料的 SHA-256。[本地归档与验证记录](../tmp/p4-ci-44880833831.hkoY9I/)。
 
 ### P5 默认切换与物理移除（2026-11-21）
 
@@ -118,7 +128,7 @@
 - 本机 `8093` 站点返回的架构图与仓库文件 SHA-256 一致。使用 agent-browser 驱动隔离的本机 Chrome 窗口，逐一验证八种主题的亮色、暗色，共 16 种状态，每种均包含全部 14 个节点。实际点击导出并重新打开三张 PNG，终端暗色与蓝图亮色为 2544×2374，等距暗色为 3812×2528，三张均完整显示图例、节点和边缘连线。[浏览器记录](/private/tmp/veytrane-diagram-qa.Ark9pn/browser-results.json)。
 - 以 `c6ee03c` 的干净源码构建 macOS arm64 [标准候选](/private/tmp/veytrane-native-p4.8v44vH/verified-standard/candidate.json)与[文件增强候选](/private/tmp/veytrane-native-p4.8v44vH/verified-files/candidate.json)，均通过完整归档校验，第三方依赖数分别为 536 和 545。
 - `a94b8a0` 调整公共工作台及诊断文案后，从干净 `ab4c34a` 源码使用正式 macOS arm64 脚本重新构建两个候选。标准与增强的三二进制版型、归档和 ad hoc 签名验证均通过，证据列出同一 SHA 的两个归档校验和。[标准候选](../tmp/p4-macos-final.3ZkW41/standard/candidate.json)、[增强候选](../tmp/p4-macos-final.3ZkW41/files/candidate.json)、[汇总](../tmp/p4-macos-final.3ZkW41/results.json)。
-- 同一源码在 Ubuntu 24.04 x86_64 通过标准和增强两个 `-D warnings` Clippy 配置，打包脚本及归档验证均通过。Linux 标准版和增强版分别列出 591 和 601 个第三方包。标准版另通过真实回环导航 API、核心重建保留 HTTP，以及 X11 窗口、托盘和退出验收。Windows 与 Intel Mac 的原生候选待验证。[Linux 标准候选](../tmp/p4-linux-evidence.5K8JYj/standard-candidate.json)、[增强候选](../tmp/p4-linux-evidence.5K8JYj/files-candidate.json)、[导航](../tmp/p4-linux-evidence.5K8JYj/navigation-standard.json)与[桌面](../tmp/p4-linux-evidence.5K8JYj/background-standard.json)记录保存在外置盘工作区。
+- 同一源码在 Ubuntu 24.04 x86_64 通过标准和增强两个 `-D warnings` Clippy 配置，打包脚本及归档验证均通过。Linux 标准版和增强版分别列出 591 和 601 个第三方包。标准版另通过真实回环导航 API、核心重建保留 HTTP，以及 X11 窗口、托盘和退出验收。[Linux 标准候选](../tmp/p4-linux-evidence.5K8JYj/standard-candidate.json)、[增强候选](../tmp/p4-linux-evidence.5K8JYj/files-candidate.json)、[导航](../tmp/p4-linux-evidence.5K8JYj/navigation-standard.json)与[桌面](../tmp/p4-linux-evidence.5K8JYj/background-standard.json)记录保存在外置盘工作区。
 - 在从提交 `c6ee03c` 导出的隔离源码中，将 `crates/veytrane-files` 移到源码目录外。只改两份 manifest，去掉根 workspace 注册、增强版组合与依赖、文件专属测试注册，并去掉 Web 的 `files` feature 及依赖。Cargo 重新解析锁文件，生产依赖树与锁文件均无该包。同一份标准 Rust 源码构建出 Agent、CLI 和 GPUI。保留的可选装配 `cfg` 名称在剪掉注册的临时源码中触发检查提示。
 - `0195687` 的真实进程用例使用隔离复制品构建的两个 Agent，覆盖可信授权目录、四路实际 TCP、测速时并发 TCP、重连、撤销信任后旧流和授权失效、停止转发释放监听端口，并验证两端未创建文件任务库。[移除演练日志](/private/tmp/veytrane-p5-verified.ehCYB7/tcp-proof.log)。
 
