@@ -576,46 +576,6 @@ impl AgentShell {
             cx,
         );
     }
-    fn choose_files(&mut self, directory: bool, cx: &mut Context<Self>) {
-        if self.busy {
-            return;
-        }
-        let peer = Self::text(&self.management_peer, cx);
-        if NodeId::from_hex(&peer).is_err() {
-            self.message = "请先填写接收设备完整ID。".into();
-            cx.notify();
-            return;
-        }
-        let picked = cx.prompt_for_paths(PathPromptOptions {
-            files: !directory,
-            directories: directory,
-            multiple: !directory,
-            prompt: Some(
-                if directory {
-                    "选择预览目录"
-                } else {
-                    "选择发送文件"
-                }
-                .into(),
-            ),
-        });
-        cx.spawn(async move |shell, cx| {
-            if let Ok(Ok(Some(paths))) = picked.await {
-                let _ = shell.update(cx, |shell, cx| {
-                    let command = if directory {
-                        let Some(path) = paths.into_iter().next() else {
-                            return;
-                        };
-                        FileManagementCommand::PreviewDirectory { peer, path }
-                    } else {
-                        FileManagementCommand::Send { peer, paths }
-                    };
-                    shell.send_file_command(command, Kind::Action, cx)
-                });
-            }
-        })
-        .detach();
-    }
 }
 fn field(label: &'static str, input: &Entity<TextField>) -> gpui::Div {
     div().flex().flex_col().gap_1().flex_1().child(label).child(
@@ -992,102 +952,12 @@ impl AgentShell {
                 );
             }
         }
-        root = root.child(
+        root.child(
             forwards.child(
                 ui_components::primary_button("保存配置草稿", enabled && self.dirty)
                     .on_click(cx.listener(|s, _, _, cx| s.save(false, cx))),
             ),
-        );
-        let mut files = ui_components::card()
-            .child("文件任务（来自后台持久记录）")
-            .child(
-                ui_components::primary_button("选择文件并发送给上述设备", enabled)
-                    .on_click(cx.listener(|s, _, _, cx| s.choose_files(false, cx))),
-            );
-        files = files.child(
-            ui_components::primary_button("选择文件夹并预览", enabled)
-                .on_click(cx.listener(|s, _, _, cx| s.choose_files(true, cx))),
-        );
-        for preview in &self.previews {
-            let request = preview["id"].as_str().unwrap_or("").to_owned();
-            let cancel = request.clone();
-            let peer = preview["peer"].as_str().unwrap_or("").to_owned();
-            // Peer is projected as canonical text by the Agent DTO.
-            files = files.child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .items_center()
-                    .child(format!(
-                        "目录预览：新增{}，变化{}，不变{}，待传{}字节",
-                        preview["added"],
-                        preview["changed"],
-                        preview["unchanged"],
-                        preview["transfer_bytes"]
-                    ))
-                    .child(
-                        ui_components::primary_button(format!("确认目录 {request}"), enabled)
-                            .on_click(cx.listener(move |s, _, _, cx| {
-                                if let Ok(request) = TaskId::parse(&request) {
-                                    s.send_file_command(
-                                        FileManagementCommand::ConfirmDirectory {
-                                            peer: peer.clone(),
-                                            request,
-                                        },
-                                        Kind::Action,
-                                        cx,
-                                    );
-                                }
-                            })),
-                    )
-                    .child(
-                        ui_components::primary_button(format!("取消预览 {cancel}"), enabled)
-                            .on_click(cx.listener(move |s, _, _, cx| {
-                                if let Ok(request) = TaskId::parse(&cancel) {
-                                    s.send_file_command(
-                                        FileManagementCommand::CancelDirectory { request },
-                                        Kind::Action,
-                                        cx,
-                                    );
-                                }
-                            })),
-                    ),
-            );
-        }
-        for task in &self.tasks {
-            let id = task["id"].as_str().unwrap_or("").to_owned();
-            let peer = task["peer"].as_str().unwrap_or("").to_owned();
-            let mut row = div().flex().gap_2().items_center().child(format!(
-                "{} · {} · {}/{}",
-                task["name"].as_str().unwrap_or(""),
-                task["state"].as_str().unwrap_or(""),
-                task["confirmed"],
-                task["total"]
-            ));
-            for (label, operation) in [("暂停", 0), ("继续", 1), ("取消", 2)] {
-                let id = id.clone();
-                let peer = peer.clone();
-                row = row.child(
-                    ui_components::primary_button(format!("{label} {id}"), enabled).on_click(
-                        cx.listener(move |s, _, _, cx| {
-                            if let Ok(task) = TaskId::parse(&id) {
-                                let command = match operation {
-                                    0 => FileManagementCommand::Pause { task },
-                                    1 => FileManagementCommand::Resume {
-                                        peer: peer.clone(),
-                                        task,
-                                    },
-                                    _ => FileManagementCommand::Cancel { task },
-                                };
-                                s.send_file_command(command, Kind::Action, cx);
-                            }
-                        }),
-                    ),
-                );
-            }
-            files = files.child(row);
-        }
-        root.child(files)
+        )
     }
 }
 pub(crate) fn start_agent(
