@@ -60,6 +60,7 @@ gui = ["node", "desktop-client"]
 desktop-client = [
     "dep:veytrane-desktop-ui",
     "dep:veytrane-files",
+    "veytrane-files/desktop",
     "dep:veytrane-management",
     "dep:veytrane-node",
     "dep:gpui",

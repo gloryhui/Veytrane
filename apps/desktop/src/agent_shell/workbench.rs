@@ -2,6 +2,7 @@
 //! This view never opens an identity, task store, network session or transfer service.
 use super::*;
 use ui_components::input_frame;
+use veytrane_files::desktop::{TaskPagination, matches_task, preview_summary, task_state};
 use veytrane_management::protocol::SpeedtestDirection as AgentSpeedDirection;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash)]
@@ -130,23 +131,6 @@ impl Workbench {
     }
 }
 
-fn task_state(task: &Value) -> &'static str {
-    match task["state"].as_str().unwrap_or("") {
-        "scanning" => "扫描中",
-        "queued" => "排队中",
-        "connecting" => "连接中",
-        "negotiating" => "协商中",
-        "transferring" => "传输中",
-        "pausing" => "正在暂停",
-        "paused" => "已暂停",
-        "finalizing" => "正在发布确认",
-        "completed" => "已完成",
-        "interrupted" => "中断待继续",
-        "failed" => "失败",
-        _ => "未知",
-    }
-}
-
 fn bytes(value: f64) -> String {
     let value = if value.is_finite() { value.max(0.) } else { 0. };
     if value >= 1024. * 1024. * 1024. {
@@ -158,60 +142,6 @@ fn bytes(value: f64) -> String {
     } else {
         format!("{value:.0} B")
     }
-}
-
-fn matches_task(
-    task: &Value,
-    query: &str,
-    direction: u8,
-    state: u8,
-    peer: Option<&str>,
-    devices: &Value,
-) -> bool {
-    let task_peer = task["peer"].as_str().unwrap_or("");
-    if peer.is_some_and(|peer| peer != task_peer) {
-        return false;
-    }
-    if direction != 0
-        && task["direction"].as_str() != Some(if direction == 1 { "send" } else { "receive" })
-    {
-        return false;
-    }
-    let phase = task["state"].as_str().unwrap_or("");
-    if match state {
-        1 => !matches!(
-            phase,
-            "scanning"
-                | "queued"
-                | "connecting"
-                | "negotiating"
-                | "transferring"
-                | "pausing"
-                | "finalizing"
-        ),
-        2 => !matches!(phase, "paused" | "interrupted"),
-        3 => phase != "completed",
-        4 => phase != "failed",
-        _ => false,
-    } {
-        return false;
-    }
-    let query = query.trim().to_lowercase();
-    query.is_empty()
-        || task["name"]
-            .as_str()
-            .unwrap_or("")
-            .to_lowercase()
-            .contains(&query)
-        || task_peer.contains(&query)
-        || devices.as_array().into_iter().flatten().any(|d| {
-            d["node_id"].as_str() == Some(task_peer)
-                && d["display_name"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_lowercase()
-                    .contains(&query)
-        })
 }
 
 impl AgentShell {
@@ -721,11 +651,11 @@ impl AgentShell {
             })
             .cloned()
             .collect();
-        let total = self.ui.task_page["total"].as_u64().unwrap_or(0);
-        let offset = self.ui.task_page["offset"].as_u64().unwrap_or(0) as usize;
-        let next = self.ui.task_page["next_offset"]
-            .as_u64()
-            .map(|n| n as usize);
+        let pagination = TaskPagination::from_value(&self.ui.task_page);
+        let total = pagination.total;
+        let offset = pagination.offset;
+        let next = pagination.next_offset;
+        let previous = pagination.previous_offset();
         let mut toolbar = div()
             .flex()
             .items_center()
@@ -818,13 +748,7 @@ impl AgentShell {
                             MouseButton::Left,
                             cx.listener(move |s, _, _, cx| {
                                 if offset > 0 {
-                                    s.send(
-                                        Command::Tasks {
-                                            offset: offset.saturating_sub(128),
-                                        },
-                                        Kind::Tasks,
-                                        cx,
-                                    );
+                                    s.send(Command::Tasks { offset: previous }, Kind::Tasks, cx);
                                 }
                             }),
                         ),
@@ -1152,14 +1076,12 @@ impl AgentShell {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().flex_1().text_sm().child(format!(
-                        "{} · 新增 {} · 变化 {} · 不变 {} · 待传 {}",
-                        preview["name"].as_str().unwrap_or("目录"),
-                        preview["added"],
-                        preview["changed"],
-                        preview["unchanged"],
-                        bytes(preview["transfer_bytes"].as_u64().unwrap_or(0) as f64)
-                    )))
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_sm()
+                            .child(preview_summary(preview, bytes)),
+                    )
                     .child(
                         ui_components::secondary_button("确认发送", self.available()).on_mouse_up(
                             MouseButton::Left,
@@ -1861,16 +1783,6 @@ impl AgentShell {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn filters_keep_direction_state_and_device_identity_distinct() {
-        let task =
-            json!({"name":"report.txt","peer":"abc","direction":"receive","state":"completed"});
-        let devices = json!([{"node_id":"abc","display_name":"Home PC"}]);
-        assert!(matches_task(&task, "home", 2, 3, Some("abc"), &devices));
-        assert!(!matches_task(&task, "home", 1, 3, Some("abc"), &devices));
-        assert!(!matches_task(&task, "home", 2, 1, Some("abc"), &devices));
-        assert!(!matches_task(&task, "home", 2, 3, Some("other"), &devices));
-    }
 
     #[test]
     fn explicit_capabilities_split_files_and_speed_without_connection_coupling() {
@@ -1931,5 +1843,16 @@ mod tests {
         assert!(!speed_start_ready(capabilities, true, true));
         assert!(!file_action_ready(capabilities, true, false));
         assert!(!file_action_ready(capabilities, true, true));
+    }
+
+    #[test]
+    fn bytes_keeps_precision_and_clamps_invalid_values() {
+        assert_eq!(bytes(1023.), "1023 B");
+        assert_eq!(bytes(1024.), "1.0 KiB");
+        assert_eq!(bytes(1.5 * 1024. * 1024.), "1.5 MiB");
+        assert_eq!(bytes(2.25 * 1024. * 1024. * 1024.), "2.2 GiB");
+        assert_eq!(bytes(-1.), "0 B");
+        assert_eq!(bytes(f64::NAN), "0 B");
+        assert_eq!(bytes(f64::INFINITY), "0 B");
     }
 }
