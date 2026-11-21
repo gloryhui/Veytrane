@@ -6,6 +6,8 @@ pub mod auto_resume;
 pub mod bandwidth;
 pub mod chunk_bitmap;
 pub mod chunker;
+#[cfg(feature = "node-runtime")]
+pub mod command_jobs;
 pub mod download;
 #[cfg(all(feature = "node-tasks", feature = "safe-storage"))]
 pub mod drop_send;

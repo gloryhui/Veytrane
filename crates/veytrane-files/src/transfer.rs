@@ -135,6 +135,37 @@ pub enum FileCommand {
     },
 }
 
+impl FileCommand {
+    pub fn peer(&self) -> NodeId {
+        match self {
+            Self::PreviewDirectory { peer, .. }
+            | Self::ConfirmDirectory { peer, .. }
+            | Self::SendPaths { peer, .. }
+            | Self::SendFile { peer, .. }
+            | Self::SendDirectory { peer, .. }
+            | Self::Resume { peer, .. } => *peer,
+        }
+    }
+
+    pub fn required_capability(&self) -> u64 {
+        use veytrane_node::capability::{CAP_DIRECTORY_TRANSFER, CAP_FILE_TRANSFER};
+
+        match self {
+            Self::PreviewDirectory { .. }
+            | Self::ConfirmDirectory { .. }
+            | Self::SendDirectory { .. } => CAP_DIRECTORY_TRANSFER,
+            _ => CAP_FILE_TRANSFER,
+        }
+    }
+
+    pub fn preview_request(&self) -> Option<&TaskId> {
+        match self {
+            Self::PreviewDirectory { request, .. } => Some(request),
+            _ => None,
+        }
+    }
+}
+
 pub enum FileCommandResult {
     Preview(crate::incremental::Preview),
     SelectionQueued(usize),

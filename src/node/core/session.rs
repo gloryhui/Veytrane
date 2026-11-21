@@ -49,6 +49,8 @@ use crate::node::core::network_state::{
 #[cfg(feature = "node-speed")]
 use crate::node::core::speed::SpeedService;
 #[cfg(feature = "agent-files")]
+use veytrane_files::command_jobs::{FileCommandJobs, PrepareError};
+#[cfg(feature = "agent-files")]
 use veytrane_files::transfer::{FileCommand, FileCommandResult};
 
 pub(crate) mod business;
@@ -1050,14 +1052,7 @@ impl SessionCommand {
             #[cfg(feature = "node-speed")]
             Self::StartSpeed { .. } => veytrane_node::capability::CAP_SPEED_EXECUTION,
             #[cfg(feature = "agent-files")]
-            Self::File(
-                FileCommand::PreviewDirectory { .. }
-                | FileCommand::ConfirmDirectory { .. }
-                | FileCommand::SendDirectory { .. },
-            ) => veytrane_node::capability::CAP_DIRECTORY_TRANSFER,
-            #[cfg(feature = "agent-files")]
-            _ => veytrane_node::capability::CAP_FILE_TRANSFER,
-            #[cfg(not(feature = "agent-files"))]
+            Self::File(command) => command.required_capability(),
             _ => 0,
         }
     }
@@ -1065,7 +1060,7 @@ impl SessionCommand {
     fn preview_request(&self) -> Option<&TaskId> {
         #[cfg(feature = "agent-files")]
         match self {
-            Self::File(FileCommand::PreviewDirectory { request, .. }) => Some(request),
+            Self::File(command) => command.preview_request(),
             _ => None,
         }
         #[cfg(not(feature = "agent-files"))]
@@ -1074,23 +1069,11 @@ impl SessionCommand {
     fn business_peer(&self) -> Option<NodeId> {
         match self {
             #[cfg(feature = "agent-files")]
-            Self::File(command) => Some(file_peer(command)),
+            Self::File(command) => Some(command.peer()),
             #[cfg(feature = "node-speed")]
             Self::StartSpeed { peer, .. } => Some(*peer),
             _ => None,
         }
-    }
-}
-
-#[cfg(feature = "agent-files")]
-fn file_peer(command: &FileCommand) -> NodeId {
-    match command {
-        FileCommand::PreviewDirectory { peer, .. }
-        | FileCommand::ConfirmDirectory { peer, .. }
-        | FileCommand::SendPaths { peer, .. }
-        | FileCommand::SendFile { peer, .. }
-        | FileCommand::SendDirectory { peer, .. }
-        | FileCommand::Resume { peer, .. } => *peer,
     }
 }
 
@@ -1653,9 +1636,7 @@ async fn run_session<B>(
     let mut deferred_candidates: HashMap<NodeId, (Vec<Candidate>, PunchToken)> = HashMap::new();
     let mut tunnel_tasks: JoinSet<TunnelTaskResult> = JoinSet::new();
     #[cfg(feature = "agent-files")]
-    let selection_jobs = Arc::new(Semaphore::new(64));
-    #[cfg(feature = "agent-files")]
-    let continuation_jobs = Arc::new(Semaphore::new(3));
+    let file_jobs = FileCommandJobs::default();
     let mut queue_changes: Option<watch::Receiver<u64>>;
     #[cfg(feature = "agent-files")]
     {
@@ -2619,11 +2600,8 @@ async fn run_session<B>(
             }
             #[cfg(feature = "agent-files")]
             Wake::Command(Some(SessionCommand::File(command))) => {
-                let peer = file_peer(&command);
-                let preview_request = match &command {
-                    FileCommand::PreviewDirectory { request, .. } => Some(request.clone()),
-                    _ => None,
-                };
+                let peer = command.peer();
+                let preview_request = command.preview_request().cloned();
                 let Some(service) = files.clone() else {
                     let _ = events
                         .send(SessionEvent::Diagnostic("任务存储尚未就绪".into()))
@@ -2649,70 +2627,59 @@ async fn run_session<B>(
                 let connection = connections
                     .get(&peer)
                     .map(|(_, connection)| connection.clone());
-                let job_pool = if matches!(&command, FileCommand::Resume { .. }) {
-                    continuation_jobs.clone()
-                } else {
-                    selection_jobs.clone()
-                };
-                let Ok(permit) = job_pool.try_acquire_owned() else {
-                    let _ = events
-                        .send(SessionEvent::Diagnostic(
-                            "文件命令排队已达上限，请稍后重试".into(),
-                        ))
-                        .await;
-                    if let Some(request) = &preview_request {
+                let prepared = match file_jobs.prepare(service, command) {
+                    Ok(prepared) => prepared,
+                    Err(error @ PrepareError::QueueFull) => {
                         let _ = events
-                            .send(SessionEvent::DirectoryPreviewFailed(request.clone()))
+                            .send(SessionEvent::Diagnostic(error.to_string()))
                             .await;
-                    }
-                    continue;
-                };
-                if let Some(request) = &preview_request
-                    && let Err(error) = service.begin_preview(peer, request.clone())
-                {
-                    let _ = events
-                        .send(SessionEvent::DirectoryPreviewFailed(request.clone()))
-                        .await;
-                    let _ = events
-                        .send(SessionEvent::Diagnostic(error.to_string()))
-                        .await;
-                    continue;
-                }
-                let live = authorizations[&peer].2.live();
-                let events = events.clone();
-                peer_tasks.spawn(async move {
-                    let _permit = permit;
-                    let result = live
-                        .guard(false, async {
-                            match service
-                                .execute_command(connection.as_ref(), command)
-                                .await?
-                            {
-                                FileCommandResult::Preview(preview) => {
-                                    let _ =
-                                        events.send(SessionEvent::DirectoryPreview(preview)).await;
-                                }
-                                FileCommandResult::SelectionQueued(count) => {
-                                    let _ = events
-                                        .send(SessionEvent::SelectionQueued { peer, count })
-                                        .await;
-                                }
-                                FileCommandResult::Resumed => {}
-                            }
-                            Ok(())
-                        })
-                        .await;
-                    if let Err(error) = result {
                         if let Some(request) = preview_request {
-                            service.cancel_preview(&request);
                             let _ = events
                                 .send(SessionEvent::DirectoryPreviewFailed(request))
                                 .await;
                         }
-                        let _ = events
-                            .send(SessionEvent::Diagnostic(error.to_string()))
-                            .await;
+                        continue;
                     }
+                    Err(PrepareError::BeginPreview { request, message }) => {
+                        let _ = events
+                            .send(SessionEvent::DirectoryPreviewFailed(request))
+                            .await;
+                        let _ = events.send(SessionEvent::Diagnostic(message)).await;
+                        continue;
+                    }
+                };
+                let live = authorizations[&peer].2.live();
+                let events = events.clone();
+                peer_tasks.spawn(async move {
+                    prepared
+                        .run(live, connection, |result| {
+                            let events = events.clone();
+                            let preview_request = preview_request.clone();
+                            async move {
+                                match result {
+                                    Ok(FileCommandResult::Preview(preview)) => {
+                                        let _ = events
+                                            .send(SessionEvent::DirectoryPreview(preview))
+                                            .await;
+                                    }
+                                    Ok(FileCommandResult::SelectionQueued(count)) => {
+                                        let _ = events
+                                            .send(SessionEvent::SelectionQueued { peer, count })
+                                            .await;
+                                    }
+                                    Ok(FileCommandResult::Resumed) => {}
+                                    Err(error) => {
+                                        if let Some(request) = preview_request {
+                                            let _ = events
+                                                .send(SessionEvent::DirectoryPreviewFailed(request))
+                                                .await;
+                                        }
+                                        let _ = events.send(SessionEvent::Diagnostic(error)).await;
+                                    }
+                                }
+                            }
+                        })
+                        .await;
                 });
             }
             Wake::Command(Some(SessionCommand::ConnectAddress {
