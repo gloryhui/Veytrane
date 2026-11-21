@@ -162,4 +162,4 @@
 | A → B | 256,123 | `11db6950efde4f30330c8fad1bdc5a146b919d13f91588ffade70cbf1b11ad26` |
 | B → A | 413,981 | `04fd644576ba1b33608db605d02830234781baa89cfd2b28ea9d8374122e9dac` |
 
-任务定义、注销复查及双向收发证据已回传。[Windows 独立验收报告](../docs/task-reports/WINDOWS_SCHEDULED_TASK_EDITION_ACCEPTANCE.md#独立验收)
+**Mac 侧证据复核通过。** 实算 `veytrane-windows-independent-acceptance-PASS.zip` 的 SHA-256 为 `04e38ad869ef2ba4463eff54b08edf45d17a496c952dd43a7b1f519d34081eda`，与 Windows 报告一致。核对任务定义、注销及新会话登录事件、Agent 启动时间与 IPC、卸载复查，以及两方向发送和接收的任务 ID、落盘路径、字节数和 SHA-256。传输文件的哈希依据 Windows 端实测记录，证据包包含记录，未附传输文件本体。本次复核未重新运行测试，两项独立验收均已结项。[Windows 独立验收报告](../docs/task-reports/WINDOWS_SCHEDULED_TASK_EDITION_ACCEPTANCE.md#独立验收)
