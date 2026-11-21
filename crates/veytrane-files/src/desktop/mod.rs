@@ -41,6 +41,12 @@ impl FileSupport {
             Self::Unavailable
         }
     }
+
+    pub fn peer_supports_files(peer: &Value) -> bool {
+        peer["negotiated_capabilities"]
+            .as_u64()
+            .is_none_or(|bits| bits & veytrane_node::capability::CAP_FILE_TRANSFER != 0)
+    }
 }
 
 #[derive(Default)]
@@ -491,6 +497,13 @@ mod tests {
             FileSupport::from_status(&json!({"core_running":true,"capabilities":{"files":true}})),
             FileSupport::Active
         );
+        assert!(!FileSupport::peer_supports_files(&json!({
+            "negotiated_capabilities": veytrane_node::capability::CAP_TCP_TUNNEL,
+        })));
+        assert!(FileSupport::peer_supports_files(&json!({
+            "negotiated_capabilities": veytrane_node::capability::CAP_FILE_TRANSFER,
+        })));
+        assert!(FileSupport::peer_supports_files(&json!({})));
     }
     use serde_json::json;
 

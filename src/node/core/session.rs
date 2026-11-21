@@ -412,6 +412,10 @@ impl SessionEvents {
     }
 
     async fn send(&self, event: SessionEvent) -> bool {
+        self.send_with_negotiation(event, None).await
+    }
+
+    async fn send_with_negotiation(&self, event: SessionEvent, capabilities: Option<u64>) -> bool {
         let mut shutdown = self.shutdown.clone();
         if *shutdown.borrow() {
             return false;
@@ -424,7 +428,7 @@ impl SessionEvents {
                 Ok(permit) => {
                     let event = event.take().expect("event is sent only once");
                     self.recovery.lock().unwrap().event(&event);
-                    self.control.observe(&event);
+                    self.control.observe(&event, capabilities);
                     permit.send(event);
                     true
                 }
@@ -4481,13 +4485,16 @@ async fn run_session<B>(
                             && capabilities & veytrane_node::capability::CAP_TCP_TUNNEL != 0)
                             .then(|| connection.clone()),
                     );
-                emit_peer_state(
-                    &events,
-                    peer,
-                    generation,
-                    PeerLifecycle::Connected(authorization),
-                )
-                .await;
+                events
+                    .send_with_negotiation(
+                        SessionEvent::PeerState {
+                            peer,
+                            generation,
+                            state: PeerLifecycle::Connected(authorization),
+                        },
+                        Some(capabilities),
+                    )
+                    .await;
                 emit_lifecycle(&events, NetworkLifecycle::Connected { peer }).await;
                 if authorization.outbound_authorized() {
                     let ready = waiting_tunnels

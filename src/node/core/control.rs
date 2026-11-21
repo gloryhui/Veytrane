@@ -61,6 +61,8 @@ pub struct PeerSnapshot {
     pub outbound_password: bool,
     pub outbound_trusted: bool,
     pub inbound_trust_source: Option<crate::node::core::authorization::TrustSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub negotiated_capabilities: Option<u64>,
     /// Bounded counters only: no socket addresses, payloads or credentials.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport: Option<TransportSnapshot>,
@@ -171,7 +173,7 @@ impl ControlState {
         }
     }
 
-    pub(crate) fn observe(&self, event: &SessionEvent) {
+    pub(crate) fn observe(&self, event: &SessionEvent, negotiated_capabilities: Option<u64>) {
         use crate::node::core::network_state::{NetworkLifecycle as N, PeerLifecycle as P};
         let Ok(mut state) = self.snapshot.lock() else {
             return;
@@ -244,6 +246,13 @@ impl ControlState {
                 }
                 .into();
                 if let P::Connected(auth) = lifecycle {
+                    peer.negotiated_capabilities = negotiated_capabilities.or_else(|| {
+                        state
+                            .peers
+                            .get(&id)
+                            .filter(|previous| previous.generation == *generation)
+                            .and_then(|previous| previous.negotiated_capabilities)
+                    });
                     peer.inbound_password = auth.inbound.password;
                     peer.inbound_trusted = auth.inbound.trusted_device;
                     if peer.inbound_trusted {
@@ -441,19 +450,26 @@ mod transport_tests {
         let capacity = 3;
         let state = ControlState::new(local, capacity);
         for generation in 1..=capacity as u64 + 1 {
-            state.observe(&SessionEvent::PeerState {
-                peer: Identity::generate().node_id(),
-                generation,
-                state: crate::node::core::network_state::PeerLifecycle::Disconnected,
-            });
+            state.observe(
+                &SessionEvent::PeerState {
+                    peer: Identity::generate().node_id(),
+                    generation,
+                    state: crate::node::core::network_state::PeerLifecycle::Disconnected,
+                },
+                None,
+            );
         }
         assert_eq!(state.snapshot.lock().unwrap().peers.len(), capacity);
 
         for index in 0..capacity as u32 + 1 {
-            state.observe(&SessionEvent::ShortIdResolved {
-                short_id: crate::discovery::short_id::ShortId::new(100_000_000 + index).unwrap(),
-                peer: Some(Identity::generate().node_id()),
-            });
+            state.observe(
+                &SessionEvent::ShortIdResolved {
+                    short_id: crate::discovery::short_id::ShortId::new(100_000_000 + index)
+                        .unwrap(),
+                    peer: Some(Identity::generate().node_id()),
+                },
+                None,
+            );
         }
         assert_eq!(state.snapshot.lock().unwrap().short_peers.len(), capacity);
     }
@@ -474,5 +490,27 @@ mod transport_tests {
                 .get("transport")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn peer_capabilities_follow_the_authenticated_generation() {
+        use crate::node::core::network_state::PeerLifecycle;
+        use crate::node::core::remote_auth::RemoteAuthorization;
+        let state = ControlState::new(Identity::generate().node_id(), 8);
+        let peer = Identity::generate().node_id();
+        let connected = |generation| SessionEvent::PeerState {
+            peer,
+            generation,
+            state: PeerLifecycle::Connected(RemoteAuthorization::default()),
+        };
+        let read_capabilities =
+            || state.snapshot.lock().unwrap().peers[&peer.to_hex()].negotiated_capabilities;
+        let tcp = veytrane_node::capability::CAP_TCP_TUNNEL;
+        state.observe(&connected(1), Some(tcp));
+        state.observe(&connected(1), None);
+        assert_eq!(read_capabilities(), Some(tcp));
+        state.observe(&connected(2), None);
+        state.observe(&connected(1), Some(tcp));
+        assert_eq!(read_capabilities(), None);
     }
 }

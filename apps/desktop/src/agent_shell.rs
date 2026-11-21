@@ -285,11 +285,16 @@ impl AgentShell {
 
     #[cfg(feature = "desktop-files")]
     fn sync_file_host(&self, cx: &mut Context<Self>) {
+        let peer = self.selected_agent_peer(cx);
+        let peer_can_send = peer.as_ref().is_some_and(|peer| {
+            FileSupport::peer_supports_files(&self.state["node"]["peers"][peer])
+        }) && self.peer_connected(cx)
+            && !self.speed_running(cx);
         let host = FileHost {
             support: FileSupport::from_status(&self.state),
             available: self.available(),
-            peer: self.selected_agent_peer(cx),
-            peer_can_send: self.peer_connected(cx) && !self.speed_running(cx),
+            peer,
+            peer_can_send,
         };
         self.files
             .update(cx, |files, cx| files.sync_host(host, &self.message, cx));
