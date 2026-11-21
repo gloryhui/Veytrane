@@ -57,3 +57,13 @@ macOS 登录宿主使用 `p2p-agent --managed`，保留 `RunAtLoad`、异常退�
 失败恢复先停新 Agent 并确认所有权锁释放，再检查当前 schema、revision 和授权变更。通过 `previous-install.json` 的 `installation.bin_dir` 找到原版，仅在它兼容当前配置并能保留授权和任务时恢复。标准版运行期间保留增强版的任务库与接收数据。`uninstall` 卸载启动项，保留身份、配置、任务、业务文件和版本目录。
 
 当前 Mac / Ubuntu 的安装、服务重启及主节点互通已有上述实机证据，Mac 桌面包通过 ad hoc 签名验证。物理重启 / 重新登录、睡眠唤醒、升级中断注入、Mac 公证发布与 Windows 计划任务行为不在这次验收范围；模板/打包脚本语法检查不能替代对应实机证据。
+
+### Windows 双版型隔离验收
+
+在没有现有 Veytrane 登录任务的 Windows 测试用户下，使用同一提交构建的标准版和文件增强版运行以下命令。每个参数都指向解包后同时含有 `p2p-agent.exe` 和 `p2p-node.exe` 的目录。测试使用独立节点数据，并在结束时注销它创建的计划任务。
+
+```powershell
+python -X utf8 scripts/node-host-tests.py --windows-upgrade "<标准候选目录>" "<文件增强候选目录>"
+```
+
+此用例验证实际计划任务启动、标准 → 增强 → 标准换版，以及换版期间保留的身份、revision、配置和安装目录。Windows 登录事件及文件收发使用独立用例验证。

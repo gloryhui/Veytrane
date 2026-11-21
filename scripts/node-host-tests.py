@@ -19,6 +19,38 @@ host = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(host)
 
 
+def installation_key(installation):
+    build = installation.get('build') or {}
+    return build.get('build_sha'), build.get('edition')
+
+
+def require_installation_switch(old, candidate):
+    if installation_key(old) == installation_key(candidate):
+        raise RuntimeError('old and candidate use the same installation key; a real SHA/edition switch is required')
+
+
+def version_directory(base, build):
+    edition = build.get('edition')
+    key = f"{build['build_sha']}-{edition}" if edition else build['build_sha']
+    return Path(base) / key
+
+
+def compatibility_settings(settings):
+    value = dict(settings)
+    value.pop('remote_auth', None)
+    value['enable_files'] = False
+    value['enable_speed'] = False
+    value['enable_tcp'] = True
+    return value
+
+
+def windows_task_presence(name):
+    return host.powershell(
+        '$t=Get-ScheduledTask -TaskName $s.name -ErrorAction SilentlyContinue;if($t){"present"}else{"absent"}',
+        {'name': name},
+    ).stdout.strip()
+
+
 class Hosting(unittest.TestCase):
     def test_windows_powershell_prefers_pwsh_and_preserves_structured_environment(self):
         captured = {}
@@ -144,6 +176,28 @@ class Hosting(unittest.TestCase):
                              [f"{legacy['build_sha']}-standard", f"{legacy['build_sha']}-files"])
             self.assertTrue(old.is_dir())
             self.assertFalse(data.exists())
+
+    def test_same_sha_editions_use_distinct_installation_keys_and_directories(self):
+        standard = {'build': {'build_sha': 'a' * 40, 'edition': 'standard'}}
+        files = {'build': {'build_sha': 'a' * 40, 'edition': 'files'}}
+        require_installation_switch(standard, files)
+        self.assertNotEqual(installation_key(standard), installation_key(files))
+        self.assertEqual(version_directory('bin', standard['build']).name, f"{'a' * 40}-standard")
+        self.assertEqual(version_directory('bin', files['build']).name, f"{'a' * 40}-files")
+        with self.assertRaisesRegex(RuntimeError, 'same installation key'):
+            require_installation_switch(standard, standard)
+
+    def test_standard_compatibility_settings_preserve_file_policy(self):
+        settings = {'remote_auth': None, 'enable_files': True, 'enable_speed': True, 'enable_tcp': False,
+                    'send_concurrency': 2, 'file_limits': {'upload_kib': 0, 'download_kib': 0}}
+        candidate = compatibility_settings(settings)
+        self.assertNotIn('remote_auth', candidate)
+        self.assertFalse(candidate['enable_files'])
+        self.assertFalse(candidate['enable_speed'])
+        self.assertTrue(candidate['enable_tcp'])
+        self.assertEqual(candidate['send_concurrency'], 2)
+        self.assertEqual(candidate['file_limits'], settings['file_limits'])
+        self.assertTrue(settings['enable_files'])
 
     def test_config_preflight_rejection_leaves_previous_installation_running(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -361,7 +415,7 @@ def upgrade_windows(old_dir, new_dir):
     if os.name != 'nt':
         raise RuntimeError('--windows-upgrade requires Windows')
     name = host.task_name()
-    existing = host.powershell('$t=Get-ScheduledTask -TaskName $s.name -ErrorAction SilentlyContinue;if($t){"present"}else{"absent"}', {'name': name}).stdout.strip()
+    existing = windows_task_presence(name)
     if existing != 'absent':
         raise RuntimeError('existing user startup task must be preserved; isolated upgrade refused')
     script = Path(__file__).with_name('node-host.py').resolve()
@@ -376,15 +430,15 @@ def upgrade_windows(old_dir, new_dir):
         state = None
         try:
             command('install', '--bin-dir', old_dir.resolve(), '--data-dir', data, '--allow-dirty')
-            state = json.loads(state_file.read_text(encoding='utf-8'))
+            old_state = json.loads(state_file.read_text(encoding='utf-8'))
+            new_build = json.loads(host.run([new_dir.resolve() / 'p2p-agent.exe', '--build-info']).stdout)
+            require_installation_switch(old_state, {'build': new_build})
+            state = old_state
             host.run(host.cli(state) + ['init'])
-            # Persist a nondefault setting before starting/upgrading.
             config_path = data / 'node.json'
             before_config = json.loads(config_path.read_text(encoding='utf-8'))
             candidate = root / 'candidate.json'
-            settings = before_config['settings']
-            settings.pop('remote_auth', None)
-            settings['send_concurrency'] = 2
+            settings = compatibility_settings(before_config['settings'])
             candidate.write_text(json.dumps(settings), encoding='utf-8')
             host.run(host.cli(state) + ['offline-apply', '--revision', str(before_config['revision']), str(candidate)])
             command('enable')
@@ -398,29 +452,71 @@ def upgrade_windows(old_dir, new_dir):
                 time.sleep(.1)
             assert before, 'old Agent did not become ready'
             config_bytes = config_path.read_bytes()
+
+            def assert_preserved(status, installation):
+                expected_build = installation['build']
+                assert status['capabilities']['tcp'] is True
+                assert status['capabilities']['speed'] is False
+                assert status['capabilities']['files'] is False
+                assert status['node']['node_id'] == before['node']['node_id']
+                assert status['revision'] == before['revision']
+                assert config_path.read_bytes() == config_bytes
+                assert status['build']['build_sha'] == expected_build['build_sha']
+                assert status['build'].get('edition') == expected_build.get('edition')
+                assert Path(installation['data_dir']).resolve() == data.resolve()
+                task = host.select_windows_startup_task(host.windows_task_preflight(installation), installation)
+                assert (task['name'], task['path']) == (name, '\\')
+
+            assert_preserved(before, old_state)
+            old_bin_dir = Path(old_state['bin_dir']).resolve()
+            new_bin_dir = version_directory(state_file.parent, new_build).resolve()
             result = json.loads(command('upgrade', '--bin-dir', new_dir.resolve()).stdout)
             state = json.loads(state_file.read_text(encoding='utf-8'))
             after = host.response(state, ['status'])
-            assert result['upgraded'] and before['build']['build_sha'] != after['build']['build_sha']
+            old_key = installation_key(old_state)
+            new_key = installation_key({'build': new_build})
+            assert result['upgraded']
+            assert installation_key(state) == new_key
+            assert Path(state['bin_dir']).resolve() == new_bin_dir
+            assert old_bin_dir.is_dir()
             assert state['build']['source_state'] == 'clean', 'upgrade candidate was not a clean build'
-            assert before['node']['node_id'] == after['node']['node_id']
-            assert before['revision'] == after['revision']
-            assert config_path.read_bytes() == config_bytes
+            assert_preserved(after, state)
             previous = json.loads(state_file.with_name('previous-install.json').read_text(encoding='utf-8'))
-            assert previous['installation']['build']['build_sha'] == before['build']['build_sha']
-            assert Path(previous['installation']['bin_dir']).is_dir()
+            assert installation_key({'build': previous['installation']['build']}) == old_key
+            assert Path(previous['installation']['bin_dir']).resolve() == old_bin_dir
+            assert previous['status']['node']['node_id'] == before['node']['node_id']
+            assert previous['status']['revision'] == before['revision']
+            dirty = ['--allow-dirty'] if old_state['build'].get('source_state') != 'clean' else []
+            result_back = json.loads(command('upgrade', '--bin-dir', old_dir.resolve(), *dirty).stdout)
+            state = json.loads(state_file.read_text(encoding='utf-8'))
+            after_back = host.response(state, ['status'])
+            assert result_back['upgraded']
+            assert installation_key(state) == old_key
+            assert Path(state['bin_dir']).resolve() == old_bin_dir
+            assert_preserved(after_back, state)
+            previous = json.loads(state_file.with_name('previous-install.json').read_text(encoding='utf-8'))
+            assert installation_key({'build': previous['installation']['build']}) == new_key
+            assert Path(previous['installation']['bin_dir']).resolve() == new_bin_dir
+            assert previous['status']['node']['node_id'] == after['node']['node_id']
+            assert previous['status']['revision'] == after['revision']
+            assert new_bin_dir.is_dir()
+            assert old_bin_dir.is_dir()
             command('uninstall')
             assert config_path.read_bytes() == config_bytes, 'uninstall removed node data'
             assert not state_file.exists()
-            assert Path(state['bin_dir']).is_dir(), 'uninstall removed immutable version binaries'
-            print(json.dumps({'result': 'PASS', 'old_sha': before['build']['build_sha'],
-                'new_sha': after['build']['build_sha'], 'scenarios': ['CLI install', 'scheduled start',
-                'graceful upgrade', 'same identity/revision/config', 'previous version retained',
+            assert old_bin_dir.is_dir(), 'uninstall removed old immutable version binaries'
+            assert new_bin_dir.is_dir(), 'uninstall removed new immutable version binaries'
+            assert windows_task_presence(name) == 'absent'
+            print(json.dumps({'result': 'PASS', 'old_sha': old_state['build']['build_sha'],
+                'new_sha': new_build['build_sha'], 'old_edition': old_state['build'].get('edition'),
+                'new_edition': new_build.get('edition'), 'scenarios': ['CLI install', 'scheduled start',
+                'graceful SHA/edition upgrade', 'switch back to old immutable installation',
+                'same identity/revision/config', 'previous version retained',
                 'uninstall preserves node data and versions']}))
         finally:
             if state:
                 host.stop(state, None)
-            if host.powershell('$t=Get-ScheduledTask -TaskName $s.name -ErrorAction SilentlyContinue;if($t){"present"}else{"absent"}', {'name': name}).stdout.strip() == 'present':
+            if windows_task_presence(name) == 'present':
                 host.disable(state, None)
                 host.powershell('Unregister-ScheduledTask -TaskName $s.name -Confirm:$false', {'name': name})
             for path in root.rglob('*'):
