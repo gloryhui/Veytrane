@@ -128,7 +128,7 @@ def select_windows_startup_task(preflight, state):
     current_sid = preflight.get('current_sid')
     if not current_sid:
         raise RuntimeError('Windows startup task preflight did not identify the current user SID')
-    expected_agent = windows_path(Path(state['bin_dir']) / 'p2p-agent.exe')
+    expected_agent = windows_path(ntpath.join(str(state['bin_dir']), 'p2p-agent.exe'))
     expected_data = windows_path(state['data_dir'])
     matches = []
     for task in preflight['tasks']:
@@ -157,11 +157,11 @@ def update_windows_task(task, old, candidate):
     settings = {
         'name': task['name'],
         'path': task['path'],
-        'old_agent': str(Path(old['bin_dir']) / 'p2p-agent.exe'),
-        'old_working_directory': str(Path(old['bin_dir'])),
-        'new_agent': str(Path(candidate['bin_dir']) / 'p2p-agent.exe'),
-        'new_working_directory': str(Path(candidate['bin_dir'])),
-        'data_dir': str(Path(old['data_dir'])),
+        'old_agent': ntpath.join(str(old['bin_dir']), 'p2p-agent.exe'),
+        'old_working_directory': str(old['bin_dir']),
+        'new_agent': ntpath.join(str(candidate['bin_dir']), 'p2p-agent.exe'),
+        'new_working_directory': str(candidate['bin_dir']),
+        'data_dir': str(old['data_dir']),
     }
     script = r'''
 function Test-SamePath([string]$left,[string]$right){
@@ -385,14 +385,17 @@ def install(source, base, data_dir, allow_dirty):
     return {'schema': 1, 'bin_dir': str(target), 'data_dir': str(data_dir), 'build': agent}
 
 
-def check_candidate_config(candidate):
+def check_candidate_config(candidate, *, upgrade):
     if 'edition' in candidate['build']:
         data_dir = Path(candidate['data_dir'])
         config = data_dir / 'node.json'
-        if config.exists() or config.is_symlink():
-            suffix = '.exe' if platform.system() == 'Windows' else ''
-            agent = Path(candidate['bin_dir']) / f'p2p-agent{suffix}'
-            run([agent, '--data-dir', data_dir, '--check-config'])
+        if not (config.exists() or config.is_symlink()):
+            if upgrade:
+                raise RuntimeError('new edition upgrade requires the existing node.json configuration; previous installation was not stopped')
+            return
+        suffix = '.exe' if platform.system() == 'Windows' else ''
+        agent = Path(candidate['bin_dir']) / f'p2p-agent{suffix}'
+        run([agent, '--data-dir', data_dir, '--check-config'])
 
 
 def main():
@@ -418,7 +421,7 @@ def main():
         startup_task = select_windows_startup_task(windows_task_preflight(old), old) if old and platform.system() == 'Windows' else None
         previous_status = response(old, ['status']) if old else None
         candidate = install(args.bin_dir.resolve(), base, data_dir, args.allow_dirty)
-        check_candidate_config(candidate)
+        check_candidate_config(candidate, upgrade=old is not None)
         if old:
             atomic_json(base / 'previous-install.json', {'installation': old, 'status': previous_status})
             if startup_task:

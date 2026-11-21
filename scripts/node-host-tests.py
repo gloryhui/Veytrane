@@ -3,6 +3,7 @@
 import argparse
 import importlib.util
 import json
+import ntpath
 import os
 from pathlib import Path
 import subprocess
@@ -172,6 +173,41 @@ class Hosting(unittest.TestCase):
             self.assertEqual(json.loads((root / 'installed.json').read_text(encoding='utf-8')), old)
             self.assertFalse((root / 'previous-install.json').exists())
 
+    def test_new_edition_upgrade_requires_existing_config_before_stop(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            data = root / 'node'
+            data.mkdir()
+            old = {'bin_dir': str(root / 'old'), 'data_dir': str(data)}
+            candidate = {'bin_dir': str(root / 'new'), 'data_dir': str(data),
+                         'build': {'edition': 'standard'}}
+            host.atomic_json(root / 'installed.json', old)
+            argv = ['node-host.py', 'upgrade', '--bin-dir', str(root / 'candidate')]
+            with patch.object(sys, 'argv', argv), \
+                    patch.object(host.platform, 'system', return_value='Linux'), \
+                    patch.object(host, 'locations', return_value=(root, None)), \
+                    patch.object(host, 'response', return_value={'revision': 1}), \
+                    patch.object(host, 'install', return_value=candidate), \
+                    patch.object(host, 'run') as run, \
+                    patch.object(host, 'stop') as stop, \
+                    patch.object(host, 'disable') as disable:
+                with self.assertRaisesRegex(RuntimeError, 'node\\.json'):
+                    host.main()
+            run.assert_not_called()
+            stop.assert_not_called()
+            disable.assert_not_called()
+            self.assertEqual(json.loads((root / 'installed.json').read_text(encoding='utf-8')), old)
+            self.assertFalse((root / 'previous-install.json').exists())
+
+    def test_new_edition_first_install_allows_missing_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            host.check_candidate_config(
+                {'bin_dir': str(root / 'new'), 'data_dir': str(root / 'node'),
+                 'build': {'edition': 'standard'}},
+                upgrade=False,
+            )
+
     def test_windows_upgrade_selects_unique_existing_task_and_keeps_extra_arguments(self):
         old={'bin_dir':r'C:\Users\glory\AppData\Local\p2p-file\bin\abc123',
              'data_dir':r'C:\Users\glory\AppData\Local\p2p-file\node'}
@@ -232,12 +268,12 @@ class Hosting(unittest.TestCase):
         self.assertIn('$after.Task.Settings.OuterXml -ne $beforeSettings',script)
         self.assertIn('another task action changed',script)
         self.assertIn('$updateWorkingDirectory=(Test-SamePath $actions[$actionIndex].WorkingDirectory $s.old_working_directory)',script)
-        self.assertEqual(settings['new_agent'],r'C:\install\new\p2p-agent.exe')
+        self.assertEqual(settings['new_agent'],ntpath.join(r'C:\install\new','p2p-agent.exe'))
         self.assertEqual(settings['new_working_directory'],r'C:\install\new')
 
     def test_windows_upgrade_update_failure_happens_before_stop(self):
         with tempfile.TemporaryDirectory() as root:
-            root=Path(root);base=root/'bin';base.mkdir();data=root/'node';source=root/'candidate';source.mkdir()
+            root=Path(root).resolve();base=root/'bin';base.mkdir();data=root/'node';source=root/'candidate';source.mkdir()
             old={'schema':1,'bin_dir':str(base/'old'),'data_dir':str(data),
                  'build':{'build_sha':'a'*40,'source_state':'clean','api_version':1}}
             candidate={'schema':1,'bin_dir':str(base/'new'),'data_dir':str(data),
