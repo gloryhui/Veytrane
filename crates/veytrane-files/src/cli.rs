@@ -1,10 +1,15 @@
 use crate::management_command::FileManagementCommand;
 use clap::Subcommand;
 use std::{io, path::PathBuf};
+use veytrane_management::protocol::Command;
 use veytrane_transport::operation_id::TaskId;
 
 #[derive(Subcommand)]
 pub enum FileAction {
+    Tasks {
+        #[arg(long, default_value_t = 0)]
+        offset: usize,
+    },
     Send {
         peer: String,
         #[arg(required = true)]
@@ -34,9 +39,10 @@ pub enum FileAction {
 }
 
 impl FileAction {
-    pub fn into_command(self) -> io::Result<FileManagementCommand> {
+    pub fn into_command(self) -> io::Result<Command> {
         let task_id = |value: &str| TaskId::parse(value).map_err(io::Error::other);
-        Ok(match self {
+        let command = match self {
+            Self::Tasks { offset } => return Ok(Command::Tasks { offset }),
             Self::Send { peer, paths } => FileManagementCommand::Send {
                 peer,
                 paths: paths
@@ -65,6 +71,7 @@ impl FileAction {
             Self::CancelDirectory { request } => FileManagementCommand::CancelDirectory {
                 request: task_id(&request)?,
             },
-        })
+        };
+        Command::file(&command)
     }
 }

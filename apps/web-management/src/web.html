@@ -196,9 +196,7 @@ function table(target,rows,columns,remove,extra,protect=()=>false){
 function render(){if(!draft)return;$('editor').hidden=false;$('revision').textContent=revision;
  table('serviceTable',draft.services,[['服务ID','id'],['名称','name'],['__NODE_NAME__ 可访问的目标','target'],['允许设备ID（逗号分隔）','allowed_peers','list'],['启用','enabled','bool']],(_,n)=>draft.services.splice(n,1));
  table('forwardTable',draft.forwards,[['规则ID','id'],['名称','name'],['远端设备ID','peer_node_id'],['__NODE_NAME__ 监听地址','listen'],['服务ID','service','text'],['启用','enabled','bool'],['自动启动','auto_start','bool']],(r,n)=>{draft.forwards.splice(n,1);delete draft.service_ids[r.id]},(r,td)=>{for(const [label,method]of[['启动','start_forward'],['停止','stop_forward']]){const b=document.createElement('button');b.type='button';b.className='row-action';b.textContent=label;b.onclick=()=>action(()=>request({method,rule:r.id}));td.append(b)}});
- const permissions=[['设备ID','node_id']];
- if(filePanel?.active)permissions.push(['文件','files','bool']);
- permissions.push(['测速','speed','bool'],['禁用设备','disabled','bool']);
+ const permissions=[['设备ID','node_id'],...(filePanel?.permissionColumns()||[]),['测速','speed','bool'],['禁用设备','disabled','bool']];
  table('resourceTable',draft.resources.peers,permissions,(_,n)=>draft.resources.peers.splice(n,1),null,row=>!filePanel?.active&&row.files===true);
 }
 $('token').addEventListener('input',()=>syncCapabilities({}));

@@ -6,7 +6,7 @@ rust-version = "1.90"
 publish = false
 
 [features]
-cli = ["dep:clap"]
+cli = ["dep:clap", "dep:veytrane-management"]
 desktop = ["dep:gpui", "dep:serde_json", "dep:veytrane-desktop-ui", "dep:veytrane-management", "dep:veytrane-node"]
 legacy = ["dep:quinn", "dep:tokio", "veytrane-transport/legacy-control", "veytrane-transport/quic"]
 node-runtime = ["node-tasks", "safe-storage", "dep:quinn", "tokio/macros", "tokio/rt"]

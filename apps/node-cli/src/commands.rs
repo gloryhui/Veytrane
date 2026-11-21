@@ -43,10 +43,6 @@ pub enum Action {
         password_stdin: bool,
     },
     Config,
-    Tasks {
-        #[arg(long, default_value_t = 0)]
-        offset: usize,
-    },
     Services {
         peer: String,
     },
@@ -161,7 +157,6 @@ pub async fn run(args: Args) -> io::Result<Response> {
             },
         },
         Action::Config => Command::Config,
-        Action::Tasks { offset } => Command::Tasks { offset },
         Action::Services { peer } => Command::Services { peer },
         Action::Connect {
             peer,
@@ -176,7 +171,7 @@ pub async fn run(args: Args) -> io::Result<Response> {
         },
         Action::Disconnect { peer } => Command::Disconnect { peer },
         #[cfg(feature = "agent-files")]
-        Action::File(action) => Command::file(&action.into_command()?)?,
+        Action::File(action) => action.into_command()?,
         Action::Speed {
             peer,
             seconds,

@@ -107,6 +107,9 @@
 
  return Object.freeze({
   setActive,
+  permissionColumns() {
+   return active ? [['文件', 'files', 'bool']] : [];
+  },
   get active() {
    return active;
   },
