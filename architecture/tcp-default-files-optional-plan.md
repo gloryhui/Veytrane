@@ -108,7 +108,8 @@
 - 16 项宿主测试及 9 项包验证测试通过。Linux 使用原生 systemd 用户临时单元实测标准 → 文件增强 → 标准，三个进程均经真实 IPC 就绪、退出并释放所有权，保留相同的身份、配置及 revision。两阶段比较了现有 Agent 服务的 PID、启动调用 ID 和定义路径。[systemd 换版结果](../tmp/p4-linux-evidence.5K8JYj/systemd-switch.json)。
 - Linux 在隔离 HOME 与 XDG 配置中，使用 `node-host.py` 生成用户服务，再通过真实 `systemctl --user` 的客户端注册逻辑分别验证两版型的启用、`default.target.wants` 指向及禁用。标准 → 增强 → 标准均从各自注册后的 `ExecStart` 启动原生临时单元，并核对原有 Agent 的 PID、启动调用 ID 和定义路径。验证未执行物理重新登录，也未重载现有用户管理器。Windows 计划任务及 Intel Mac 原生发行待验收。[注册与启动证据](../tmp/p4-login.Nz3ASU/results.json)。
 - 从干净 `4f3be51` 源码在 macOS arm64 分别用 `--no-default-features` 构建 `live` 的 gateway/viewer、`sub2api-gateway` 和 `sub2api-client`，均生成原生可执行文件。客户端使用无私有配置的编译组合。三套构建均报告四条未使用的节点策略 API 告警；验证涵盖构建和目标架构。[Live](../tmp/p4-products.1GBs3O/live.log)、[Sub2API Gateway](../tmp/p4-products.1GBs3O/sub2api-gateway.log)、[Sub2API Client](../tmp/p4-products.1GBs3O/sub2api-client.log)。
-- [GPUI CI](../.github/workflows/gpui.yml) 提供 Windows x64 与 Intel Mac 双版型的原生构建和归档验证，入口为 PR 或对远端 ref 的手动触发。Windows runner 直接使用 Cargo 和公共打包器，Windows 安装脚本、计划任务启停与换版仍需独立验收。
+- [GPUI CI](../.github/workflows/gpui.yml) 提供 Windows x64 与 Intel Mac 双版型的原生构建和归档验证，入口为 PR 或对远端 ref 的手动触发。Windows 使用正式 `build.ps1` 分别生成标准和 `-WithFiles` 候选，包含各自的 doctor、打包与归档验证。Windows runner 执行这些步骤的证据待补。
+- `d639375` 更新 Windows [计划任务换版验收入口](../packaging/node/README.md#windows-双版型隔离验收)，允许同 SHA 的标准与增强候选往返切换，并核对任务指向、TCP 能力、身份与配置。18 项本机 Python 宿主测试通过，Windows 计划任务实测待执行。
 
 ### P5 默认切换与物理移除（2026-11-21）
 

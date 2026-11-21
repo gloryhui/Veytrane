@@ -110,7 +110,7 @@ jobs:
           cargo test --locked --no-default-features --features standalone --test signaling_tls_cli --target ${{ matrix.target }} -- --nocapture
           cargo test --locked --no-default-features --features standalone-files --test signaling_tls_cli --target ${{ matrix.target }} -- --nocapture
       - name: Build optimized native candidates
-        if: matrix.target != 'x86_64-apple-darwin'
+        if: matrix.target != 'x86_64-apple-darwin' && runner.os != 'Windows'
         env:
           MACOSX_DEPLOYMENT_TARGET: '13.0'
         run: |
@@ -119,12 +119,19 @@ jobs:
           cargo build --locked --release --no-default-features --features desktop-files --bin p2p-desktop --target ${{ matrix.target }} --target-dir target/desktop-files
           cargo build --locked --release --no-default-features --features agent-full --bin p2p-agent --bin p2p-node --target ${{ matrix.target }} --target-dir target/desktop-files
       - name: Package and verify the literal-head native candidates
-        if: matrix.target != 'x86_64-apple-darwin'
+        if: matrix.target != 'x86_64-apple-darwin' && runner.os != 'Windows'
         run: |
           python scripts/package-desktop.py --binary target/desktop-standard/${{ matrix.target }}/release/${{ matrix.executable }} --target ${{ matrix.target }} --edition standard --output "${{ runner.temp }}/p2p-desktop-candidate"
           python scripts/verify-desktop-package.py "${{ runner.temp }}/p2p-desktop-candidate/candidate.json"
           python scripts/package-desktop.py --binary target/desktop-files/${{ matrix.target }}/release/${{ matrix.executable }} --target ${{ matrix.target }} --edition files --output "${{ runner.temp }}/p2p-desktop-candidate-files"
           python scripts/verify-desktop-package.py "${{ runner.temp }}/p2p-desktop-candidate-files/candidate.json"
+      - name: Build and verify the Windows x64 native candidates
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./packaging/windows-x64/build.ps1 -Output "${{ runner.temp }}/p2p-desktop-candidate"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./packaging/windows-x64/build.ps1 -WithFiles -Output "${{ runner.temp }}/p2p-desktop-candidate-files"
       - name: Verify the native Intel Mac build and packaging entrypoint
         if: matrix.target == 'x86_64-apple-darwin'
         run: |
