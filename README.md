@@ -4,14 +4,14 @@
 
 <p align="center">
   <strong>可信设备，跨网络互联。</strong><br>
-  通过信令服务发现设备，以经过认证的端到端连接访问远端服务、传输文件。
+  通过经过认证的端到端连接访问远端授权 TCP 服务，可选原生文件收发。
 </p>
 
 <p align="center">
   <a href="#使用前提">使用前提</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="#系统架构">系统架构</a> ·
-  <a href="docs/architecture-current.html">可点击架构图</a> ·
+  <a href="architecture/layer-review.html">交互架构图</a> ·
   <a href="#部署与平台">部署与平台</a> ·
   <a href="#文档导航">文档导航</a>
 </p>
@@ -50,7 +50,7 @@ Veytrane 是用 Rust 构建的可信设备互联软件。设备可以位于不�
 | --- | --- |
 | 访问远端应用与管理面板 | 将远端发布的授权服务映射到本机端口，用浏览器或原有客户端访问。 |
 | 连接家中或办公室设备 | 通过自建信令发现设备，完成身份认证与远程访问认证，按资源授予权限。 |
-| 传输文件与目录 | 支持分片校验、暂停与继续、目录预览、增量发送、上传/下载限速及任务历史管理。 |
+| 原生文件与目录收发（可选） | 两端使用文件增强版并启用文件能力后，可使用分片校验、暂停与继续、目录预览、增量发送、限速和任务历史。 |
 | 在无桌面服务器上常驻 | Agent 由 systemd、launchd 或 Windows 当前用户登录任务托管；管理界面通过本地 IPC 接入。 |
 | 为特定用途分发客户端 | 使用 Veytrane for Sub2API 独立网关与 Windows 专用包，仅开放指定服务。 |
 | 排查连接问题 | 查看连接阶段、Direct / Relay 路径与授权状态，并使用设备间测速辅助定位问题。 |
@@ -70,35 +70,36 @@ TCP 转发按服务 ID 与授权目录开流。服务发布、设备白名单和
 1. **取得对端地址**：同一局域网通过 mDNS 发现，或手动提供完整 NodeId 与 IP:端口；需要跨 NAT 协调时再使用信令与 STUN。
 2. **建立通道**：尝试可用的 IPv4 / IPv6 路径与打洞候选，优先建立 QUIC 直连。
 3. **验证身份与权限**：Ed25519 身份握手绑定当前 TLS 会话；远程密码或可信设备认证通过后，再检查相应资源权限。
-4. **承载业务**：在授权通道上进行文件传输、测速或指定 TCP 服务转发。
+4. **承载业务**：按各自授权转发 TCP 服务或测速。文件增强版可以在同一节点会话上收发文件。
 
 Direct 连接成功时，业务数据在设备间传输，信令服务器负责发现和连接协调。配置可选 UDP Relay 后，直连无法及时建立时可回退到中继；Relay 转发端到端加密的 QUIC 数据报。是否能直连取决于双方网络和 NAT 条件。
 
 ## 系统架构
 
-Veytrane 的常驻形态由**一个 Agent 持有节点状态，多个入口管理同一个节点**。关闭或重新打开管理界面，不需要重新建立另一套节点身份和业务会话。
+通用版由**一个常驻 Agent 持有节点状态，桌面、CLI 和 Web 经本机 IPC 管理同一个节点**。授权 TCP 转发是标准版的默认业务。文件增强版在同一会话、认证和授权机制上装配文件能力。
 
-[![Veytrane 节点架构：桌面、管理 CLI 和 Web 经统一 API 与本地 IPC 接入 Agent，核心复用身份、QUIC、发现和存储基础设施。](docs/assets/readme/node-architecture.svg)](docs/architecture-current.html)
+[打开新版交互架构图](architecture/layer-review.html)可在本地浏览器离线查看，支持八种主题、独立亮暗切换和整图 PNG 导出。
 
 | 层次 | 主要模块 | 职责 |
 | --- | --- | --- |
-| 管理入口 | `desktop/agent_shell`、`node/adapters` | 原生 GPUI 工作台、管理 CLI、回环 Web 管理页；呈现状态并提交操作。 |
-| 管理契约与本地连接 | `node/api`、`node/local` | 请求/响应、构建信息、本地 Unix socket / Windows named pipe、用户路径与锁。 |
-| Agent 宿主 | `node/host` | 独占身份和数据目录，执行管理命令，协调配置提交、本地转发与恢复。 |
-| 节点核心 | `node/core` | 设备会话、认证授权、服务目录、文件任务、测速、调度与恢复策略。 |
-| 共享基础设施 | `discovery`、`nat`、`net`、`transport`、`relay`、`storage` | 设备发现、候选收集、连接竞速、QUIC、可选中继及安全持久化。 |
-| 专用产品组合 | `node/products` | 复用核心能力，构建权限和功能受限的 Sub2API 客户端与网关。 |
+| 网络与传输 | [`veytrane-transport`](crates/veytrane-transport)、`src/{net,discovery,nat,relay}` | Ed25519 身份、QUIC / TLS、帧、发现、建连和可选中继。 |
+| 节点核心 | [`veytrane-node`](crates/veytrane-node)、[`src/node/core`](src/node/core) | P2PN v2、认证与授权、连接代际、重连、强撤销和有界流分发。 |
+| 默认业务 | [`veytrane-tcp`](crates/veytrane-tcp)、[`veytrane-speed`](crates/veytrane-speed) | TCP 服务发布、授权目录、本地监听与字节桥接，以及单独授权的测速。 |
+| 可选文件业务 | [`veytrane-files`](crates/veytrane-files) | 文件协议、完整性校验、配置、任务库、续传、管理 DTO、GPUI、Web 和 CLI。启用后复用节点会话、授权和传输。 |
+| 宿主与装配 | [`apps/agent`](apps/agent)、[`src/node/composition`](src/node/composition) | 持有 Agent 所有权和数据目录，处理配置 revision、请求去重、启停与核心重建，按版型装配业务。 |
+| 管理契约与入口 | [`veytrane-management`](crates/veytrane-management)、[`apps/desktop`](apps/desktop)、[`apps/node-cli`](apps/node-cli)、[`apps/web-management`](apps/web-management) | IPC v1 的请求、响应与客户端，以及 GPUI、管理 CLI 和回环 Web。内置导航按配置在 Agent 进程中提供 `3001`，`p2p-node web` 可在独立进程中运行。 |
+| 专用产品与独立 CLI | [`apps/live`](apps/live)、[`apps/sub2api`](apps/sub2api)、[`apps/standalone-cli`](apps/standalone-cli)、[`apps/signaling`](apps/signaling) | Live 与 Sub2API 复用节点装配与 TCP。`p2p_file` 提供独立隧道、测速和信令入口，旧式文件命令随 `standalone-files` 构建。 |
 
-**架构资料**　[节点架构图](architecture/layer-review.html)可切换八种主题与亮暗配色，并将当前图导出为 PNG。[可点击源码索引](docs/architecture-current.html)提供系统全景、节点分层、核心内部和桌面边界四个视图。下载仓库后可在浏览器离线查看两份 HTML。源码边界见[仓库分层说明](docs/REPOSITORY_LAYOUT.md)，管理契约见[Agent API](docs/specs/NODE_AGENT_API.md)，设备间协议见[P2PN v2](docs/specs/NODE_WIRE.md)。
+添加业务时，由入口选择能力并向节点装配层注入策略，业务包复用节点提供的会话、授权和流分发。文件增强版采用这条路径，移除文件包后的标准 Agent、CLI 和桌面已有独立演练记录。[分层说明](docs/REPOSITORY_LAYOUT.md) · [源码索引](docs/architecture-current.html) · [Agent API](docs/specs/NODE_AGENT_API.md) · [P2PN v2](docs/specs/NODE_WIRE.md) · [施工与验收](architecture/tcp-default-files-optional-plan.md)
 
 ### 进程与入口
 
 | 入口 | 用途 |
 | --- | --- |
-| `p2p-agent` | 常驻无 GUI 节点，持有身份、连接、任务与监听。 |
-| `p2p-node` | 管理同一 Agent 的 CLI；也可启动只监听回环地址的 Web 管理网关。 |
-| `p2p-desktop` | 原生桌面工作台，通过 IPC 管理 Agent；需要 `gui` feature。 |
-| `p2p_file signal-server` | 自建信令服务器，负责发现和候选交换；可配置 TLS 与 UDP Relay。 |
+| `p2p-agent` | 常驻无 GUI 节点，持有身份、连接和转发监听。文件增强版启用后管理文件任务。 |
+| `p2p-node` | 管理同一 Agent 的 CLI。`p2p-node web` 可启动只监听回环地址的管理网关。 |
+| `p2p-desktop` | GPUI 工作台，通过 IPC 管理 Agent。标准桌面用 `desktop-client`，增强桌面用 `desktop-files`。 |
+| `p2p_file` | 独立 CLI。`p2p_file signal-server` 可自建信令，负责发现和候选交换，并支持可选 TLS 与 UDP Relay。 |
 | `p2p-sub2api-gateway` / `sub2api-client` | 独立的 Sub2API 专用组合，使用独立身份和受限服务范围。 |
 
 产品与仓库名为 **Veytrane**。当前 Cargo 包名、可执行命令和数据路径仍沿用现有内部标识；源码目录更名不会迁移身份或配置。
@@ -108,6 +109,13 @@ Veytrane 的常驻形态由**一个 Agent 持有节点状态，多个入口管�
 ### 1. 获取源码与构建
 
 需要 Rust stable、Rust / Cargo **1.90.0 或更高版本**，以及目标平台的编译工具链。桌面构建还需要图形系统依赖，见下方各平台打包文档。
+
+| 版型 | Agent、CLI 与 Web | GPUI | 文件能力 |
+| --- | --- | --- | --- |
+| 标准版（默认） | `agent-standard` | `desktop-client` | 提供 TCP 转发和测速。原生文件收发未编入发行二进制。 |
+| 文件增强版 | `agent-full` | `desktop-files` | 追加 `veytrane-files` 的执行和各入口。两端须显式启用文件能力并完成授权。 |
+
+默认 Cargo 构建和发行脚本使用标准版。增强版 Agent、CLI 可用 `--no-default-features --features agent-full` 构建。发行脚本通过 `--with-files`（PowerShell 为 `-WithFiles`）生成文件增强包。两种版型共用数据目录、IPC v1 和节点协议，初始配置均关闭文件能力。已有节点切回标准版前，按[宿主升级说明](packaging/node/README.md)先关闭文件能力。
 
 ```sh
 git clone https://github.com/gloryhui/Veytrane.git
@@ -182,7 +190,7 @@ cargo build --locked --release --no-default-features --features agent-standard -
 target/release/p2p-desktop
 ```
 
-桌面、Agent 和管理 CLI 使用同一提交和版型。标准桌面首页提供设备、授权服务目录和转发。通过打包脚本的 `--with-files`（PowerShell 为 `-WithFiles`）获得文件增强版；首次使用在桌面设置中启用文件传输，并启动后台应用配置。增强版 CLI 提供 `send`、`preview-directory`、`pause` 和 `resume` 等命令。
+安装时使用同一提交与版型的桌面、Agent 和 CLI。标准桌面首页提供设备、授权服务目录和转发。增强版通过桌面设置启用文件能力，CLI 提供 `send`、`preview-directory`、`pause` 和 `resume` 等命令。
 
 主窗口关闭按钮会收起到托盘，托盘不可用时保留任务栏入口。托盘菜单“退出 Veytrane”退出桌面，后台 Agent 继续提供转发。需要停用后台时使用节点管理的停止入口。发行组合及平台依赖见[桌面构建与运行](packaging/RUNNING.md)。
 
@@ -203,7 +211,7 @@ target/release/p2p_file signal-server   --listen 0.0.0.0:8900   --short-id-db ./
 
 | 形态 | 目标环境 | 说明 |
 | --- | --- | --- |
-| 通用 Agent + CLI / Web | macOS、Linux、Windows | 使用同一节点核心；当前 Mac / Ubuntu 部署已有连接、双向文件校验与服务入口验证记录。 |
+| 通用 Agent + CLI / Web | macOS、Linux、Windows | 共用节点核心，支持标准版和文件增强版。Mac、Ubuntu、Windows 的现有生产节点已完成 `de9af87` 标准版换版。 |
 | 原生桌面 | macOS、Windows、Linux | GPUI 窗口与系统托盘；系统依赖、打包与签名按平台核验。 |
 | Sub2API 专用客户端 | Windows x64 | 分发包仅提供固定服务入口；已交叉构建并检查制品，Windows 实机验收尚未完成。 |
 | 信令 / 可选 Relay | 可公网访问的服务器 | 与设备业务分离，按实际启用的监听端口部署。 |
@@ -250,13 +258,13 @@ python3 scripts/node-host-tests.py
 python3 scripts/package-desktop-tests.py
 ```
 
-当前实现、平台构建与实机验收分别记录。最近一次 Mac / Ubuntu 更新完成双向 1 MiB 文件校验及各服务入口检查；这不等同于 Windows 实机、所有 GUI 操作、物理睡眠唤醒或长期弱网验收。详细版本、时间、范围和限制见[当前部署验收记录](docs/task-reports/VEYTRANE_DEPLOYMENT.md)。
+默认 TCP、可选文件拆分的 P1–P5 已结项，覆盖三平台候选、换版与文件包移除演练。三端生产节点已完成标准版切换，Windows 还通过独立的重新登录触发计划任务和文件增强版双向收发验收。Windows 生产管理入口 `3001` 换版前后均返回 HTTP `400`，该页面功能未纳入通过范围。[最终验收汇总](architecture/tcp-default-files-optional-plan.md#p1p5-最终验收汇总) · [三端生产部署](architecture/tcp-default-files-optional-plan.md#三端生产标准版部署汇总) · [Windows 验收记录](docs/task-reports/WINDOWS_SCHEDULED_TASK_EDITION_ACCEPTANCE.md)
 
 ## 文档导航
 
 | 要了解什么 | 文档 |
 | --- | --- |
-| 交互式查看模块与源码 | [可点击架构图](docs/architecture-current.html)、[仓库分层](docs/REPOSITORY_LAYOUT.md) |
+| 交互式查看模块与源码 | [节点架构图](architecture/layer-review.html)、[源码索引](docs/architecture-current.html)、[仓库分层](docs/REPOSITORY_LAYOUT.md) |
 | 安装、常驻、升级与恢复 | [节点宿主说明](packaging/node/README.md)、[生命周期契约](docs/specs/NODE_HOST_LIFECYCLE.md) |
 | 管理 API 与配置事务 | [Agent API](docs/specs/NODE_AGENT_API.md)、[配置契约](docs/specs/NODE_CONFIG_P1.md) |
 | 无信令局域网发现 / IP 直连 | [使用与配置](docs/SIGNAL_FREE_CONNECTIVITY.md) |
@@ -265,7 +273,7 @@ python3 scripts/package-desktop-tests.py
 | 限速、测速与连接排查 | [文件限速](docs/TRANSFER_LIMITS.md)、[连接诊断](docs/CONNECTION_DIAGNOSTICS.md) |
 | 专用客户端与网关 | [Veytrane for Sub2API](packaging/sub2api-windows/README.md) |
 | 独立 CLI 的 serve / tunnel / push 等命令 | [独立 CLI 使用指南](docs/STANDALONE_CLI.md)、[动态转发](docs/CLI_DYNAMIC_TUNNEL.md) |
-| 部署版本与验证证据 | [当前部署记录](docs/task-reports/VEYTRANE_DEPLOYMENT.md)、[任务记录索引](docs/task-reports/IMPLEMENTATION_STATUS.md) |
+| 部署版本与验证证据 | [三端标准版部署验收](architecture/tcp-default-files-optional-plan.md#三端生产标准版部署汇总)、[历史部署记录](docs/task-reports/VEYTRANE_DEPLOYMENT.md)、[任务记录索引](docs/task-reports/IMPLEMENTATION_STATUS.md) |
 
 ## 许可证
 
