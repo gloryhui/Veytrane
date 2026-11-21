@@ -207,3 +207,15 @@ Windows 实际注销并重新登录触发计划任务、文件增强版双向收
 | 标准版 → 文件增强版 | 5.265 秒 | `PASS`。代际从 `1` 的 `disconnected` 升至 `2` 的 `connected`，对端信任恢复。 |
 
 确认已自动重连后，两次均读取到授权服务目录，并通过已保存的转发规则完成一次 TCP 回显。这次测得的两个恢复时间均超过先前的 5 秒观察窗口。受测 Agent 在对端重启期间 PID 不变。验收结束后隔离进程已退出、临时启动项已注销，现有 Agent 的 PID 和启动定义 SHA-256 前后一致。未重跑并发、撤销或监听回收用例。[自动重连结果 JSON](../tmp/upgrade-auto-reconnect.U3cWru/result.json)的 SHA-256 为 `174086ed72f4d1bb82e0933b57f3faaf66eb7c4756d63994ff5d9ab0ce25a59d`。[运行日志](../tmp/upgrade-auto-reconnect.U3cWru/runner.log)
+
+## 三端生产标准版部署汇总
+
+**部署验收通过（2026-11-21，UTC+08:00）。** Ubuntu、Mac 和 Windows 的现有 Agent 依次由 `c94d501` 升级到 CI #44880833831 同一源码提交 `de9af87d516efea8f0cf2dab0c235ea59815e1b2` 的各平台标准版。三端均保留节点身份、原有数据目录、TCP 配置、任务库和旧版安装。配置仅关闭文件能力并更新 revision 和请求记录。换版后三端信令均在线，各自恢复两个可信对端。
+
+| 生产节点 | 启动与配置 | 换版后实测 |
+| --- | --- | --- |
+| Ubuntu x64 | 经独立 SSH 先升级，原 systemd 用户服务启动新版，revision `26 → 27`。 | `1/1` 条转发监听且对端就绪，独立管理 Web `8787` 返回 HTTP `200`。通往 Mac 的 StreamDesk Hook 目标在换版前已离线。 |
+| Mac arm64 | Ubuntu 验收后升级，原 LaunchAgent 启动新版，revision `31 → 32`。 | `26/26` 条转发监听且对端就绪，经 P2P 的 `ubuntu-local` SSH 可用，HTTP `3001`、`8214`、`7788` 及独立 Web `7789` 均返回 `200`。 |
+| Windows x64 | 原计划任务 `\Veytrane-Agent-Boot` 指向新版并进入 `Running`，保留任务参数、主体、触发器、设置、其他 Actions 及 DACL。revision `15 → 16`，配置检查和换版退出码均为 `0`。 | 17 条转发监听且对端就绪。Windows → Ubuntu SSH、Windows → Mac RustDesk，以及 Windows 本机 RustDesk、RDP 均通过协议探测。换版前无运行中的 WSL 发行版，本轮未探测 WSL 后端。管理入口 `3001` 换版前后均返回 HTTP `400`，管理页面功能未纳入通过范围。[Windows 生产换版证据](../docs/task-reports/WINDOWS_SCHEDULED_TASK_EDITION_ACCEPTANCE.md#windows-生产换版) |
+
+Mac 侧复核了 Ubuntu 和 Mac 的部署日志及换版后的流量记录，并核对 Windows 脱敏回传包 `veytrane-windows-production-de9af87-PASS-mac-review.zip`。回传包 SHA-256 为 `067e3991fb100dcc31b8005efa8fe4e14a67a3e1626c6100f72b48d7626ffecb`，包内 `SHA256SUMS` 所列 4 个文件哈希均一致。候选报告、生产重试结果和升级前管理入口记录与施工记录一致。Windows 原始配置、计划任务快照和校验明细留在 Windows，本次依据包内脱敏摘要复核。三端备份保留在各自部署主机，本次文档复核未重跑测试。
