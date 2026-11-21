@@ -10,6 +10,30 @@ use veytrane_node::live_authorization::LiveAuthorization;
 const SELECTION_JOBS: usize = 64;
 const CONTINUATION_JOBS: usize = 3;
 
+pub enum SessionFileCommand {
+    Transfer(FileCommand),
+    Pause(TaskId),
+    CancelDirectoryPreview(TaskId),
+}
+
+impl SessionFileCommand {
+    pub fn unavailable(&self) -> &'static str {
+        match self {
+            Self::Transfer(FileCommand::SendPaths { .. }) => {
+                "传输命令队列已满或会话已关闭；拖入项尚未提交"
+            }
+            Self::Transfer(FileCommand::PreviewDirectory { .. }) => {
+                "目录预览命令队列已满或会话已关闭"
+            }
+            Self::Transfer(FileCommand::ConfirmDirectory { .. }) => {
+                "目录确认命令队列已满或会话已关闭"
+            }
+            Self::CancelDirectoryPreview(_) => "目录取消命令队列已满或会话已关闭",
+            _ => "传输命令队列已满或会话已关闭",
+        }
+    }
+}
+
 pub struct FileCommandJobs {
     selection_jobs: Arc<Semaphore>,
     continuation_jobs: Arc<Semaphore>,

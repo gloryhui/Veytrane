@@ -49,7 +49,7 @@ use crate::node::core::network_state::{
 #[cfg(feature = "node-speed")]
 use crate::node::core::speed::SpeedService;
 #[cfg(feature = "agent-files")]
-use veytrane_files::command_jobs::{FileCommandJobs, PrepareError};
+use veytrane_files::command_jobs::{FileCommandJobs, PrepareError, SessionFileCommand};
 #[cfg(feature = "agent-files")]
 use veytrane_files::transfer::{FileCommand, FileCommandResult};
 
@@ -445,13 +445,13 @@ pub struct NodeSessionHandle {
     lifetime: Arc<SessionLifetime>,
 }
 
-#[cfg(feature = "agent-files")]
+#[cfg(all(feature = "agent-files", test))]
 #[derive(Clone, Copy)]
 pub(crate) struct FileCommands<'a> {
-    commands: &'a mpsc::Sender<SessionCommand>,
+    node: &'a NodeSessionHandle,
 }
 
-#[cfg(feature = "agent-files")]
+#[cfg(all(feature = "agent-files", test))]
 impl FileCommands<'_> {
     pub(crate) fn send_paths(
         &self,
@@ -459,36 +459,37 @@ impl FileCommands<'_> {
         sources: Vec<std::path::PathBuf>,
     ) -> std::result::Result<(), String> {
         let sources =
-            crate::node::core::drop_send::normalize(sources).map_err(|error| error.to_string())?;
-        self.commands
-            .try_send(SessionCommand::File(FileCommand::SendPaths {
+            veytrane_files::drop_send::normalize(sources).map_err(|error| error.to_string())?;
+        self.node
+            .enqueue_file_command(SessionFileCommand::Transfer(FileCommand::SendPaths {
                 peer,
                 sources,
             }))
-            .map_err(|_| "传输命令队列已满或会话已关闭；拖入项尚未提交".into())
     }
 
-    #[cfg(test)]
     pub(crate) fn send_file(
         &self,
         peer: NodeId,
         source: std::path::PathBuf,
     ) -> std::result::Result<(), String> {
-        self.commands
-            .try_send(SessionCommand::File(FileCommand::SendFile { peer, source }))
-            .map_err(|_| "传输命令队列已满或会话已关闭".into())
+        self.node
+            .enqueue_file_command(SessionFileCommand::Transfer(FileCommand::SendFile {
+                peer,
+                source,
+            }))
     }
 
     pub(crate) fn pause_task(&self, id: TaskId) -> std::result::Result<(), String> {
-        self.commands
-            .try_send(SessionCommand::PauseTask(id))
-            .map_err(|_| "传输命令队列已满或会话已关闭".into())
+        self.node
+            .enqueue_file_command(SessionFileCommand::Pause(id))
     }
 
     pub(crate) fn resume_task(&self, peer: NodeId, id: TaskId) -> std::result::Result<(), String> {
-        self.commands
-            .try_send(SessionCommand::File(FileCommand::Resume { peer, task: id }))
-            .map_err(|_| "传输命令队列已满或会话已关闭".into())
+        self.node
+            .enqueue_file_command(SessionFileCommand::Transfer(FileCommand::Resume {
+                peer,
+                task: id,
+            }))
     }
 
     pub(crate) fn preview_directory(
@@ -497,13 +498,14 @@ impl FileCommands<'_> {
         source: std::path::PathBuf,
     ) -> std::result::Result<TaskId, String> {
         let request = TaskId::generate();
-        self.commands
-            .try_send(SessionCommand::File(FileCommand::PreviewDirectory {
-                peer,
-                source,
-                request: request.clone(),
-            }))
-            .map_err(|_| "目录预览命令队列已满或会话已关闭".to_owned())?;
+        self.node
+            .enqueue_file_command(SessionFileCommand::Transfer(
+                FileCommand::PreviewDirectory {
+                    peer,
+                    source,
+                    request: request.clone(),
+                },
+            ))?;
         Ok(request)
     }
 
@@ -512,32 +514,26 @@ impl FileCommands<'_> {
         peer: NodeId,
         id: TaskId,
     ) -> std::result::Result<(), String> {
-        self.commands
-            .try_send(SessionCommand::File(FileCommand::ConfirmDirectory {
-                peer,
-                request: id,
-            }))
-            .map_err(|_| "目录确认命令队列已满或会话已关闭".into())
+        self.node.enqueue_file_command(SessionFileCommand::Transfer(
+            FileCommand::ConfirmDirectory { peer, request: id },
+        ))
     }
 
     pub(crate) fn cancel_directory_preview(&self, id: TaskId) -> std::result::Result<(), String> {
-        self.commands
-            .try_send(SessionCommand::CancelDirectoryPreview(id))
-            .map_err(|_| "目录取消命令队列已满或会话已关闭".into())
+        self.node
+            .enqueue_file_command(SessionFileCommand::CancelDirectoryPreview(id))
     }
 
-    #[cfg(test)]
     pub(crate) fn send_directory(
         &self,
         peer: NodeId,
         source: std::path::PathBuf,
     ) -> std::result::Result<(), String> {
-        self.commands
-            .try_send(SessionCommand::File(FileCommand::SendDirectory {
+        self.node
+            .enqueue_file_command(SessionFileCommand::Transfer(FileCommand::SendDirectory {
                 peer,
                 source,
             }))
-            .map_err(|_| "传输命令队列已满或会话已关闭".into())
     }
 }
 
@@ -587,10 +583,26 @@ impl Drop for SessionLifetime {
 
 impl NodeSessionHandle {
     #[cfg(feature = "agent-files")]
+    pub(crate) fn enqueue_file_command(
+        &self,
+        command: SessionFileCommand,
+    ) -> std::result::Result<(), String> {
+        let unavailable = command.unavailable();
+        let command = match command {
+            SessionFileCommand::Transfer(command) => SessionCommand::File(command),
+            SessionFileCommand::Pause(task) => SessionCommand::PauseTask(task),
+            SessionFileCommand::CancelDirectoryPreview(request) => {
+                SessionCommand::CancelDirectoryPreview(request)
+            }
+        };
+        self.commands
+            .try_send(command)
+            .map_err(|_| unavailable.into())
+    }
+
+    #[cfg(all(feature = "agent-files", test))]
     pub(crate) fn file_commands(&self) -> FileCommands<'_> {
-        FileCommands {
-            commands: &self.commands,
-        }
+        FileCommands { node: self }
     }
 
     /// Internal listener demand; unlike an explicit user connect this does not

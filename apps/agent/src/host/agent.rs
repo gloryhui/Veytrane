@@ -17,9 +17,6 @@ use veytrane_management::{
     transport::Listener,
 };
 
-#[cfg(feature = "agent-files")]
-mod files;
-
 #[cfg(not(feature = "agent-files"))]
 #[derive(Default)]
 struct FilePage {
@@ -228,7 +225,10 @@ impl Agent {
                         .decode()
                         .map_err(|error| format!("invalid_request: {error}"))?;
                     return self
-                        .execute_files(service, self.control.file_commands(), command)
+                        .file_management
+                        .execute(service, command, |command| {
+                            self.control.enqueue_file_command(command)
+                        })
                         .await;
                 }
                 #[cfg(not(feature = "agent-files"))]
