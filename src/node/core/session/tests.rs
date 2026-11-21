@@ -134,6 +134,46 @@ async fn ipv6_desktop_responder_authenticates_password_without_any_punch_respons
     )
     .await
     .unwrap();
+    let fresh_offer = signaling
+        .resolve_peer(desktop.node_id(), Duration::from_secs(5))
+        .await
+        .unwrap();
+    assert_ne!(offer.token, fresh_offer.token);
+    time::timeout(Duration::from_secs(2), async {
+        while deferred_offer_token(&handle, client.node_id()).await != Some(fresh_offer.token) {
+            time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("fresh pairing should wait for the pending authorization");
+    connection.close(3u32.into(), b"old authorization exchange ended");
+    wait_failed(&mut events).await;
+    assert!(inspect(&handle).await.is_empty());
+    time::timeout(Duration::from_secs(5), async {
+        while let Some(event) = events.recv().await {
+            if matches!(event, SessionEvent::PeerState { peer, state: PeerLifecycle::Authenticating, .. } if peer == client.node_id()) {
+                return;
+            }
+        }
+        panic!("desktop stopped before processing the fresh pairing");
+    })
+    .await
+    .expect("the deferred pairing must survive the old authorization failure");
+    let connection = crate::net::race::authenticated_race(
+        fresh_offer
+            .candidates
+            .iter()
+            .filter(|c| c.addr.is_ipv6())
+            .map(|c| (endpoint.clone(), c.addr))
+            .collect(),
+        &client,
+        desktop.node_id(),
+    )
+    .await
+    .unwrap();
+    let capabilities = crate::node::core::wire::negotiate(&connection, true, capabilities)
+        .await
+        .unwrap();
     let authorization = AuthContext::default()
         .authorize_session(
             &connection,
@@ -569,20 +609,21 @@ async fn relay_authenticated_late_generation_is_closed_by_the_actual_publication
     let _ = server.await;
 }
 
+async fn deferred_offer_token(handle: &NodeSessionHandle, peer: NodeId) -> Option<PunchToken> {
+    let (tx, rx) = oneshot::channel();
+    handle
+        .commands
+        .send(SessionCommand::InspectDeferred(peer, tx))
+        .await
+        .unwrap();
+    time::timeout(Duration::from_secs(2), rx)
+        .await
+        .unwrap()
+        .unwrap()
+}
+
 #[tokio::test]
 async fn relay_pairing_before_close_keeps_live_winner_then_reconnects_on_fresh_tls() {
-    async fn deferred(handle: &NodeSessionHandle, peer: NodeId) -> Option<PunchToken> {
-        let (tx, rx) = oneshot::channel();
-        handle
-            .commands
-            .send(SessionCommand::InspectDeferred(peer, tx))
-            .await
-            .unwrap();
-        time::timeout(Duration::from_secs(2), rx)
-            .await
-            .unwrap()
-            .unwrap()
-    }
     async fn with_route(
         events: &mut mpsc::Receiver<SessionEvent>,
         peer: NodeId,
@@ -651,8 +692,8 @@ async fn relay_pairing_before_close_keeps_live_winner_then_reconnects_on_fresh_t
     time::timeout(Duration::from_secs(3), async {
         loop {
             if let (Some(a), Some(b)) = (
-                deferred(&ha, b.node_id()).await,
-                deferred(&hb, a.node_id()).await,
+                deferred_offer_token(&ha, b.node_id()).await,
+                deferred_offer_token(&hb, a.node_id()).await,
             ) && a == b
             {
                 break;

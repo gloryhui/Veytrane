@@ -4694,13 +4694,13 @@ async fn run_session<B>(
                 pending_inbound.remove(&(peer, generation));
                 if peers.is_current(peer, generation) {
                     direct_dialing.remove(&peer);
-                    peer_attempts.remove(&peer);
-                    let candidate = deferred_candidates.remove(&peer);
+                    let failed_token = peer_attempts.remove(&peer).map(|attempt| attempt.token);
+                    let candidate = deferred_candidates
+                        .remove(&peer)
+                        .filter(|(_, token)| Some(*token) != failed_token);
                     let credential_retry = credential_retries.remove(&peer);
                     if peers.transition(peer, generation, PeerLifecycle::Failed(detail.clone())) {
                         peer_candidates.remove(&peer);
-                        // Classify even when another offer is queued. An offer is not
-                        // new authorization and cannot turn a denied password into retry.
                         emit_peer_state(
                             &events,
                             peer,
@@ -4709,11 +4709,16 @@ async fn run_session<B>(
                         )
                         .await;
                         let auth_failed = events.recovery.lock().unwrap().auth_failed(peer);
-                        if credential_retry {
-                            let _ = command_tx.try_send(SessionCommand::ConnectPeer(peer));
-                            continue;
+                        if auth_failed {
+                            fresh_lookup_peers.remove(&peer);
+                            fast_recoveries.remove(&peer);
+                            recovery_timings.remove(&peer);
+                            debug!(
+                                peer = %peer.short(),
+                                "peer authentication failure keeps autonomous lookup and transport recovery paused"
+                            );
                         }
-                        if !auth_failed && let Some((candidates, token)) = candidate {
+                        if let Some((candidates, token)) = candidate {
                             let _ = command_tx.try_send(SessionCommand::RetryCandidates {
                                 peer,
                                 candidates,
@@ -4721,11 +4726,9 @@ async fn run_session<B>(
                             });
                             continue;
                         }
-                        if auth_failed {
-                            fresh_lookup_peers.remove(&peer);
-                            fast_recoveries.remove(&peer);
-                            recovery_timings.remove(&peer);
-                            debug!(peer = %peer.short(), "peer authentication failure keeps transport recovery paused");
+                        if credential_retry {
+                            let _ = command_tx.try_send(SessionCommand::ConnectPeer(peer));
+                            continue;
                         }
                         fail_peer_tunnels(
                             peer,
