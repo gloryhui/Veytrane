@@ -51,7 +51,7 @@ Chromium 发送凭据前，将映射入口的证书指纹与通过 SSH 读取的
 
 本次验证覆盖服务重启后的节点连接、双向文件传输、授权服务目录及上述入口。没有验收主机物理重启 / 睡眠唤醒、长时间弱网运行、Windows、Linux GUI 或桌面 GUI 交互；Mac 桌面包的 ad hoc 签名验证不代表公证发布。应用入口检查也不等于完整业务操作验收，未操作路由器设置、Chromium 内部会话或已有 SMB 共享文件。
 
-源码回归结果见[节点协议统一记录](NODE_PROTOCOL_UNIFICATION.md)，与本文的实机部署证据分别记录。架构及部署关系见[可点击架构图](../architecture-current.html#deployment)，升级顺序与失败恢复见[节点宿主安装说明](../../packaging/node/README.md)。
+源码回归结果见[节点协议统一记录](NODE_PROTOCOL_UNIFICATION.md)，与本文的实机部署证据分别记录。当前节点分层见[交互架构图](../../architecture/layer-review.html)，升级顺序与失败恢复见[节点宿主安装说明](../../packaging/node/README.md)。
 
 出现升级故障时，先停新 Agent 并确认锁释放，核对当前配置 schema、revision、授权和任务状态，再决定修复构建或恢复旧启动路径。不得将停机备份直接覆盖运行中的节点，也不得用旧备份覆盖升级后新增任务或撤销记录。
 

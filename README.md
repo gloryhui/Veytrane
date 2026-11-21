@@ -90,7 +90,7 @@ Direct 连接成功时，业务数据在设备间传输，信令服务器负责�
 | 管理契约与入口 | [`veytrane-management`](crates/veytrane-management)、[`apps/desktop`](apps/desktop)、[`apps/node-cli`](apps/node-cli)、[`apps/web-management`](apps/web-management) | IPC v1 的请求、响应与客户端，以及 GPUI、管理 CLI 和回环 Web。内置导航按配置在 Agent 进程中提供 `3001`，`p2p-node web` 可在独立进程中运行。 |
 | 专用产品与独立 CLI | [`apps/live`](apps/live)、[`apps/sub2api`](apps/sub2api)、[`apps/standalone-cli`](apps/standalone-cli)、[`apps/signaling`](apps/signaling) | Live 与 Sub2API 复用节点装配与 TCP。`p2p_file` 提供独立隧道、测速和信令入口，旧式文件命令随 `standalone-files` 构建。 |
 
-添加业务时，由入口选择能力并向节点装配层注入策略，业务包复用节点提供的会话、授权和流分发。文件增强版采用这条路径，移除文件包后的标准 Agent、CLI 和桌面已有独立演练记录。[分层说明](docs/REPOSITORY_LAYOUT.md) · [源码索引](docs/architecture-current.html) · [Agent API](docs/specs/NODE_AGENT_API.md) · [P2PN v2](docs/specs/NODE_WIRE.md) · [施工与验收](architecture/tcp-default-files-optional-plan.md)
+添加业务时，由入口选择能力并向节点装配层注入策略，业务包复用节点提供的会话、授权和流分发。文件增强版采用这条路径，移除文件包后的标准 Agent、CLI 和桌面已有独立演练记录。[分层说明](docs/REPOSITORY_LAYOUT.md) · [Agent API](docs/specs/NODE_AGENT_API.md) · [P2PN v2](docs/specs/NODE_WIRE.md) · [施工与验收](architecture/tcp-default-files-optional-plan.md)
 
 ### 进程与入口
 
@@ -244,9 +244,8 @@ target/release/p2p_file signal-server   --listen 0.0.0.0:8900   --short-id-db ./
 宿主和打包脚本的检查需要 Python 3.11 或更高版本。
 
 ```sh
-# 架构依赖与图中源码链接
+# 架构依赖
 python3 scripts/check-architecture.py
-python3 scripts/update-architecture-map.py --check
 
 # Rust 格式、编译与回归
 cargo fmt --all -- --check
@@ -264,7 +263,7 @@ python3 scripts/package-desktop-tests.py
 
 | 要了解什么 | 文档 |
 | --- | --- |
-| 交互式查看模块与源码 | [节点架构图](architecture/layer-review.html)、[源码索引](docs/architecture-current.html)、[仓库分层](docs/REPOSITORY_LAYOUT.md) |
+| 交互式查看模块与源码 | [节点架构图](architecture/layer-review.html)、[仓库分层](docs/REPOSITORY_LAYOUT.md) |
 | 安装、常驻、升级与恢复 | [节点宿主说明](packaging/node/README.md)、[生命周期契约](docs/specs/NODE_HOST_LIFECYCLE.md) |
 | 管理 API 与配置事务 | [Agent API](docs/specs/NODE_AGENT_API.md)、[配置契约](docs/specs/NODE_CONFIG_P1.md) |
 | 无信令局域网发现 / IP 直连 | [使用与配置](docs/SIGNAL_FREE_CONNECTIVITY.md) |

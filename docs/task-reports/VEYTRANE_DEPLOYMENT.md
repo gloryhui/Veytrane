@@ -54,7 +54,7 @@ Windows 构建沿用原私有 profile，EXE 中的网关身份和专用访问凭
 
 原二进制、安装元数据、启动定义及 Mac 旧应用仍在私有备份中。恢复前先优雅停止新进程并确认锁释放，再选择匹配当前配置与 P2PN v2 的程序及启动路径；不自动用备份覆盖新增任务、授权撤销或身份状态。Windows 更新保留身份目录，完整解压新包后运行 BAT。
 
-当前架构见[可点击架构图](../architecture-current.html#deployment)，宿主操作见[安装与恢复说明](../../packaging/node/README.md)，专用包见[分发说明](../../packaging/sub2api-windows/README.md)。此前的[首次 v2 主节点升级](P2PN_V2_DEPLOYMENT.md)与[专用网关升级](SUB2API_P2PN_V2_DEPLOYMENT.md)保留各自历史时间、构建和制品校验值。
+当前节点分层见[交互架构图](../../architecture/layer-review.html)，宿主操作见[安装与恢复说明](../../packaging/node/README.md)，专用包见[分发说明](../../packaging/sub2api-windows/README.md)。此前的[首次 v2 主节点升级](P2PN_V2_DEPLOYMENT.md)与[专用网关升级](SUB2API_P2PN_V2_DEPLOYMENT.md)保留各自历史时间、构建和制品校验值。
 
 私有配置、NodeId、密码、令牌、私钥、完整日志、备份及带嵌入访问凭证的 ZIP 均未提交到仓库。
 

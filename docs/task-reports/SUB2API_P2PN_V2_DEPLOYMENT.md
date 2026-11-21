@@ -47,4 +47,4 @@ Windows 构建仅产生一条工具链的 `-no-pie` 未使用参数提示，构�
 
 网关故障恢复先停止服务并确认锁释放，再按备份服务定义恢复旧可执行路径或安装修复构建。程序与协议需成对选择；不能只回退一端。恢复启动路径不等于恢复旧身份或校验值，不自动覆盖运行后的状态。
 
-架构位置见[部署关系](../architecture-current.html#deployment)，首次配置及构建入口见[专用分发说明](../../packaging/sub2api-windows/README.md)。私有 profile、密码校验值、NodeId、身份文件、备份、完整日志和带嵌入凭证的 ZIP 均未提交。
+专用产品与节点核心的关系见[交互架构图](../../architecture/layer-review.html)，首次配置及构建入口见[专用分发说明](../../packaging/sub2api-windows/README.md)。私有 profile、密码校验值、NodeId、身份文件、备份、完整日志和带嵌入凭证的 ZIP 均未提交。

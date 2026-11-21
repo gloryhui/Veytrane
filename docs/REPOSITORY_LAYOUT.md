@@ -108,13 +108,12 @@ cargo build --locked --no-default-features --features standalone-files --bin p2p
 - `target/`、`release/`：已被 Git 忽略的生成物；本次不删除缓存、已安装二进制或发布包。
 - `service-navigation.html`：用户的本机服务目录模板，按 `AGENTS.md` 单次同步；不是另一个后台服务。私有凭据副本不在仓库。
 
-[节点架构图](../architecture/layer-review.html) 提供八种主题、亮暗配色和当前图的 PNG 导出。[源码索引](architecture-current.html) 提供四个可钻取视图。节点数据维护在 `docs/architecture/architecture-map.json`，编辑后用 `python3 scripts/update-architecture-map.py` 更新离线 HTML。历史文档中的旧源码路径可通过 Git 历史追溯。
+[节点架构图](../architecture/layer-review.html) 提供八种主题、亮暗配色和当前图的 PNG 导出。图表源数据位于 [`architecture/layer-review.spec.json`](../architecture/layer-review.spec.json)。编辑后，在安装了 `arch-diagram` 技能的环境里运行 `node architecture/build-layer-review.mjs` 更新离线页面。历史文档中的旧源码路径可通过 Git 历史追溯。
 
 ## 检查与后续维护
 
 ```sh
 python3 scripts/check-architecture.py
-python3 scripts/update-architecture-map.py --check
 cargo fmt --all -- --check
 cargo check --locked --no-default-features --features standalone --all-targets
 cargo check --locked --all-features --all-targets
