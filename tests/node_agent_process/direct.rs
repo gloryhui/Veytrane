@@ -336,7 +336,45 @@ async fn file_disabled_agents_keep_speed_tcp_and_reconnect_without_file_storage(
     );
     wait_peer(&client, &server_id).await;
     if client_tcp {
-        echo_request(listen, b"TCP after reconnect").await;
+        let services = client
+            .ok(Api::Services {
+                peer: server_id.clone(),
+            })
+            .await;
+        assert_eq!(services[0]["id"], "echo");
+        tokio::join!(
+            echo_request(listen, b"TCP after reconnect"),
+            echo_request(listen, b"TCP parallel 2"),
+            echo_request(listen, b"TCP parallel 3"),
+            echo_request(listen, b"TCP parallel 4"),
+        );
+        let mut stream = tokio::net::TcpStream::connect(listen).await.unwrap();
+        stream.write_all(b"live stream").await.unwrap();
+        let mut received = [0; 11];
+        stream.read_exact(&mut received).await.unwrap();
+        assert_eq!(&received, b"live stream");
+
+        let mut revoked = server.config().await;
+        revoked["settings"]["trusted_devices"] = json!([]);
+        revoked["settings"]["trust_sources"] = json!({});
+        assert!(server.apply(&revoked).await.error.is_none());
+        let ended = tokio::time::timeout(Duration::from_secs(8), stream.read(&mut received))
+            .await
+            .expect("trust revocation left the forwarded stream open");
+        assert!(matches!(ended, Ok(0) | Err(_)));
+        assert!(
+            client
+                .response(Api::Services {
+                    peer: server_id.clone(),
+                })
+                .await
+                .error
+                .is_some(),
+            "revoked peer still lists the authorized service"
+        );
+        client.ok(Api::StopForward { rule: "echo".into() }).await;
+        assert!(TcpListener::bind(listen).is_ok(), "listener did not release");
+        println!("NODE_AGENT_PROOF authorized directory, four TCP echoes, reconnect, trust revocation and listener release");
     }
     client.stop().await;
     server.stop().await;
