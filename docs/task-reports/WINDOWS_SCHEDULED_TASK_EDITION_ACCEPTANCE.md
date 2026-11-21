@@ -85,3 +85,17 @@ python -X utf8 .\node-host-tests.py --windows-upgrade "<标准版二进制目录
 接收文件均落在各自的专用接收目录。两台测试 Agent 经 IPC 停止后均以退出码 `0` 退出，所有权锁释放。
 
 独立验收回传包 `veytrane-windows-independent-acceptance-PASS.zip` 的 SHA-256 为 `04e38ad869ef2ba4463eff54b08edf45d17a496c952dd43a7b1f519d34081eda`。包内 `login-before.json`、`login-task-definition.xml` 和 `login-result.json` 记录任务定义、登录时间线、IPC 与注销复查。`bidirectional-files.json` 记录两边的任务状态和各自的源文件与落盘文件哈希。[施工验收记录](../../architecture/tcp-default-files-optional-plan.md#独立验收)
+
+## Windows 生产换版
+
+**结果** `PASS`（2026-11-21 20:58:31，UTC+08:00）。Windows x64 生产 Agent 和配套 `p2p-node` 从 `c94d501adcc94043dbf02dd0bc3fcad9c4d732e8` 切换到 `de9af87d516efea8f0cf2dab0c235ea59815e1b2` 标准版。复用上表中 CI #44880833831 的标准版归档（产物 ID `14699490790`）。
+
+| 核对项 | 实测结果 |
+| --- | --- |
+| 配置及退出码 | 成功重试的配置 revision 为 `15 → 16`。标准候选 `--check-config` 和 `node-host.py upgrade` 退出码均为 `0`。按 JSON 结构复核仅 `enable_files`、`revision` 和 `last_request` 变化，节点身份与任务库校验值一致，旧版安装保留。 |
+| 生产计划任务 | 原任务 `\Veytrane-Agent-Boot` 启动新版后处于 `Running`，Agent PID `12348 → 17352`。仅匹配 Action 的可执行路径和原先指向旧版目录的工作目录切换到新安装。参数、主体、登录方式、触发器、设置、其他 Actions 和任务 DACL 均经核对。 |
+| 原生 IPC 与转发 | 新 `p2p-node` 经 IPC v1 确认 `standard`、TCP 就绪、测速启用、文件关闭。信令在线，Mac 和 Ubuntu 两个可信对端已连接，17 条转发均监听且对端就绪。 |
+| 协议探测 | Windows → Ubuntu SSH 转发返回 `SSH-2.0`。Windows → Mac RustDesk 转发及 Windows 本机 RustDesk 均返回 `Message.hash`，本机 RDP 完成 X.224 协商。换版前没有运行中的 WSL 发行版。 |
+| 管理入口基线 | `http://127.0.0.1:3001/` 换版前后均返回 HTTP `400`。这项核对只确认响应与原有基线一致，管理页面功能未验收。 |
+
+首轮在升级脚本执行前，JSON 序列化文本比较误判了配置差异，当时恢复到旧版 revision `15`。重试前用备份离线验证了键重排可以通过、无关 TCP 变更会被拒绝，随后用结构比较复核生产配置。脱敏结果保存为 `production-retry-result.json`，换版前管理入口状态记录在 `production-preflight.json`。私有备份和原始配置留存于 Windows 本机。[施工验收记录](../../architecture/tcp-default-files-optional-plan.md#windows-生产换版验收)

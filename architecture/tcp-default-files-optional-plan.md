@@ -178,6 +178,12 @@
 
 Windows 实际注销并重新登录触发计划任务、文件增强版双向收发落盘且每个方向的 SHA-256 一致，均已通过独立验收和 Mac 侧证据复核。[Windows 独立验收报告](../docs/task-reports/WINDOWS_SCHEDULED_TASK_EDITION_ACCEPTANCE.md#独立验收)
 
+### Windows 生产换版验收
+
+2026-11-21（UTC+08:00）Windows x64 生产换版 `PASS`。Agent 和配套 `p2p-node` 从 `c94d501adcc94043dbf02dd0bc3fcad9c4d732e8` 切到 CI #44880833831 的 `de9af87d516efea8f0cf2dab0c235ea59815e1b2` 标准版。成功重试配置 revision 为 `15 → 16`，`--check-config` 和 `node-host.py upgrade` 退出码均为 `0`。JSON 结构校验仅 `enable_files`、`revision` 和 `last_request` 变化，节点身份和任务库校验值一致。
+
+原生产任务 `\Veytrane-Agent-Boot` 启动新版后处于 `Running`。匹配 Action 仅更新可执行路径和原先指向旧安装的工作目录。核对了原参数、其余任务定义及 DACL。原生 IPC 确认 TCP 就绪、测速启用、文件关闭。信令在线，Mac 和 Ubuntu 两个可信对端均已连接，17 条转发均监听且对端就绪。Windows → Ubuntu SSH、Windows → Mac RustDesk、Windows 本机 RustDesk 和 RDP 均通过协议探测。本机管理入口 `http://127.0.0.1:3001/` 换版前后均返回 HTTP `400`，符合原有响应基线，管理页面功能未验收。[Windows 生产换版证据](../docs/task-reports/WINDOWS_SCHEDULED_TASK_EDITION_ACCEPTANCE.md#windows-生产换版)
+
 ### 已有版本升级组专项验收
 
 2026-11-21 在 macOS 15.8.1 Apple Silicon 上补验，结果为 `PASS`。复用 `18d114b` 旧版和 `ab4c34a` 的双版候选。旧节点先经已保存的转发规则完成 TCP 回显，再通过 `node-host.py upgrade` 和独立 LaunchAgent 连续换到标准版、文件增强版。两次换版均保留节点身份、revision `2` 和配置文件字节。两端经回环直连，信令和 mDNS 均关闭，文件增强版沿用关闭文件能力的配置。
