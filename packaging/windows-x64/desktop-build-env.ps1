@@ -182,9 +182,10 @@ function Test-P2PVisualStudioEnvironment {
     try {
         New-Item -ItemType Directory -Path $temporaryRoot -ErrorAction Stop | Out-Null
         $sourcePath = Join-Path $temporaryRoot 'sdk_probe.cpp'
+        $objectPath = Join-Path $temporaryRoot 'sdk_probe.obj'
         $executablePath = Join-Path $temporaryRoot 'sdk_probe.exe'
         [IO.File]::WriteAllText($sourcePath, "#include <windows.h>`r`nint main(void) { return GetCurrentProcessId() == 0; }`r`n", [Text.Encoding]::ASCII)
-        $compilerArguments = @('/nologo', '/EHsc', ('/Fe:' + $executablePath), $sourcePath)
+        $compilerArguments = @('/nologo', '/EHsc', ('/Fo' + $objectPath), ('/Fe:' + $executablePath), $sourcePath)
         $compilerCapture = Invoke-P2PDesktopNativeCapture -Executable $cl.Source -Arguments $compilerArguments
         $compilerOutput = @($compilerCapture.Output)
         $compileCode = $compilerCapture.ExitCode
