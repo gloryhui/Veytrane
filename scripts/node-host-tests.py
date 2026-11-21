@@ -108,6 +108,70 @@ class Hosting(unittest.TestCase):
                     host.install(source,root/'install',root/'data',False)
             self.assertFalse((root/'data').exists(),'install initialized identity/data')
 
+    def test_same_sha_editions_install_separately_and_mixed_helpers_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            suffix = '.exe' if os.name == 'nt' else ''
+            roles = ('p2p-agent', 'p2p-node')
+            for edition in ('standard', 'files', 'mixed'):
+                source = root / edition
+                source.mkdir()
+                for name in roles:
+                    (source / (name + suffix)).write_text(f'{edition}:{name}', encoding='utf-8')
+            legacy = {'build_sha': 'b' * 40, 'target': 'fixture', 'version': '1',
+                      'source_state': 'clean', 'api_version': 1}
+
+            def metadata(argv):
+                binary = argv[0]
+                name = binary.stem
+                edition = binary.parent.name
+                if edition == 'mixed':
+                    edition = 'files' if name == 'p2p-agent' else 'standard'
+                info = dict(legacy, name=name, edition=edition, files=edition == 'files')
+                return subprocess.CompletedProcess(argv, 0, json.dumps(info), '')
+
+            base = root / 'install'
+            old = base / legacy['build_sha']
+            old.mkdir(parents=True)
+            data = root / 'data'
+            with patch.object(host, 'run', side_effect=metadata):
+                installed = [host.install(root / edition, base, data, False)
+                             for edition in ('standard', 'files')]
+                with self.assertRaisesRegex(RuntimeError, 'same build'):
+                    host.install(root / 'mixed', base, data, False)
+            self.assertEqual([Path(record['bin_dir']).name for record in installed],
+                             [f"{legacy['build_sha']}-standard", f"{legacy['build_sha']}-files"])
+            self.assertTrue(old.is_dir())
+            self.assertFalse(data.exists())
+
+    def test_config_preflight_rejection_leaves_previous_installation_running(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            data = root / 'node'
+            data.mkdir()
+            config = data / 'node.json'
+            config.write_text('{"settings":{"enable_files":true}}', encoding='utf-8')
+            old = {'bin_dir': str(root / 'old'), 'data_dir': str(data)}
+            candidate = {'bin_dir': str(root / 'new'), 'data_dir': str(data),
+                         'build': {'edition': 'standard'}}
+            host.atomic_json(root / 'installed.json', old)
+            argv = ['node-host.py', 'upgrade', '--bin-dir', str(root / 'candidate')]
+            with patch.object(sys, 'argv', argv), \
+                    patch.object(host.platform, 'system', return_value='Linux'), \
+                    patch.object(host, 'locations', return_value=(root, None)), \
+                    patch.object(host, 'response', return_value={'revision': 1}), \
+                    patch.object(host, 'install', return_value=candidate), \
+                    patch.object(host, 'run', side_effect=RuntimeError('candidate rejected config')) as run, \
+                    patch.object(host, 'stop') as stop, \
+                    patch.object(host, 'disable') as disable:
+                with self.assertRaisesRegex(RuntimeError, 'candidate rejected config'):
+                    host.main()
+            run.assert_called_once_with([root / 'new/p2p-agent', '--data-dir', data, '--check-config'])
+            stop.assert_not_called()
+            disable.assert_not_called()
+            self.assertEqual(json.loads((root / 'installed.json').read_text(encoding='utf-8')), old)
+            self.assertFalse((root / 'previous-install.json').exists())
+
     def test_windows_upgrade_selects_unique_existing_task_and_keeps_extra_arguments(self):
         old={'bin_dir':r'C:\Users\glory\AppData\Local\p2p-file\bin\abc123',
              'data_dir':r'C:\Users\glory\AppData\Local\p2p-file\node'}

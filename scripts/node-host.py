@@ -354,11 +354,18 @@ def install(source, base, data_dir, allow_dirty):
     agent = metadata['p2p-agent']
     if not re.fullmatch('[0-9a-f]{40}', agent['build_sha']):
         raise RuntimeError('invalid build SHA')
-    if agent.get('api_version') != 1 or any(metadata[name].get(key) != agent.get(key) for name in metadata for key in ('build_sha', 'target', 'version', 'source_state', 'api_version')):
+    if agent.get('api_version') != 1 or any(metadata[name].get(key) != agent.get(key) for name in metadata for key in ('build_sha', 'target', 'version', 'source_state', 'api_version', 'edition', 'files')):
         raise RuntimeError('Agent and CLI must come from exactly the same build')
+    edition = agent.get('edition')
+    if any('edition' in info or 'files' in info for info in metadata.values()):
+        if edition not in ('standard', 'files') or agent.get('files') is not (edition == 'files'):
+            raise RuntimeError('invalid Agent/CLI build edition')
+        if any(info.get('name') != name for name, info in metadata.items()):
+            raise RuntimeError('incorrect Agent/CLI binary role')
     if not allow_dirty and agent['source_state'] != 'clean':
         raise RuntimeError('dirty build cannot be installed without explicit --allow-dirty')
-    target = base / agent['build_sha']
+    version_key = f"{agent['build_sha']}-{edition}" if edition else agent['build_sha']
+    target = base / version_key
     if target.exists():
         if target.is_symlink() or not target.is_dir():
             raise RuntimeError('version directory is not a plain directory')
@@ -376,6 +383,16 @@ def install(source, base, data_dir, allow_dirty):
         if platform.system() != 'Windows':
             (target / path.name).chmod(0o755)
     return {'schema': 1, 'bin_dir': str(target), 'data_dir': str(data_dir), 'build': agent}
+
+
+def check_candidate_config(candidate):
+    if 'edition' in candidate['build']:
+        data_dir = Path(candidate['data_dir'])
+        config = data_dir / 'node.json'
+        if config.exists() or config.is_symlink():
+            suffix = '.exe' if platform.system() == 'Windows' else ''
+            agent = Path(candidate['bin_dir']) / f'p2p-agent{suffix}'
+            run([agent, '--data-dir', data_dir, '--check-config'])
 
 
 def main():
@@ -401,6 +418,7 @@ def main():
         startup_task = select_windows_startup_task(windows_task_preflight(old), old) if old and platform.system() == 'Windows' else None
         previous_status = response(old, ['status']) if old else None
         candidate = install(args.bin_dir.resolve(), base, data_dir, args.allow_dirty)
+        check_candidate_config(candidate)
         if old:
             atomic_json(base / 'previous-install.json', {'installation': old, 'status': previous_status})
             if startup_task:
@@ -420,9 +438,12 @@ def main():
                 status = response(candidate, ['status'], check=False)
                 if status:
                     if (status['node']['node_id'] != previous_status['node']['node_id'] or
-                            status['revision'] < previous_status['revision'] or status['build']['build_sha'] != candidate['build']['build_sha']):
+                            status['revision'] < previous_status['revision'] or
+                            any(status['build'].get(key) != candidate['build'].get(key)
+                                for key in ('build_sha', 'edition'))):
                         raise RuntimeError('upgrade identity/revision/build mismatch; no automatic data rollback')
-                    print(json.dumps({'upgraded': True, 'build_sha': candidate['build']['build_sha']}))
+                    print(json.dumps({'upgraded': True, 'build_sha': candidate['build']['build_sha'],
+                                      'edition': candidate['build'].get('edition')}))
                     return
                 time.sleep(.5)
             raise RuntimeError('new Agent did not become ready; previous installation is retained; no automatic permission rollback')

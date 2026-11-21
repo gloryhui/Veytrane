@@ -11,6 +11,9 @@ struct Args {
     init: bool,
     #[arg(long)]
     build_info: bool,
+    /// Validate an existing node.json against this build without starting the Agent.
+    #[arg(long, conflicts_with_all = ["init", "initialize", "build_info"])]
+    check_config: bool,
     /// Explicit first-run lifecycle action: initialize if missing, then run.
     #[arg(long)]
     initialize: bool,
@@ -52,6 +55,21 @@ pub(super) async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(root) => root,
         None => AgentPaths::default_root()?,
     };
+    if args.check_config {
+        p2p_file::node::composition::settings::ConfigRecord::load(&root.join("node.json"))
+            .map_err(|error| {
+                if matches!(
+                    &error,
+                    p2p_file::error::Error::Protocol(message)
+                        if message == "capability_disabled: 当前构建未包含文件服务"
+                ) {
+                    "节点已启用文件传输。请选择文件增强版，或经现有 Agent 停用文件后再切换。"
+                } else {
+                    "当前候选无法读取或加载节点配置。"
+                }
+            })?;
+        return Ok(());
+    }
     let paths = AgentPaths::new(&root)?;
     if args.init {
         println!("{}", configuration::initialize(&paths)?);
