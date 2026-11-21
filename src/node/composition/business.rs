@@ -8,6 +8,8 @@ use tokio::sync::Semaphore;
 use crate::node::core::session::business::{BusinessContext, BusinessHandler, BusinessOutcome};
 #[cfg(feature = "node-speed")]
 use crate::node::core::speed::{DEFAULT_MAX_PEER_BUSINESS_STREAMS, SpeedService};
+#[cfg(feature = "node-speed")]
+use veytrane_speed::runtime::AuthenticatedPeer;
 
 #[cfg(feature = "agent-files")]
 use veytrane_files::transfer::TransferService;
@@ -95,9 +97,11 @@ impl BusinessHandler for StaticBusiness {
                 {
                     service
                         .serve_peer(
-                            connection.clone(),
-                            peer,
-                            local,
+                            AuthenticatedPeer {
+                                connection: connection.clone(),
+                                local,
+                                remote: peer,
+                            },
                             authorization.clone(),
                             resources.clone(),
                             budget.clone(),

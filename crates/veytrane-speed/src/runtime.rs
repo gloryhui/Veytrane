@@ -82,6 +82,14 @@ impl SpeedSnapshot {
     }
 }
 
+/// Existing identity-verified connection and the local/remote endpoint IDs.
+#[derive(Clone, Debug)]
+pub struct AuthenticatedPeer {
+    pub connection: Connection,
+    pub local: NodeId,
+    pub remote: NodeId,
+}
+
 #[derive(Clone)]
 pub struct SpeedService {
     peers: Arc<Mutex<HashMap<NodeId, SpeedPeer>>>,
@@ -175,14 +183,17 @@ impl SpeedService {
 
     pub async fn serve_peer(
         &self,
-        connection: Connection,
-        peer: NodeId,
-        local: NodeId,
+        authenticated_peer: AuthenticatedPeer,
         authorization: LiveAuthorization,
         resources: watch::Receiver<ResourcePolicy>,
         bi_budget: Arc<Semaphore>,
         mut incoming: mpsc::Receiver<BiStream>,
     ) -> Result<()> {
+        let AuthenticatedPeer {
+            connection,
+            local,
+            remote: peer,
+        } = authenticated_peer;
         let registration = self.register(connection.clone(), local, peer);
         let speed = registration.handle();
         let uni_slot = bi_budget

@@ -64,9 +64,11 @@ fn spawn_peer(
                 async move {
                     speed
                         .serve_peer(
-                            connection,
-                            peer,
-                            local,
+                            veytrane_speed::runtime::AuthenticatedPeer {
+                                connection,
+                                local,
+                                remote: peer,
+                            },
                             authorization,
                             resources,
                             budget,
